@@ -1,0 +1,703 @@
+[gd_scene load_steps=15 format=3 uid="uid://bhud001"]
+
+[ext_resource type="Script" path="res://scripts/ui/HUDController.gd" id="1_hud"]
+[ext_resource type="Script" path="res://scripts/ui/DiceFace.gd" id="2_dice_face"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/panel_grey_bolts_dark.png" id="3_panel_dark"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/panel_grey_bolts_green.png" id="4_panel_green"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/panel_grey_bolts_blue.png" id="5_panel_blue"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/panel_brown_dark.png" id="6_panel_brown"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/button_grey.png" id="7_button_grey"]
+[ext_resource type="Texture2D" path="res://assets/items/solar_panel.png" id="11_solar_item"]
+[ext_resource type="Texture2D" path="res://assets/items/wind_blade.png" id="12_wind_item"]
+[ext_resource type="Texture2D" path="res://assets/items/battery.png" id="13_battery_item"]
+[ext_resource type="Texture2D" path="res://assets/items/insulation.png" id="14_insulation_item"]
+[ext_resource type="Texture2D" path="res://assets/items/smart_grid.png" id="15_grid_item"]
+[ext_resource type="Script" path="res://scripts/ui/VillageMap.gd" id="16_village_map"]
+
+[sub_resource type="StyleBoxTexture" id="StyleTopStatus"]
+texture = ExtResource("3_panel_dark")
+texture_margin_left = 18.0
+texture_margin_top = 18.0
+texture_margin_right = 18.0
+texture_margin_bottom = 18.0
+content_margin_left = 18.0
+content_margin_right = 18.0
+modulate_color = Color(0.42, 0.7, 0.75, 0.98)
+
+[sub_resource type="StyleBoxTexture" id="StyleDock"]
+texture = ExtResource("4_panel_green")
+texture_margin_left = 22.0
+texture_margin_top = 22.0
+texture_margin_right = 22.0
+texture_margin_bottom = 22.0
+content_margin_left = 18.0
+content_margin_top = 10.0
+content_margin_right = 18.0
+content_margin_bottom = 10.0
+modulate_color = Color(0.44, 0.74, 0.65, 1)
+
+[sub_resource type="StyleBoxTexture" id="StyleDicePanel"]
+texture = ExtResource("6_panel_brown")
+texture_margin_left = 18.0
+texture_margin_top = 18.0
+texture_margin_right = 18.0
+texture_margin_bottom = 18.0
+content_margin_left = 12.0
+content_margin_top = 8.0
+content_margin_right = 12.0
+content_margin_bottom = 8.0
+
+[sub_resource type="StyleBoxTexture" id="StyleBanner"]
+texture = ExtResource("5_panel_blue")
+texture_margin_left = 20.0
+texture_margin_top = 20.0
+texture_margin_right = 20.0
+texture_margin_bottom = 20.0
+content_margin_left = 24.0
+content_margin_top = 12.0
+content_margin_right = 24.0
+content_margin_bottom = 12.0
+modulate_color = Color(0.92, 1.0, 1.1, 1)
+
+[sub_resource type="StyleBoxTexture" id="StyleUtility"]
+texture = ExtResource("7_button_grey")
+texture_margin_left = 12.0
+texture_margin_top = 8.0
+texture_margin_right = 12.0
+texture_margin_bottom = 8.0
+modulate_color = Color(0.75, 1.0, 0.96, 1)
+
+[sub_resource type="StyleBoxTexture" id="StyleVictory"]
+texture = ExtResource("4_panel_green")
+texture_margin_left = 26.0
+texture_margin_top = 26.0
+texture_margin_right = 26.0
+texture_margin_bottom = 26.0
+content_margin_left = 24.0
+content_margin_top = 18.0
+content_margin_right = 24.0
+content_margin_bottom = 18.0
+modulate_color = Color(0.76, 0.95, 0.80, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleRescueProgressBackground"]
+bg_color = Color(0.015, 0.055, 0.08, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.36, 0.82, 0.78, 0.9)
+corner_radius_top_left = 7
+corner_radius_top_right = 7
+corner_radius_bottom_right = 7
+corner_radius_bottom_left = 7
+
+[sub_resource type="StyleBoxFlat" id="StyleRescueProgressFill"]
+bg_color = Color(0.98, 0.78, 0.24, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[node name="HUD" type="Control"]
+offset_right = 1280.0
+offset_bottom = 720.0
+mouse_filter = 2
+script = ExtResource("1_hud")
+
+[node name="TopBackdrop" type="ColorRect" parent="."]
+layout_mode = 0
+offset_right = 1280.0
+offset_bottom = 96.0
+mouse_filter = 2
+color = Color(0.015, 0.05, 0.09, 0.88)
+
+[node name="AccentLine" type="ColorRect" parent="TopBackdrop"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -2.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+color = Color(0.18, 0.85, 0.74, 0.85)
+
+[node name="TopHUD" type="VBoxContainer" parent="."]
+layout_mode = 0
+offset_left = 14.0
+offset_top = 4.0
+offset_right = 1266.0
+offset_bottom = 94.0
+theme_override_constants/separation = 3
+
+[node name="PlayerPanels" type="HBoxContainer" parent="TopHUD"]
+custom_minimum_size = Vector2(0, 58)
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="StatusTicker" type="PanelContainer" parent="TopHUD"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleTopStatus")
+
+[node name="Label" type="Label" parent="TopHUD/StatusTicker"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.88, 1.0, 0.96, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.95)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 17
+text = "에코 히어로즈 원정대가 출발을 준비합니다."
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="EventBanner" type="PanelContainer" parent="."]
+visible = false
+layout_mode = 0
+offset_left = 280.0
+offset_top = 104.0
+offset_right = 1000.0
+offset_bottom = 172.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBanner")
+
+[node name="Label" type="Label" parent="EventBanner"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.95, 0.65, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 5
+theme_override_font_sizes/font_size = 22
+text = "이벤트 메시지"
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="GameTimePanel" type="PanelContainer" parent="."]
+layout_mode = 0
+offset_left = 1010.0
+offset_top = 104.0
+offset_right = 1206.0
+offset_bottom = 174.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleTopStatus")
+
+[node name="VBox" type="VBoxContainer" parent="GameTimePanel"]
+layout_mode = 2
+theme_override_constants/separation = 0
+alignment = 1
+
+[node name="Title" type="Label" parent="GameTimePanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.48, 0.98, 0.90, 1)
+theme_override_font_sizes/font_size = 13
+text = "남은 플레이 시간"
+horizontal_alignment = 1
+
+[node name="TimeLabel" type="Label" parent="GameTimePanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.86, 0.30, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.9)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 27
+text = "10:00"
+horizontal_alignment = 1
+
+[node name="MissionPanel" type="PanelContainer" parent="."]
+visible = false
+layout_mode = 0
+offset_left = 14.0
+offset_top = 104.0
+offset_right = 306.0
+offset_bottom = 190.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleTopStatus")
+
+[node name="Margin" type="MarginContainer" parent="MissionPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 6
+
+[node name="VBox" type="VBoxContainer" parent="MissionPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="Title" type="Label" parent="MissionPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.88, 0.40, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.9)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 15
+text = "왕국 복원 현황"
+
+[node name="KingdomProgressBar" type="ProgressBar" parent="MissionPanel/Margin/VBox"]
+custom_minimum_size = Vector2(0, 12)
+layout_mode = 2
+max_value = 30.0
+show_percentage = false
+theme_override_styles/background = SubResource("StyleRescueProgressBackground")
+theme_override_styles/fill = SubResource("StyleRescueProgressFill")
+
+[node name="KingdomStatusLabel" type="Label" parent="MissionPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.76, 1, 0.94, 1)
+theme_override_font_sizes/font_size = 13
+text = "개인 재료 0개  •  공동 건설 0 / 10"
+horizontal_alignment = 1
+
+[node name="ItemIcons" type="HBoxContainer" parent="MissionPanel/Margin/VBox"]
+visible = false
+custom_minimum_size = Vector2(0, 54)
+layout_mode = 2
+theme_override_constants/separation = 4
+alignment = 1
+
+[node name="solar_panel" type="VBoxContainer" parent="MissionPanel/Margin/VBox/ItemIcons"]
+custom_minimum_size = Vector2(42, 0)
+layout_mode = 2
+alignment = 1
+
+[node name="Icon" type="TextureRect" parent="MissionPanel/Margin/VBox/ItemIcons/solar_panel"]
+custom_minimum_size = Vector2(42, 34)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("11_solar_item")
+expand_mode = 1
+stretch_mode = 5
+tooltip_text = "태양광 패널"
+
+[node name="Count" type="Label" parent="MissionPanel/Margin/VBox/ItemIcons/solar_panel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.92, 0.58, 1)
+theme_override_font_sizes/font_size = 11
+text = "×0"
+horizontal_alignment = 1
+
+[node name="wind_blade" type="VBoxContainer" parent="MissionPanel/Margin/VBox/ItemIcons"]
+custom_minimum_size = Vector2(42, 0)
+layout_mode = 2
+alignment = 1
+
+[node name="Icon" type="TextureRect" parent="MissionPanel/Margin/VBox/ItemIcons/wind_blade"]
+custom_minimum_size = Vector2(42, 34)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("12_wind_item")
+expand_mode = 1
+stretch_mode = 5
+tooltip_text = "풍력 터빈 날개"
+
+[node name="Count" type="Label" parent="MissionPanel/Margin/VBox/ItemIcons/wind_blade"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.92, 0.58, 1)
+theme_override_font_sizes/font_size = 11
+text = "×0"
+horizontal_alignment = 1
+
+[node name="battery" type="VBoxContainer" parent="MissionPanel/Margin/VBox/ItemIcons"]
+custom_minimum_size = Vector2(42, 0)
+layout_mode = 2
+alignment = 1
+
+[node name="Icon" type="TextureRect" parent="MissionPanel/Margin/VBox/ItemIcons/battery"]
+custom_minimum_size = Vector2(42, 34)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("13_battery_item")
+expand_mode = 1
+stretch_mode = 5
+tooltip_text = "에너지 저장 배터리"
+
+[node name="Count" type="Label" parent="MissionPanel/Margin/VBox/ItemIcons/battery"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.92, 0.58, 1)
+theme_override_font_sizes/font_size = 11
+text = "×0"
+horizontal_alignment = 1
+
+[node name="insulation" type="VBoxContainer" parent="MissionPanel/Margin/VBox/ItemIcons"]
+custom_minimum_size = Vector2(42, 0)
+layout_mode = 2
+alignment = 1
+
+[node name="Icon" type="TextureRect" parent="MissionPanel/Margin/VBox/ItemIcons/insulation"]
+custom_minimum_size = Vector2(42, 34)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("14_insulation_item")
+expand_mode = 1
+stretch_mode = 5
+tooltip_text = "고효율 단열재"
+
+[node name="Count" type="Label" parent="MissionPanel/Margin/VBox/ItemIcons/insulation"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.92, 0.58, 1)
+theme_override_font_sizes/font_size = 11
+text = "×0"
+horizontal_alignment = 1
+
+[node name="smart_grid" type="VBoxContainer" parent="MissionPanel/Margin/VBox/ItemIcons"]
+custom_minimum_size = Vector2(42, 0)
+layout_mode = 2
+alignment = 1
+
+[node name="Icon" type="TextureRect" parent="MissionPanel/Margin/VBox/ItemIcons/smart_grid"]
+custom_minimum_size = Vector2(42, 34)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("15_grid_item")
+expand_mode = 1
+stretch_mode = 5
+tooltip_text = "스마트 그리드 코어"
+
+[node name="Count" type="Label" parent="MissionPanel/Margin/VBox/ItemIcons/smart_grid"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.92, 0.58, 1)
+theme_override_font_sizes/font_size = 11
+text = "×0"
+horizontal_alignment = 1
+
+[node name="ConstructionGuidePanel" type="Panel" parent="."]
+z_index = 2
+layout_mode = 0
+offset_left = 12.0
+offset_top = 574.0
+offset_right = 1268.0
+offset_bottom = 718.0
+mouse_filter = 1
+
+[node name="TurnPrompt" type="Label" parent="."]
+z_index = 2
+layout_mode = 0
+offset_left = 300.0
+offset_top = 510.0
+offset_right = 960.0
+offset_bottom = 550.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 0.90, 0.35, 1)
+theme_override_colors/font_outline_color = Color(0.01, 0.05, 0.08, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 24
+text = "내 턴  •  중앙 주사위 또는 특수기술을 선택하세요"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="TurnPromptPlate" type="Panel" parent="."]
+show_behind_parent = true
+layout_mode = 0
+offset_left = 285.0
+offset_top = 504.0
+offset_right = 975.0
+offset_bottom = 558.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleTopStatus")
+
+[node name="SpecialSkillButton" type="Button" parent="."]
+z_index = 3
+layout_mode = 0
+offset_left = 990.0
+offset_top = 504.0
+offset_right = 1205.0
+offset_bottom = 558.0
+theme_override_font_sizes/font_size = 16
+text = "특수기술"
+tooltip_text = "퀴즈 정답으로 모은 특수 에너지로 사용합니다."
+
+[node name="CenterDicePanel" type="PanelContainer" parent="."]
+visible = false
+z_index = 5
+layout_mode = 0
+offset_left = 1018.0
+offset_top = 184.0
+offset_right = 1198.0
+offset_bottom = 386.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleDicePanel")
+
+[node name="VBox" type="VBoxContainer" parent="CenterDicePanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+alignment = 1
+
+[node name="PromptLabel" type="Label" parent="CenterDicePanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.91, 0.53, 1)
+theme_override_font_sizes/font_size = 17
+text = "주사위를 클릭하세요"
+horizontal_alignment = 1
+
+[node name="DiceFace" type="Control" parent="CenterDicePanel/VBox"]
+custom_minimum_size = Vector2(126, 126)
+layout_mode = 2
+size_flags_horizontal = 4
+script = ExtResource("2_dice_face")
+
+[node name="DiceValueLabel" type="Label" parent="CenterDicePanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 1, 0.91, 1)
+theme_override_font_sizes/font_size = 17
+text = "클릭해서 굴리기"
+horizontal_alignment = 1
+
+[node name="CenterDiceButton" type="Button" parent="."]
+visible = false
+z_index = 6
+layout_mode = 0
+offset_left = 1018.0
+offset_top = 184.0
+offset_right = 1198.0
+offset_bottom = 386.0
+focus_mode = 0
+mouse_default_cursor_shape = 2
+flat = true
+tooltip_text = "중앙 주사위를 클릭해 굴립니다."
+
+[node name="RightRail" type="VBoxContainer" parent="."]
+layout_mode = 0
+offset_left = 1216.0
+offset_top = 110.0
+offset_right = 1270.0
+offset_bottom = 400.0
+theme_override_constants/separation = 8
+
+[node name="HelpButton" type="Button" parent="RightRail"]
+custom_minimum_size = Vector2(54, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+theme_override_styles/normal = SubResource("StyleUtility")
+text = "?"
+tooltip_text = "게임 도움말"
+
+[node name="SoundButton" type="Button" parent="RightRail"]
+custom_minimum_size = Vector2(54, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+theme_override_styles/normal = SubResource("StyleUtility")
+text = "♪"
+tooltip_text = "효과음 켜기/끄기"
+
+[node name="InfoButton" type="Button" parent="RightRail"]
+custom_minimum_size = Vector2(54, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+theme_override_styles/normal = SubResource("StyleUtility")
+text = "i"
+tooltip_text = "현재 게임 정보"
+
+[node name="ZoomInButton" type="Button" parent="RightRail"]
+custom_minimum_size = Vector2(54, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+theme_override_styles/normal = SubResource("StyleUtility")
+text = "+"
+tooltip_text = "보드 확대 (마우스 휠 위)"
+
+[node name="ZoomOutButton" type="Button" parent="RightRail"]
+custom_minimum_size = Vector2(54, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+theme_override_styles/normal = SubResource("StyleUtility")
+text = "−"
+tooltip_text = "보드 축소 (마우스 휠 아래)"
+
+[node name="VictoryDimmer" type="ColorRect" parent="."]
+visible = false
+z_index = 9
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.003, 0.014, 0.02, 0.78)
+mouse_filter = 0
+
+[node name="VictoryModal" type="Panel" parent="."]
+visible = false
+z_index = 10
+layout_mode = 0
+offset_left = 144.0
+offset_top = 18.0
+offset_right = 1136.0
+offset_bottom = 702.0
+theme_override_styles/panel = SubResource("StyleVictory")
+
+[node name="Title" type="Label" parent="VictoryModal"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 22.0
+offset_bottom = 64.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 0.86, 0.28, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 29
+text = "왕국 복원 성공!"
+horizontal_alignment = 1
+
+[node name="RescueStoryLabel" type="Label" parent="VictoryModal"]
+visible = false
+layout_mode = 0
+offset_left = 42.0
+offset_top = 70.0
+offset_right = 658.0
+offset_bottom = 138.0
+theme_override_colors/font_color = Color(1, 0.94, 0.68, 1)
+theme_override_colors/font_outline_color = Color(0.02, 0.08, 0.06, 0.95)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 18
+text = "재생에너지 발전소가 화력발전소를 대체했습니다.\n에너지요정 나라가 건강한 미래를 되찾았습니다!"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="RankingsLabel" type="Label" parent="VictoryModal"]
+visible = false
+layout_mode = 0
+offset_left = 40.0
+offset_top = 144.0
+offset_right = 660.0
+offset_bottom = 400.0
+theme_override_colors/font_color = Color(0.90, 1.0, 0.98, 1)
+theme_override_font_sizes/font_size = 21
+text = "랭킹 정보가 여기에 표시됩니다."
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ReturnButton" type="Button" parent="VictoryModal"]
+layout_mode = 0
+offset_left = 532.0
+offset_top = 620.0
+offset_right = 842.0
+offset_bottom = 666.0
+theme_override_font_sizes/font_size = 21
+text = "로비로 돌아가기"
+
+[node name="BuildInstructionLabel" type="Label" parent="VictoryModal"]
+layout_mode = 0
+offset_left = 30.0
+offset_top = 578.0
+offset_right = 620.0
+offset_bottom = 614.0
+theme_override_colors/font_color = Color(0.90, 1, 0.80, 1)
+theme_override_font_sizes/font_size = 17
+text = "각자 재료로 건설 · 공동 친환경 지수 70 달성 시 왕국 복원!"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ConstructionPane" type="Panel" parent="VictoryModal"]
+layout_mode = 0
+offset_left = 630.0
+offset_top = 70.0
+offset_right = 976.0
+offset_bottom = 588.0
+mouse_filter = 2
+
+[node name="ConstructionList" type="GridContainer" parent="VictoryModal"]
+layout_mode = 0
+offset_left = 640.0
+offset_top = 78.0
+offset_right = 966.0
+offset_bottom = 580.0
+theme_override_constants/separation = 6
+columns = 1
+
+[node name="EvaluateButton" type="Button" parent="VictoryModal"]
+layout_mode = 0
+offset_left = 640.0
+offset_top = 596.0
+offset_right = 966.0
+offset_bottom = 648.0
+theme_override_font_sizes/font_size = 19
+text = "마을 완성도 확인하기"
+
+[node name="SaveVillageButton" type="Button" parent="VictoryModal"]
+layout_mode = 0
+offset_left = 150.0
+offset_top = 620.0
+offset_right = 460.0
+offset_bottom = 666.0
+theme_override_font_sizes/font_size = 18
+text = "완성된 마을 이미지 저장"
+
+[node name="SaveStatusLabel" type="Label" parent="VictoryModal"]
+layout_mode = 0
+offset_left = 154.0
+offset_top = 580.0
+offset_right = 766.0
+offset_bottom = 600.0
+theme_override_colors/font_color = Color(0.72, 0.95, 0.88, 1)
+theme_override_font_sizes/font_size = 13
+horizontal_alignment = 1
+
+[node name="KingdomPreviewFrame" type="Panel" parent="VictoryModal"]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 78.0
+offset_right = 620.0
+offset_bottom = 526.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleTopStatus")
+
+[node name="VillageMap" type="Control" parent="VictoryModal/KingdomPreviewFrame"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+script = ExtResource("16_village_map")
+
+[node name="KingdomHealthBar" type="ProgressBar" parent="VictoryModal"]
+layout_mode = 0
+offset_left = 42.0
+offset_top = 532.0
+offset_right = 602.0
+offset_bottom = 558.0
+mouse_filter = 2
+max_value = 100.0
+value = 0.0
+show_percentage = false
+theme_override_font_sizes/font_size = 18
+theme_override_styles/background = SubResource("StyleRescueProgressBackground")
+theme_override_styles/fill = SubResource("StyleRescueProgressFill")
+
+[node name="EnergyResolutionLabel" type="Label" parent="VictoryModal"]
+layout_mode = 0
+offset_left = 32.0
+offset_top = 560.0
+offset_right = 612.0
+offset_bottom = 584.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.88, 1, 0.84, 1)
+theme_override_colors/font_outline_color = Color(0.02, 0.08, 0.06, 0.9)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 14
+text = "친환경 에너지 지수 0 / 70 · 문제 해결까지 70"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="BuiltProjectsRow" type="HBoxContainer" parent="VictoryModal"]
+visible = false
+layout_mode = 0
+offset_left = 30.0
+offset_top = 432.0
+offset_right = 580.0
+offset_bottom = 518.0
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="RankingsContainer" type="VBoxContainer" parent="VictoryModal"]
+layout_mode = 0
+offset_left = 640.0
+offset_top = 78.0
+offset_right = 966.0
+offset_bottom = 588.0
+theme_override_constants/separation = 8

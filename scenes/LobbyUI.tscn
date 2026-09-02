@@ -1,0 +1,778 @@
+[gd_scene load_steps=27 format=3 uid="uid://blobbyui001"]
+
+[ext_resource type="Script" path="res://scripts/ui/LobbyUI.gd" id="1_lobby"]
+[ext_resource type="Script" path="res://scripts/ui/LobbyBackgroundFX.gd" id="2_fx"]
+[ext_resource type="Texture2D" path="res://assets/open_source/forest/forest_emerald.png" id="3_bg"]
+[ext_resource type="Texture2D" path="res://assets/images/char_captain_eco.jpg" id="4_captain"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/banner_hanging.png" id="8_banner"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/panel_brown_dark.png" id="10_panel_dark"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/button_brown.png" id="11_button"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/button_brown_close.png" id="12_button_pressed"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/button_grey.png" id="13_button_grey"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/minimap_icon_star_yellow.png" id="14_star"]
+[ext_resource type="Texture2D" path="res://assets/story/opening/01_energy_waste.png" id="15_story_waste"]
+[ext_resource type="Texture2D" path="res://assets/story/opening/02_fossil_fuel.png" id="16_story_fossil"]
+[ext_resource type="Texture2D" path="res://assets/story/opening/03_crisis.png" id="17_story_crisis"]
+[ext_resource type="Texture2D" path="res://assets/story/opening/04_renewable_plan.png" id="18_story_plan"]
+
+[sub_resource type="StyleBoxTexture" id="StylePrimaryNormal"]
+texture = ExtResource("11_button")
+texture_margin_left = 12.0
+texture_margin_top = 8.0
+texture_margin_right = 12.0
+texture_margin_bottom = 8.0
+content_margin_left = 22.0
+content_margin_top = 12.0
+content_margin_right = 22.0
+content_margin_bottom = 12.0
+
+[sub_resource type="StyleBoxTexture" id="StylePrimaryHover"]
+texture = ExtResource("11_button")
+texture_margin_left = 12.0
+texture_margin_top = 8.0
+texture_margin_right = 12.0
+texture_margin_bottom = 8.0
+content_margin_left = 22.0
+content_margin_top = 12.0
+content_margin_right = 22.0
+content_margin_bottom = 12.0
+modulate_color = Color(1.18, 1.12, 0.72, 1)
+
+[sub_resource type="StyleBoxTexture" id="StylePrimaryPressed"]
+texture = ExtResource("12_button_pressed")
+texture_margin_left = 12.0
+texture_margin_top = 8.0
+texture_margin_right = 12.0
+texture_margin_bottom = 8.0
+content_margin_left = 22.0
+content_margin_top = 14.0
+content_margin_right = 22.0
+content_margin_bottom = 10.0
+
+[sub_resource type="StyleBoxTexture" id="StyleSecondary"]
+texture = ExtResource("13_button_grey")
+texture_margin_left = 12.0
+texture_margin_top = 8.0
+texture_margin_right = 12.0
+texture_margin_bottom = 8.0
+content_margin_left = 18.0
+content_margin_top = 10.0
+content_margin_right = 18.0
+content_margin_bottom = 10.0
+
+[sub_resource type="StyleBoxFlat" id="StyleInput"]
+bg_color = Color(0.055, 0.105, 0.075, 0.92)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.68, 0.53, 0.22, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+content_margin_left = 14.0
+content_margin_right = 14.0
+
+[sub_resource type="StyleBoxFlat" id="StyleInputFocus"]
+bg_color = Color(0.06, 0.16, 0.10, 0.98)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.96, 0.78, 0.27, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+content_margin_left = 13.0
+content_margin_right = 13.0
+
+[sub_resource type="StyleBoxFlat" id="StyleMiniButton"]
+bg_color = Color(0.025, 0.08, 0.055, 0.82)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.72, 0.58, 0.26, 0.9)
+corner_radius_top_left = 18
+corner_radius_top_right = 18
+corner_radius_bottom_right = 18
+corner_radius_bottom_left = 18
+
+[sub_resource type="StyleBoxFlat" id="StyleHeroTag"]
+bg_color = Color(0.015, 0.12, 0.065, 0.9)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.73, 0.92, 0.36, 0.9)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+shadow_color = Color(0, 0, 0, 0.4)
+shadow_size = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleFormPanel"]
+bg_color = Color(0.018, 0.075, 0.045, 0.78)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.18, 0.11, 0.035, 0.8)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+shadow_color = Color(0, 0, 0, 0.32)
+shadow_size = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleFeatureChip"]
+bg_color = Color(0.12, 0.24, 0.10, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.48, 0.68, 0.22, 0.85)
+corner_radius_top_left = 7
+corner_radius_top_right = 7
+corner_radius_bottom_right = 7
+corner_radius_bottom_left = 7
+
+[node name="LobbyUI" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_lobby")
+
+[node name="Background" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("3_bg")
+expand_mode = 1
+stretch_mode = 6
+mouse_filter = 2
+
+[node name="BackgroundTint" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.01, 0.09, 0.06, 0.24)
+mouse_filter = 2
+
+[node name="BackgroundFX" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("2_fx")
+
+[node name="TopBar" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 54.0
+grow_horizontal = 2
+color = Color(0.012, 0.045, 0.032, 0.78)
+mouse_filter = 2
+
+[node name="EditionLabel" type="Label" parent="TopBar"]
+layout_mode = 1
+anchors_preset = 4
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = 28.0
+offset_top = -14.0
+offset_right = 450.0
+offset_bottom = 14.0
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.75, 0.91, 0.71, 1)
+theme_override_font_sizes/font_size = 17
+text = "GREEN GUARDIANS  •  CLEAN CITY ADVENTURE"
+vertical_alignment = 1
+
+[node name="TopActions" type="HBoxContainer" parent="TopBar"]
+layout_mode = 1
+anchors_preset = 6
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -136.0
+offset_top = 6.0
+offset_right = -18.0
+offset_bottom = 48.0
+grow_horizontal = 0
+theme_override_constants/separation = 10
+
+[node name="HelpButton" type="Button" parent="TopBar/TopActions"]
+custom_minimum_size = Vector2(48, 40)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.88, 0.55, 1)
+theme_override_font_sizes/font_size = 24
+theme_override_styles/normal = SubResource("StyleMiniButton")
+theme_override_styles/hover = SubResource("StyleMiniButton")
+text = "?"
+
+[node name="SoundButton" type="Button" parent="TopBar/TopActions"]
+custom_minimum_size = Vector2(56, 40)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.88, 0.55, 1)
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StyleMiniButton")
+theme_override_styles/hover = SubResource("StyleMiniButton")
+text = "SFX"
+
+[node name="LogoContainer" type="Control" parent="."]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 64.0
+offset_right = 760.0
+offset_bottom = 214.0
+mouse_filter = 2
+
+[node name="StarLeft" type="TextureRect" parent="LogoContainer"]
+layout_mode = 0
+offset_left = 18.0
+offset_top = 34.0
+offset_right = 68.0
+offset_bottom = 84.0
+texture = ExtResource("14_star")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="StarRight" type="TextureRect" parent="LogoContainer"]
+layout_mode = 0
+offset_left = 626.0
+offset_top = 38.0
+offset_right = 670.0
+offset_bottom = 82.0
+texture = ExtResource("14_star")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Eyebrow" type="Label" parent="LogoContainer"]
+layout_mode = 0
+offset_left = 80.0
+offset_top = 0.0
+offset_right = 610.0
+offset_bottom = 32.0
+theme_override_colors/font_color = Color(0.8, 1, 0.48, 1)
+theme_override_colors/font_outline_color = Color(0.02, 0.12, 0.06, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 22
+text = "위기의 에너지요정 나라"
+horizontal_alignment = 1
+
+[node name="Title" type="Label" parent="LogoContainer"]
+layout_mode = 0
+offset_left = 40.0
+offset_top = 22.0
+offset_right = 650.0
+offset_bottom = 108.0
+theme_override_colors/font_color = Color(1, 0.86, 0.22, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.75)
+theme_override_colors/font_outline_color = Color(0.025, 0.24, 0.10, 1)
+theme_override_constants/shadow_offset_x = 4
+theme_override_constants/shadow_offset_y = 6
+theme_override_constants/outline_size = 12
+theme_override_font_sizes/font_size = 65
+text = "그린 킹덤 리빌드"
+horizontal_alignment = 1
+
+[node name="SubTitle" type="Label" parent="LogoContainer"]
+layout_mode = 0
+offset_left = 90.0
+offset_top = 104.0
+offset_right = 600.0
+offset_bottom = 140.0
+theme_override_colors/font_color = Color(0.92, 1, 0.88, 1)
+theme_override_colors/font_outline_color = Color(0.01, 0.09, 0.04, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 25
+text = "GREEN KINGDOM REBUILD  •  재생에너지 왕국 복원 작전"
+horizontal_alignment = 1
+
+[node name="HeroGlow" type="Panel" parent="."]
+visible = false
+layout_mode = 0
+offset_left = 92.0
+offset_top = 220.0
+offset_right = 596.0
+offset_bottom = 680.0
+modulate = Color(0.55, 1, 0.42, 0.18)
+theme_override_styles/panel = SubResource("StyleHeroTag")
+mouse_filter = 2
+
+[node name="HeroPortrait" type="TextureRect" parent="."]
+layout_mode = 0
+offset_left = 38.0
+offset_top = 178.0
+offset_right = 650.0
+offset_bottom = 704.0
+texture = ExtResource("4_captain")
+expand_mode = 1
+stretch_mode = 5
+mouse_filter = 2
+
+[node name="HeroBadge" type="PanelContainer" parent="."]
+layout_mode = 0
+offset_left = 80.0
+offset_top = 520.0
+offset_right = 650.0
+offset_bottom = 700.0
+theme_override_styles/panel = SubResource("StyleHeroTag")
+mouse_filter = 2
+
+[node name="Margin" type="MarginContainer" parent="HeroBadge"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 10
+mouse_filter = 2
+
+[node name="VBox" type="VBoxContainer" parent="HeroBadge/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 3
+mouse_filter = 2
+
+[node name="CharacterName" type="Label" parent="HeroBadge/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.88, 0.32, 1)
+theme_override_font_sizes/font_size = 31
+text = "캡틴 에코"
+
+[node name="CharacterRole" type="Label" parent="HeroBadge/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 1.0, 0.82, 1)
+theme_override_font_sizes/font_size = 16
+text = "자연의 힘으로 도시를 회복하는 밸런스형 히어로"
+autowrap_mode = 2
+
+[node name="SkillSeparator" type="HSeparator" parent="HeroBadge/Margin/VBox"]
+layout_mode = 2
+
+[node name="SkillName" type="Label" parent="HeroBadge/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.33, 0.95, 0.82, 1)
+theme_override_font_sizes/font_size = 16
+text = "특수기술 · 자연의 돌진  |  필요 SP 3  |  타일 지정"
+
+[node name="SkillDescription" type="Label" parent="HeroBadge/Margin/VBox"]
+custom_minimum_size = Vector2(0, 38)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.88, 0.88, 1)
+theme_override_font_sizes/font_size = 13
+text = "자연의 길을 열어 앞쪽 1~5칸 타일로 즉시 이동합니다. 사용 후에도 주사위를 굴릴 수 있습니다."
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="MenuPanel" type="Control" parent="."]
+layout_mode = 0
+offset_left = 750.0
+offset_top = 68.0
+offset_right = 1244.0
+offset_bottom = 704.0
+mouse_filter = 2
+
+[node name="Shadow" type="ColorRect" parent="MenuPanel"]
+layout_mode = 0
+offset_left = 10.0
+offset_top = 12.0
+offset_right = 484.0
+offset_bottom = 630.0
+color = Color(0, 0, 0, 0.42)
+mouse_filter = 2
+
+[node name="Frame" type="NinePatchRect" parent="MenuPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("10_panel_dark")
+patch_margin_left = 20
+patch_margin_top = 20
+patch_margin_right = 20
+patch_margin_bottom = 20
+mouse_filter = 2
+
+[node name="HeaderBanner" type="TextureRect" parent="MenuPanel"]
+layout_mode = 0
+offset_left = 54.0
+offset_top = 16.0
+offset_right = 440.0
+offset_bottom = 114.0
+texture = ExtResource("8_banner")
+expand_mode = 1
+stretch_mode = 0
+mouse_filter = 2
+
+[node name="Header" type="Label" parent="MenuPanel/HeaderBanner"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 0.96, 0.78, 1)
+theme_override_colors/font_outline_color = Color(0.16, 0.06, 0.02, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 30
+text = "왕국 복원 준비"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="FormBackdrop" type="Panel" parent="MenuPanel"]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 104.0
+offset_right = 470.0
+offset_bottom = 616.0
+theme_override_styles/panel = SubResource("StyleFormPanel")
+mouse_filter = 2
+
+[node name="Content" type="VBoxContainer" parent="MenuPanel"]
+layout_mode = 0
+offset_left = 38.0
+offset_top = 112.0
+offset_right = 456.0
+offset_bottom = 604.0
+theme_override_constants/separation = 8
+
+[node name="NicknameLabel" type="Label" parent="MenuPanel/Content"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.85, 0.65, 1)
+theme_override_font_sizes/font_size = 17
+text = "플레이어 이름"
+
+[node name="NicknameEdit" type="LineEdit" parent="MenuPanel/Content"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.94, 1, 0.92, 1)
+theme_override_colors/caret_color = Color(1, 0.85, 0.25, 1)
+theme_override_font_sizes/font_size = 21
+theme_override_styles/normal = SubResource("StyleInput")
+theme_override_styles/focus = SubResource("StyleInputFocus")
+text = "에코 히어로 1"
+placeholder_text = "닉네임을 입력하세요"
+max_length = 18
+
+[node name="CharacterLabel" type="Label" parent="MenuPanel/Content"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.85, 0.65, 1)
+theme_override_font_sizes/font_size = 17
+text = "나의 에코 히어로"
+
+[node name="CharOptionButton" type="OptionButton" parent="MenuPanel/Content"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.94, 1, 0.92, 1)
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StyleInput")
+theme_override_styles/hover = SubResource("StyleInputFocus")
+theme_override_styles/pressed = SubResource("StyleInputFocus")
+
+[node name="CharacterStrip" type="ScrollContainer" parent="MenuPanel/Content"]
+visible = false
+custom_minimum_size = Vector2(0, 68)
+layout_mode = 2
+horizontal_scroll_mode = 1
+vertical_scroll_mode = 0
+
+[node name="Characters" type="HBoxContainer" parent="MenuPanel/Content/CharacterStrip"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ModeLabel" type="Label" parent="MenuPanel/Content"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.85, 0.65, 1)
+theme_override_font_sizes/font_size = 17
+text = "플레이 방식"
+
+[node name="ModeOptionButton" type="OptionButton" parent="MenuPanel/Content"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.94, 1, 0.92, 1)
+theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("StyleInput")
+theme_override_styles/hover = SubResource("StyleInputFocus")
+theme_override_styles/pressed = SubResource("StyleInputFocus")
+
+[node name="GameTimeRow" type="HBoxContainer" parent="MenuPanel/Content"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Label" type="Label" parent="MenuPanel/Content/GameTimeRow"]
+custom_minimum_size = Vector2(108, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.85, 0.65, 1)
+theme_override_font_sizes/font_size = 17
+text = "플레이 시간"
+vertical_alignment = 1
+
+[node name="GameTimeOptionButton" type="OptionButton" parent="MenuPanel/Content/GameTimeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.94, 1, 0.92, 1)
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StyleInput")
+theme_override_styles/hover = SubResource("StyleInputFocus")
+theme_override_styles/pressed = SubResource("StyleInputFocus")
+
+[node name="OnlineBox" type="VBoxContainer" parent="MenuPanel/Content"]
+layout_mode = 2
+theme_override_constants/separation = 7
+
+[node name="IPLabel" type="Label" parent="MenuPanel/Content/OnlineBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.85, 0.65, 1)
+theme_override_font_sizes/font_size = 17
+text = "서버 IP 주소"
+
+[node name="IPEdit" type="LineEdit" parent="MenuPanel/Content/OnlineBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.94, 1, 0.92, 1)
+theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("StyleInput")
+theme_override_styles/focus = SubResource("StyleInputFocus")
+text = "127.0.0.1"
+placeholder_text = "접속할 IP 주소"
+
+[node name="NetworkButtons" type="HBoxContainer" parent="MenuPanel/Content/OnlineBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="HostButton" type="Button" parent="MenuPanel/Content/OnlineBox/NetworkButtons"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.12, 0.07, 0.02, 1)
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StylePrimaryNormal")
+theme_override_styles/hover = SubResource("StylePrimaryHover")
+theme_override_styles/pressed = SubResource("StylePrimaryPressed")
+text = "방 만들기"
+
+[node name="JoinButton" type="Button" parent="MenuPanel/Content/OnlineBox/NetworkButtons"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.86, 0.91, 0.88, 1)
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StyleSecondary")
+theme_override_styles/hover = SubResource("StyleSecondary")
+theme_override_styles/pressed = SubResource("StyleSecondary")
+text = "방 참가"
+
+[node name="LocalStartButton" type="Button" parent="MenuPanel/Content"]
+custom_minimum_size = Vector2(0, 68)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.13, 0.075, 0.015, 1)
+theme_override_colors/font_hover_color = Color(0.08, 0.04, 0.005, 1)
+theme_override_colors/font_pressed_color = Color(0.13, 0.075, 0.015, 1)
+theme_override_colors/font_outline_color = Color(1, 0.88, 0.45, 0.3)
+theme_override_constants/outline_size = 2
+theme_override_font_sizes/font_size = 23
+theme_override_styles/normal = SubResource("StylePrimaryNormal")
+theme_override_styles/hover = SubResource("StylePrimaryHover")
+theme_override_styles/pressed = SubResource("StylePrimaryPressed")
+text = "싱글 시작  •  AI 자동 채움  ▶"
+
+[node name="StatusLabel" type="Label" parent="MenuPanel/Content"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.95, 0.60, 1)
+theme_override_colors/font_outline_color = Color(0.02, 0.05, 0.02, 1)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 16
+text = "혼자 시작해도 AI 동료가 빈 자리를 채워 4인 파티로 출발합니다."
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="FeatureTitle" type="Label" parent="MenuPanel/Content"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.68, 0.78, 0.58, 1)
+theme_override_font_sizes/font_size = 15
+text = "ADVENTURE FEATURES"
+horizontal_alignment = 1
+
+[node name="FeatureRow" type="HBoxContainer" parent="MenuPanel/Content"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="QuizChip" type="PanelContainer" parent="MenuPanel/Content/FeatureRow"]
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleFeatureChip")
+
+[node name="Label" type="Label" parent="MenuPanel/Content/FeatureRow/QuizChip"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.88, 1.0, 0.72, 1)
+theme_override_font_sizes/font_size = 15
+text = "건설 아이템"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="SkillChip" type="PanelContainer" parent="MenuPanel/Content/FeatureRow"]
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleFeatureChip")
+
+[node name="Label" type="Label" parent="MenuPanel/Content/FeatureRow/SkillChip"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.88, 1.0, 0.72, 1)
+theme_override_font_sizes/font_size = 15
+text = "캐릭터 특수기술"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="VillageChip" type="PanelContainer" parent="MenuPanel/Content/FeatureRow"]
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleFeatureChip")
+
+[node name="Label" type="Label" parent="MenuPanel/Content/FeatureRow/VillageChip"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.88, 1.0, 0.72, 1)
+theme_override_font_sizes/font_size = 15
+text = "마을 건설"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Footer" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -320.0
+offset_top = -28.0
+offset_right = 320.0
+offset_bottom = -6.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.75, 0.82, 0.72, 0.9)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.7)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 14
+text = "v1.0  •  CC0 UI & BACKGROUND ASSETS  •  4 PLAYER BOARD ADVENTURE"
+horizontal_alignment = 1
+
+[node name="OpeningStoryOverlay" type="Control" parent="."]
+visible = false
+z_index = 100
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="StoryImage" type="TextureRect" parent="OpeningStoryOverlay"]
+z_index = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("15_story_waste")
+expand_mode = 1
+stretch_mode = 6
+mouse_filter = 2
+
+[node name="Scrim" type="ColorRect" parent="OpeningStoryOverlay"]
+z_index = 2
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.01, 0.02, 0.04, 0.42)
+mouse_filter = 2
+
+[node name="StoryTitle" type="Label" parent="OpeningStoryOverlay"]
+z_index = 3
+layout_mode = 0
+offset_left = 90.0
+offset_top = 52.0
+offset_right = 1190.0
+offset_bottom = 106.0
+theme_override_colors/font_color = Color(1, 0.9, 0.36, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 38
+text = "ENERGY FAIRY KINGDOM  •  위기의 시작"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="CaptionPanel" type="PanelContainer" parent="OpeningStoryOverlay"]
+z_index = 3
+layout_mode = 0
+offset_left = 138.0
+offset_top = 506.0
+offset_right = 1142.0
+offset_bottom = 634.0
+theme_override_styles/panel = SubResource("StyleHeroTag")
+mouse_filter = 2
+
+[node name="Caption" type="Label" parent="OpeningStoryOverlay/CaptionPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.93, 1, 0.89, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 5
+theme_override_font_sizes/font_size = 26
+text = "이야기"
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="StepLabel" type="Label" parent="OpeningStoryOverlay"]
+z_index = 3
+layout_mode = 0
+offset_left = 160.0
+offset_top = 654.0
+offset_right = 1120.0
+offset_bottom = 690.0
+theme_override_colors/font_color = Color(1, 0.92, 0.62, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.9)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 18
+text = "STORY  1 / 4  •  클릭하여 다음"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="SkipButton" type="Button" parent="OpeningStoryOverlay"]
+z_index = 3
+layout_mode = 0
+offset_left = 1000.0
+offset_top = 112.0
+offset_right = 1180.0
+offset_bottom = 158.0
+theme_override_font_sizes/font_size = 17
+text = "게임 바로 시작  ▶"

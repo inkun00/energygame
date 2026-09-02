@@ -1,0 +1,37 @@
+# Godot 4+ specific ignores
+.godot/
+
+# Godot-specific files that shouldn't be tracked
+*.translation
+
+# Export presets (keep in repo if configured for CI/CD, or ignore if secrets included)
+# export_presets.cfg
+
+# Build / Export outputs
+/build/
+/dist/
+/export/
+/exports/
+*.exe
+*.wasm
+*.pck
+*.apk
+*.aab
+*.ipa
+
+# Temporary and cache files
+*.tmp
+*.log
+*.swp
+*~
+
+# Operating System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
