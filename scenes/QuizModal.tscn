@@ -1,7 +1,7 @@
 [gd_scene load_steps=4 format=3 uid="uid://bquizmodal001"]
 
 [ext_resource type="Script" path="res://scripts/ui/QuizUIController.gd" id="1_quiz"]
-[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/panel_grey_bolts_blue.png" id="2_panel_blue"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/panel_grey_bolts_blue.webp" id="2_panel_blue"]
 
 [sub_resource type="StyleBoxTexture" id="StyleQuizPanel"]
 texture = ExtResource("2_panel_blue")

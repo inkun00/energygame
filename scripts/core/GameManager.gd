@@ -52,42 +52,42 @@ const SPECTATOR_QUIZ_BONUS_SCORE := QUIZ_CORRECT_SCORE / 2
 # 이 에너지는 최종 순위 계산 전에 지급되어 실제 순위에 반영됩니다.
 const MOVEMENT_END_REWARDS: Array[int] = [120, 80, 40, 20]
 const SPECIAL_SKILLS_BY_ICON := {
-	"res://assets/characters/eco_roster/captain_eco.png": {"id": "eco_dash", "name": "자연의 돌진", "description": "자연의 길을 열어 앞쪽 1~5칸 타일로 즉시 이동합니다.", "cost": 3, "target_type": "tile", "effect": "move", "range": 5},
-	"res://assets/characters/eco_roster/fairy_sparky.png": {"id": "starlight_charge", "name": "별빛 충전", "description": "자신의 일반 에너지를 3 충전합니다.", "cost": 3, "target_type": "self", "effect": "energy_boost", "amount": 3},
-	"res://assets/characters/eco_roster/water_popo.png": {"id": "purifying_wave", "name": "정화의 물결", "description": "자신에게 방패와 일반 에너지 1을 부여합니다.", "cost": 3, "target_type": "self", "effect": "purify", "amount": 1},
-	"res://assets/characters/eco_roster/bear_pongi.png": {"id": "forest_supply", "name": "숲의 보급", "description": "자신의 개인 보관함에 무작위 건설 재료 1개를 보급합니다.", "cost": 4, "target_type": "self", "effect": "material_supply", "amount": 1},
-	"res://assets/characters/eco_roster/solar_fox_sol.png": {"id": "solar_charge", "name": "태양 충전", "description": "자신의 일반 에너지를 4 충전합니다.", "cost": 3, "target_type": "self", "effect": "energy_boost", "amount": 4},
-	"res://assets/characters/eco_roster/wind_rabbit_bori.png": {"id": "wind_path", "name": "바람길 질주", "description": "바람길을 타고 앞쪽 1~7칸 타일로 즉시 이동합니다.", "cost": 3, "target_type": "tile", "effect": "move", "range": 7},
-	"res://assets/characters/eco_roster/recycle_raccoon_ringo.png": {"id": "recycle_salvage", "name": "재활용 회수", "description": "선택한 미획득 타일의 건설 재료를 회수합니다.", "cost": 3, "target_type": "tile", "effect": "collect_material"},
-	"res://assets/characters/eco_roster/earth_turtle_tori.png": {"id": "earth_barrier", "name": "대지 방벽", "description": "자신에게 다음 미끄럼틀이나 오답 후퇴를 막는 방패를 부여합니다.", "cost": 3, "target_type": "self", "effect": "shield"},
-	"res://assets/characters/eco_roster/lightning_bird_pika.png": {"id": "lightning_leap", "name": "번개 도약", "description": "번개처럼 앞쪽 1~9칸 타일로 즉시 이동합니다.", "cost": 4, "target_type": "tile", "effect": "move", "range": 9},
-	"res://assets/characters/eco_roster/mushroom_cat_momo.png": {"id": "mycelium_harvest", "name": "균사체 채집", "description": "선택한 미획득 타일의 건설 재료를 채집합니다.", "cost": 3, "target_type": "tile", "effect": "collect_material"}
+	"res://assets/characters/eco_roster/captain_eco.webp": {"id": "eco_dash", "name": "자연의 돌진", "description": "자연의 길을 열어 앞쪽 1~5칸 타일로 즉시 이동합니다.", "cost": 3, "target_type": "tile", "effect": "move", "range": 5},
+	"res://assets/characters/eco_roster/fairy_sparky.webp": {"id": "starlight_charge", "name": "별빛 충전", "description": "자신의 일반 에너지를 3 충전합니다.", "cost": 3, "target_type": "self", "effect": "energy_boost", "amount": 3},
+	"res://assets/characters/eco_roster/water_popo.webp": {"id": "purifying_wave", "name": "정화의 물결", "description": "자신에게 방패와 일반 에너지 1을 부여합니다.", "cost": 3, "target_type": "self", "effect": "purify", "amount": 1},
+	"res://assets/characters/eco_roster/bear_pongi.webp": {"id": "forest_supply", "name": "숲의 보급", "description": "자신의 개인 보관함에 무작위 건설 재료 1개를 보급합니다.", "cost": 4, "target_type": "self", "effect": "material_supply", "amount": 1},
+	"res://assets/characters/eco_roster/solar_fox_sol.webp": {"id": "solar_charge", "name": "태양 충전", "description": "자신의 일반 에너지를 4 충전합니다.", "cost": 3, "target_type": "self", "effect": "energy_boost", "amount": 4},
+	"res://assets/characters/eco_roster/wind_rabbit_bori.webp": {"id": "wind_path", "name": "바람길 질주", "description": "바람길을 타고 앞쪽 1~7칸 타일로 즉시 이동합니다.", "cost": 3, "target_type": "tile", "effect": "move", "range": 7},
+	"res://assets/characters/eco_roster/recycle_raccoon_ringo.webp": {"id": "recycle_salvage", "name": "재활용 회수", "description": "선택한 미획득 타일의 건설 재료를 회수합니다.", "cost": 3, "target_type": "tile", "effect": "collect_material"},
+	"res://assets/characters/eco_roster/earth_turtle_tori.webp": {"id": "earth_barrier", "name": "대지 방벽", "description": "자신에게 다음 미끄럼틀이나 오답 후퇴를 막는 방패를 부여합니다.", "cost": 3, "target_type": "self", "effect": "shield"},
+	"res://assets/characters/eco_roster/lightning_bird_pika.webp": {"id": "lightning_leap", "name": "번개 도약", "description": "번개처럼 앞쪽 1~9칸 타일로 즉시 이동합니다.", "cost": 4, "target_type": "tile", "effect": "move", "range": 9},
+	"res://assets/characters/eco_roster/mushroom_cat_momo.webp": {"id": "mycelium_harvest", "name": "균사체 채집", "description": "선택한 미획득 타일의 건설 재료를 채집합니다.", "cost": 3, "target_type": "tile", "effect": "collect_material"}
 }
 const DEFAULT_SPECIAL_SKILL := {"id": "eco_dash", "name": "자연의 돌진", "description": "앞쪽 1~5칸 타일로 즉시 이동합니다.", "cost": 3, "target_type": "tile", "effect": "move", "range": 5}
 const ITEM_DEFINITIONS := {
-	"solar_panel": {"name": "태양광 패널", "icon": "☀️", "asset": "res://assets/items/solar_panel.png"},
-	"wind_blade": {"name": "풍력 터빈 날개", "icon": "🌬️", "asset": "res://assets/items/wind_blade.png"},
-	"battery": {"name": "에너지 저장 배터리", "icon": "🔋", "asset": "res://assets/items/battery.png"},
-	"insulation": {"name": "고효율 단열재", "icon": "🏠", "asset": "res://assets/items/insulation.png"},
-	"smart_grid": {"name": "스마트 그리드 코어", "icon": "🔌", "asset": "res://assets/items/smart_grid.png"},
-	"hydro_turbine": {"name": "수력 터빈", "icon": "💧", "asset": "res://assets/items/hydro_turbine.png"},
-	"geothermal_core": {"name": "지열 교환 코어", "icon": "♨️", "asset": "res://assets/items/geothermal_core.png"},
-	"tidal_generator": {"name": "조력 발전 기어", "icon": "🌊", "asset": "res://assets/items/tidal_generator.png"},
-	"reactor_control_core": {"name": "원자로 제어 코어", "icon": "⚛️", "asset": "res://assets/items/reactor_control_core.png"},
-	"recycled_composite": {"name": "재생 복합소재", "icon": "♻️", "asset": "res://assets/items/recycled_composite.png"},
-	"fast_charge_module": {"name": "고속 충전 모듈", "icon": "🔋", "asset": "res://assets/items/fast_charge_module.png"}
+	"solar_panel": {"name": "태양광 패널", "icon": "☀️", "asset": "res://assets/items/solar_panel.webp"},
+	"wind_blade": {"name": "풍력 터빈 날개", "icon": "🌬️", "asset": "res://assets/items/wind_blade.webp"},
+	"battery": {"name": "에너지 저장 배터리", "icon": "🔋", "asset": "res://assets/items/battery.webp"},
+	"insulation": {"name": "고효율 단열재", "icon": "🏠", "asset": "res://assets/items/insulation.webp"},
+	"smart_grid": {"name": "스마트 그리드 코어", "icon": "🔌", "asset": "res://assets/items/smart_grid.webp"},
+	"hydro_turbine": {"name": "수력 터빈", "icon": "💧", "asset": "res://assets/items/hydro_turbine.webp"},
+	"geothermal_core": {"name": "지열 교환 코어", "icon": "♨️", "asset": "res://assets/items/geothermal_core.webp"},
+	"tidal_generator": {"name": "조력 발전 기어", "icon": "🌊", "asset": "res://assets/items/tidal_generator.webp"},
+	"reactor_control_core": {"name": "원자로 제어 코어", "icon": "⚛️", "asset": "res://assets/items/reactor_control_core.webp"},
+	"recycled_composite": {"name": "재생 복합소재", "icon": "♻️", "asset": "res://assets/items/recycled_composite.webp"},
+	"fast_charge_module": {"name": "고속 충전 모듈", "icon": "🔋", "asset": "res://assets/items/fast_charge_module.webp"}
 }
 const CONSTRUCTION_PROJECTS := [
-	{"name": "태양광 발전소", "image": "res://assets/buildings/solar_power_plant.png", "requirements": {"solar_panel": 2, "battery": 1}, "terrains": ["solar_field"], "terrain_label": "햇빛 초원", "health": 35, "message": "햇빛으로 전기를 만드는 태양광 발전소가 완공됐습니다!"},
-	{"name": "풍력 발전단지", "image": "res://assets/buildings/wind_power_complex.png", "requirements": {"wind_blade": 2, "smart_grid": 1}, "terrains": ["wind_plain", "wind_coast"], "terrain_label": "바람 들판 또는 해안 절벽", "health": 35, "message": "맑은 바람을 전기로 바꾸는 풍력 발전단지가 돌아가기 시작했습니다!"},
-	{"name": "에너지 절약 건물", "image": "res://assets/buildings/efficiency_building.png", "requirements": {"insulation": 2, "smart_grid": 1}, "terrains": ["eco_city"], "terrain_label": "친환경 도시", "health": 25, "message": "단열과 절전 설비를 갖춘 에너지 절약 건물이 늘어났습니다!"},
-	{"name": "에너지 저장소", "image": "res://assets/buildings/energy_storage_facility.png", "requirements": {"battery": 2, "smart_grid": 1}, "terrains": ["grid_hub"], "terrain_label": "전력망 광장", "health": 25, "message": "남는 전기를 모아 쓰는 에너지 저장소가 완공됐습니다!"},
-	{"name": "소수력 발전소", "image": "res://assets/buildings/small_hydro_plant.png", "requirements": {"hydro_turbine": 2, "smart_grid": 1}, "terrains": ["riverbank"], "terrain_label": "강변 수로", "health": 30, "message": "강물의 흐름을 살린 친환경 소수력 발전소가 완공됐습니다!"},
-	{"name": "지열 발전소", "image": "res://assets/buildings/geothermal_power_plant.png", "requirements": {"geothermal_core": 2, "insulation": 1}, "terrains": ["geothermal_field"], "terrain_label": "지열 온천 지대", "health": 30, "message": "땅속 열을 안정적인 전기로 바꾸는 지열 발전소가 완공됐습니다!"},
-	{"name": "조력 발전소", "image": "res://assets/buildings/tidal_power_plant.png", "requirements": {"tidal_generator": 2, "battery": 1}, "terrains": ["tidal_lagoon"], "terrain_label": "바닷가 조력 석호", "health": 30, "message": "밀물과 썰물의 힘을 이용하는 조력 발전소가 완공됐습니다!"},
-	{"name": "원자력 발전소", "image": "res://assets/buildings/nuclear_power_plant.png", "requirements": {"reactor_control_core": 2, "smart_grid": 1}, "terrains": ["nuclear_site"], "terrain_label": "안전 관리 부지", "health": 40, "message": "안전 제어 설비를 갖춘 차세대 원자력 발전소가 안정적으로 전력을 공급합니다!"},
-	{"name": "자원순환 생활센터", "category": "친환경 생활", "image": "res://assets/buildings/resource_circulation_center.png", "requirements": {"recycled_composite": 2, "smart_grid": 1}, "terrains": ["eco_city"], "terrain_label": "친환경 마을", "health": 20, "message": "수리·재사용·분리배출을 한곳에서 실천하는 자원순환 생활센터가 문을 열었습니다!"},
-	{"name": "전기 대중교통 허브", "category": "친환경 생활", "image": "res://assets/buildings/electric_transit_hub.png", "requirements": {"fast_charge_module": 2, "battery": 1}, "terrains": ["grid_hub"], "terrain_label": "다리 옆 전력 광장", "health": 25, "message": "전기 셔틀과 자전거를 편리하게 이용하는 친환경 교통 거점이 완성됐습니다!"}
+	{"name": "태양광 발전소", "image": "res://assets/buildings/solar_power_plant.webp", "requirements": {"solar_panel": 2, "battery": 1}, "terrains": ["solar_field"], "terrain_label": "햇빛 초원", "health": 35, "message": "햇빛으로 전기를 만드는 태양광 발전소가 완공됐습니다!"},
+	{"name": "풍력 발전단지", "image": "res://assets/buildings/wind_power_complex.webp", "requirements": {"wind_blade": 2, "smart_grid": 1}, "terrains": ["wind_plain", "wind_coast"], "terrain_label": "바람 들판 또는 해안 절벽", "health": 35, "message": "맑은 바람을 전기로 바꾸는 풍력 발전단지가 돌아가기 시작했습니다!"},
+	{"name": "에너지 절약 건물", "image": "res://assets/buildings/efficiency_building.webp", "requirements": {"insulation": 2, "smart_grid": 1}, "terrains": ["eco_city"], "terrain_label": "친환경 도시", "health": 25, "message": "단열과 절전 설비를 갖춘 에너지 절약 건물이 늘어났습니다!"},
+	{"name": "에너지 저장소", "image": "res://assets/buildings/energy_storage_facility.webp", "requirements": {"battery": 2, "smart_grid": 1}, "terrains": ["grid_hub"], "terrain_label": "전력망 광장", "health": 25, "message": "남는 전기를 모아 쓰는 에너지 저장소가 완공됐습니다!"},
+	{"name": "소수력 발전소", "image": "res://assets/buildings/small_hydro_plant.webp", "requirements": {"hydro_turbine": 2, "smart_grid": 1}, "terrains": ["riverbank"], "terrain_label": "강변 수로", "health": 30, "message": "강물의 흐름을 살린 친환경 소수력 발전소가 완공됐습니다!"},
+	{"name": "지열 발전소", "image": "res://assets/buildings/geothermal_power_plant.webp", "requirements": {"geothermal_core": 2, "insulation": 1}, "terrains": ["geothermal_field"], "terrain_label": "지열 온천 지대", "health": 30, "message": "땅속 열을 안정적인 전기로 바꾸는 지열 발전소가 완공됐습니다!"},
+	{"name": "조력 발전소", "image": "res://assets/buildings/tidal_power_plant.webp", "requirements": {"tidal_generator": 2, "battery": 1}, "terrains": ["tidal_lagoon"], "terrain_label": "바닷가 조력 석호", "health": 30, "message": "밀물과 썰물의 힘을 이용하는 조력 발전소가 완공됐습니다!"},
+	{"name": "원자력 발전소", "image": "res://assets/buildings/nuclear_power_plant.webp", "requirements": {"reactor_control_core": 2, "smart_grid": 1}, "terrains": ["nuclear_site"], "terrain_label": "안전 관리 부지", "health": 40, "message": "안전 제어 설비를 갖춘 차세대 원자력 발전소가 안정적으로 전력을 공급합니다!"},
+	{"name": "자원순환 생활센터", "category": "친환경 생활", "image": "res://assets/buildings/resource_circulation_center.webp", "requirements": {"recycled_composite": 2, "smart_grid": 1}, "terrains": ["eco_city"], "terrain_label": "친환경 마을", "health": 20, "message": "수리·재사용·분리배출을 한곳에서 실천하는 자원순환 생활센터가 문을 열었습니다!"},
+	{"name": "전기 대중교통 허브", "category": "친환경 생활", "image": "res://assets/buildings/electric_transit_hub.webp", "requirements": {"fast_charge_module": 2, "battery": 1}, "terrains": ["grid_hub"], "terrain_label": "다리 옆 전력 광장", "health": 25, "message": "전기 셔틀과 자전거를 편리하게 이용하는 친환경 교통 거점이 완성됐습니다!"}
 ]
 const MATERIAL_DRAW_BAG: Array[String] = [
 	"solar_panel", "wind_blade", "battery", "insulation", "smart_grid", "hydro_turbine",
@@ -173,10 +173,10 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 	
 	# 싱글플레이와 인원 미달 파티 모두 최대 4인까지 AI 동료로 자동 채웁니다.
 	var default_chars = [
-		{"name": "캡틴 에코", "icon": "res://assets/characters/eco_roster/captain_eco.png", "color": Color(0.2, 0.8, 0.3)},
-		{"name": "포포", "icon": "res://assets/characters/eco_roster/water_popo.png", "color": Color(0.2, 0.6, 0.95)},
-		{"name": "퐁이", "icon": "res://assets/characters/eco_roster/bear_pongi.png", "color": Color(0.4, 0.9, 0.8)},
-		{"name": "태양 여우 솔", "icon": "res://assets/characters/eco_roster/solar_fox_sol.png", "color": Color(1.0, 0.58, 0.12)}
+		{"name": "캡틴 에코", "icon": "res://assets/characters/eco_roster/captain_eco.webp", "color": Color(0.2, 0.8, 0.3)},
+		{"name": "포포", "icon": "res://assets/characters/eco_roster/water_popo.webp", "color": Color(0.2, 0.6, 0.95)},
+		{"name": "퐁이", "icon": "res://assets/characters/eco_roster/bear_pongi.webp", "color": Color(0.4, 0.9, 0.8)},
+		{"name": "태양 여우 솔", "icon": "res://assets/characters/eco_roster/solar_fox_sol.webp", "color": Color(1.0, 0.58, 0.12)}
 	]
 	
 	for i in range(MAX_PLAYER_COUNT):
@@ -191,7 +191,7 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 				"char_color": default_chars[i]["color"]
 			}
 		# 스파키는 이제 구조 대상이 아니라 왕국의 안내자이므로 플레이어 말로 선택하지 않습니다.
-		if p_info.get("char_icon", "") == "res://assets/characters/eco_roster/fairy_sparky.png":
+		if p_info.get("char_icon", "") == "res://assets/characters/eco_roster/fairy_sparky.webp":
 			p_info = p_info.duplicate(true)
 			p_info["char_icon"] = default_chars[i]["icon"]
 			p_info["char_color"] = default_chars[i]["color"]

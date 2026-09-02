@@ -36,15 +36,15 @@ const UI = preload("res://scripts/ui/CommercialUI.gd")
 @onready var opening_skip_button: Button = $OpeningStoryOverlay/SkipButton
 
 var characters: Array[Dictionary] = [
-	{"name": "캡틴 에코", "icon": "res://assets/characters/eco_roster/captain_eco.png", "color": Color(0.28, 0.90, 0.34), "role": "자연의 힘으로 도시를 회복하는 밸런스형 히어로"},
-	{"name": "물방울 정령 포포", "icon": "res://assets/characters/eco_roster/water_popo.png", "color": Color(0.20, 0.72, 0.96), "role": "깨끗한 물의 힘으로 오염을 씻어 내는 회복형 히어로"},
-	{"name": "에코 베어 퐁이", "icon": "res://assets/characters/eco_roster/bear_pongi.png", "color": Color(0.30, 0.92, 0.82), "role": "튼튼한 장비와 보호막으로 모두를 지키는 방어형 히어로"},
-	{"name": "태양 여우 솔", "icon": "res://assets/characters/eco_roster/solar_fox_sol.png", "color": Color(1.00, 0.58, 0.12), "role": "태양광 장비로 에너지를 충전하는 기술형 히어로"},
-	{"name": "바람 토끼 보리", "icon": "res://assets/characters/eco_roster/wind_rabbit_bori.png", "color": Color(0.22, 0.82, 0.92), "role": "바람보다 빠르게 길을 개척하는 기동형 히어로"},
-	{"name": "재활용 너구리 링고", "icon": "res://assets/characters/eco_roster/recycle_raccoon_ringo.png", "color": Color(0.36, 0.82, 0.28), "role": "버려진 자원을 멋진 도구로 바꾸는 발명형 히어로"},
-	{"name": "대지 거북 토리", "icon": "res://assets/characters/eco_roster/earth_turtle_tori.png", "color": Color(0.60, 0.72, 0.20), "role": "대지의 방패로 위험을 막아 내는 수호형 히어로"},
-	{"name": "번개새 피카", "icon": "res://assets/characters/eco_roster/lightning_bird_pika.png", "color": Color(1.00, 0.82, 0.10), "role": "깨끗한 전기를 다루는 초고속 정찰형 히어로"},
-	{"name": "버섯 고양이 모모", "icon": "res://assets/characters/eco_roster/mushroom_cat_momo.png", "color": Color(0.96, 0.30, 0.22), "role": "숲의 생명 에너지를 연구하는 연금술형 히어로"}
+	{"name": "캡틴 에코", "icon": "res://assets/characters/eco_roster/captain_eco.webp", "color": Color(0.28, 0.90, 0.34), "role": "자연의 힘으로 도시를 회복하는 밸런스형 히어로"},
+	{"name": "물방울 정령 포포", "icon": "res://assets/characters/eco_roster/water_popo.webp", "color": Color(0.20, 0.72, 0.96), "role": "깨끗한 물의 힘으로 오염을 씻어 내는 회복형 히어로"},
+	{"name": "에코 베어 퐁이", "icon": "res://assets/characters/eco_roster/bear_pongi.webp", "color": Color(0.30, 0.92, 0.82), "role": "튼튼한 장비와 보호막으로 모두를 지키는 방어형 히어로"},
+	{"name": "태양 여우 솔", "icon": "res://assets/characters/eco_roster/solar_fox_sol.webp", "color": Color(1.00, 0.58, 0.12), "role": "태양광 장비로 에너지를 충전하는 기술형 히어로"},
+	{"name": "바람 토끼 보리", "icon": "res://assets/characters/eco_roster/wind_rabbit_bori.webp", "color": Color(0.22, 0.82, 0.92), "role": "바람보다 빠르게 길을 개척하는 기동형 히어로"},
+	{"name": "재활용 너구리 링고", "icon": "res://assets/characters/eco_roster/recycle_raccoon_ringo.webp", "color": Color(0.36, 0.82, 0.28), "role": "버려진 자원을 멋진 도구로 바꾸는 발명형 히어로"},
+	{"name": "대지 거북 토리", "icon": "res://assets/characters/eco_roster/earth_turtle_tori.webp", "color": Color(0.60, 0.72, 0.20), "role": "대지의 방패로 위험을 막아 내는 수호형 히어로"},
+	{"name": "번개새 피카", "icon": "res://assets/characters/eco_roster/lightning_bird_pika.webp", "color": Color(1.00, 0.82, 0.10), "role": "깨끗한 전기를 다루는 초고속 정찰형 히어로"},
+	{"name": "버섯 고양이 모모", "icon": "res://assets/characters/eco_roster/mushroom_cat_momo.webp", "color": Color(0.96, 0.30, 0.22), "role": "숲의 생명 에너지를 연구하는 연금술형 히어로"}
 ]
 
 var _character_buttons: Array[Button] = []
@@ -59,10 +59,10 @@ var _pending_game_duration_seconds := GameManager.DEFAULT_GAME_DURATION_SECONDS
 var _is_finishing_opening := false
 
 const OPENING_IMAGES := [
-	preload("res://assets/story/opening/01_energy_waste.png"),
-	preload("res://assets/story/opening/02_fossil_fuel.png"),
-	preload("res://assets/story/opening/03_crisis.png"),
-	preload("res://assets/story/opening/04_renewable_plan.png")
+	preload("res://assets/story/opening/01_energy_waste.webp"),
+	preload("res://assets/story/opening/02_fossil_fuel.webp"),
+	preload("res://assets/story/opening/03_crisis.webp"),
+	preload("res://assets/story/opening/04_renewable_plan.webp")
 ]
 
 const OPENING_STORY := [

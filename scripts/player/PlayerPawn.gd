@@ -31,29 +31,29 @@ const GROUND_SHADOW_LIFT_SPREAD := 0.95
 const GROUND_SHADOW_MAX_SCALE := 1.82
 
 const IDLE_SPRITE_BY_ICON := {
-	"res://assets/characters/eco_roster/captain_eco.png": "res://assets/characters/eco_roster/sprites/captain_eco_idle.png",
-	"res://assets/characters/eco_roster/fairy_sparky.png": "res://assets/characters/eco_roster/sprites/fairy_sparky_idle.png",
-	"res://assets/characters/eco_roster/water_popo.png": "res://assets/characters/eco_roster/sprites/water_popo_idle.png",
-	"res://assets/characters/eco_roster/bear_pongi.png": "res://assets/characters/eco_roster/sprites/bear_pongi_idle.png",
-	"res://assets/characters/eco_roster/solar_fox_sol.png": "res://assets/characters/eco_roster/sprites/solar_fox_sol_idle.png",
-	"res://assets/characters/eco_roster/wind_rabbit_bori.png": "res://assets/characters/eco_roster/sprites/wind_rabbit_bori_idle.png",
-	"res://assets/characters/eco_roster/recycle_raccoon_ringo.png": "res://assets/characters/eco_roster/sprites/recycle_raccoon_ringo_idle.png",
-	"res://assets/characters/eco_roster/earth_turtle_tori.png": "res://assets/characters/eco_roster/sprites/earth_turtle_tori_move_alpha.png",
-	"res://assets/characters/eco_roster/lightning_bird_pika.png": "res://assets/characters/eco_roster/sprites/lightning_bird_pika_idle.png",
-	"res://assets/characters/eco_roster/mushroom_cat_momo.png": "res://assets/characters/eco_roster/sprites/mushroom_cat_momo_idle.png"
+	"res://assets/characters/eco_roster/captain_eco.webp": "res://assets/characters/eco_roster/sprites/captain_eco_idle.webp",
+	"res://assets/characters/eco_roster/fairy_sparky.webp": "res://assets/characters/eco_roster/sprites/fairy_sparky_idle.webp",
+	"res://assets/characters/eco_roster/water_popo.webp": "res://assets/characters/eco_roster/sprites/water_popo_idle.webp",
+	"res://assets/characters/eco_roster/bear_pongi.webp": "res://assets/characters/eco_roster/sprites/bear_pongi_idle.webp",
+	"res://assets/characters/eco_roster/solar_fox_sol.webp": "res://assets/characters/eco_roster/sprites/solar_fox_sol_idle.webp",
+	"res://assets/characters/eco_roster/wind_rabbit_bori.webp": "res://assets/characters/eco_roster/sprites/wind_rabbit_bori_idle.webp",
+	"res://assets/characters/eco_roster/recycle_raccoon_ringo.webp": "res://assets/characters/eco_roster/sprites/recycle_raccoon_ringo_idle.webp",
+	"res://assets/characters/eco_roster/earth_turtle_tori.webp": "res://assets/characters/eco_roster/sprites/earth_turtle_tori_move_alpha.webp",
+	"res://assets/characters/eco_roster/lightning_bird_pika.webp": "res://assets/characters/eco_roster/sprites/lightning_bird_pika_idle.webp",
+	"res://assets/characters/eco_roster/mushroom_cat_momo.webp": "res://assets/characters/eco_roster/sprites/mushroom_cat_momo_idle.webp"
 }
 
 const MOVE_SPRITE_BY_ICON := {
-	"res://assets/characters/eco_roster/captain_eco.png": "res://assets/characters/eco_roster/sprites/captain_eco_move_alpha.png",
-	"res://assets/characters/eco_roster/water_popo.png": "res://assets/characters/eco_roster/sprites/water_popo_move_alpha.png",
-	"res://assets/characters/eco_roster/bear_pongi.png": "res://assets/characters/eco_roster/sprites/bear_pongi_move_alpha.png",
-	"res://assets/characters/eco_roster/solar_fox_sol.png": "res://assets/characters/eco_roster/sprites/solar_fox_sol_move_alpha.png",
-	"res://assets/characters/eco_roster/wind_rabbit_bori.png": "res://assets/characters/eco_roster/sprites/wind_rabbit_bori_move_alpha.png",
-	"res://assets/characters/eco_roster/recycle_raccoon_ringo.png": "res://assets/characters/eco_roster/sprites/recycle_raccoon_ringo_move_alpha.png",
+	"res://assets/characters/eco_roster/captain_eco.webp": "res://assets/characters/eco_roster/sprites/captain_eco_move_alpha.webp",
+	"res://assets/characters/eco_roster/water_popo.webp": "res://assets/characters/eco_roster/sprites/water_popo_move_alpha.webp",
+	"res://assets/characters/eco_roster/bear_pongi.webp": "res://assets/characters/eco_roster/sprites/bear_pongi_move_alpha.webp",
+	"res://assets/characters/eco_roster/solar_fox_sol.webp": "res://assets/characters/eco_roster/sprites/solar_fox_sol_move_alpha.webp",
+	"res://assets/characters/eco_roster/wind_rabbit_bori.webp": "res://assets/characters/eco_roster/sprites/wind_rabbit_bori_move_alpha.webp",
+	"res://assets/characters/eco_roster/recycle_raccoon_ringo.webp": "res://assets/characters/eco_roster/sprites/recycle_raccoon_ringo_move_alpha.webp",
 	# 토리는 이동 중 3D 도약과 빠른 프레임 재생을 사용합니다. 투명 가장자리가 보존된 시트를 유지합니다.
-	"res://assets/characters/eco_roster/earth_turtle_tori.png": "res://assets/characters/eco_roster/sprites/earth_turtle_tori_idle.png",
-	"res://assets/characters/eco_roster/lightning_bird_pika.png": "res://assets/characters/eco_roster/sprites/lightning_bird_pika_move_alpha.png",
-	"res://assets/characters/eco_roster/mushroom_cat_momo.png": "res://assets/characters/eco_roster/sprites/mushroom_cat_momo_move_alpha.png"
+	"res://assets/characters/eco_roster/earth_turtle_tori.webp": "res://assets/characters/eco_roster/sprites/earth_turtle_tori_idle.webp",
+	"res://assets/characters/eco_roster/lightning_bird_pika.webp": "res://assets/characters/eco_roster/sprites/lightning_bird_pika_move_alpha.webp",
+	"res://assets/characters/eco_roster/mushroom_cat_momo.webp": "res://assets/characters/eco_roster/sprites/mushroom_cat_momo_move_alpha.webp"
 }
 
 const IDLE_SPRITE_FRAMES := 4
@@ -107,7 +107,7 @@ func setup_player(p_data: Dictionary) -> void:
 	_init_components()
 	player_index = p_data.get("index", 0)
 	
-	var icon_path = p_data.get("char_icon", "res://assets/images/char_captain_eco.jpg")
+	var icon_path = p_data.get("char_icon", "res://assets/images/char_captain_eco.webp")
 	var idle_sprite_path := str(IDLE_SPRITE_BY_ICON.get(icon_path, ""))
 	var move_sprite_path := str(MOVE_SPRITE_BY_ICON.get(icon_path, ""))
 	if avatar_sprite and not idle_sprite_path.is_empty() and ResourceLoader.exists(idle_sprite_path):

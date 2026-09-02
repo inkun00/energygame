@@ -20,7 +20,7 @@ config/version="1.0.0"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 boot_splash/bg_color=Color(0.12, 0.16, 0.22, 1)
-config/icon="res://assets/images/card_back_mascot.jpg"
+config/icon="res://assets/images/card_back_mascot.webp"
 
 [autoload]
 

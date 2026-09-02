@@ -127,7 +127,7 @@ func _test_random_shortcuts_each_game() -> void:
 func _test_single_player_ai_fill() -> void:
 	var game_manager = root.get_node("GameManager")
 	var single_player_configs: Array[Dictionary] = []
-	single_player_configs.append({"name": "혼자 하는 히어로", "is_ai": false, "char_icon": "res://assets/characters/eco_roster/captain_eco.png"})
+	single_player_configs.append({"name": "혼자 하는 히어로", "is_ai": false, "char_icon": "res://assets/characters/eco_roster/captain_eco.webp"})
 	game_manager.setup_game(single_player_configs)
 	_expect(game_manager.players.size() == game_manager.MAX_PLAYER_COUNT, "싱글플레이는 AI를 채워 항상 4인 파티로 시작해야 합니다.")
 	_expect(not game_manager.players[0]["is_ai"], "싱글플레이의 첫 자리는 실제 플레이어여야 합니다.")
@@ -139,7 +139,7 @@ func _test_single_player_ai_fill() -> void:
 func _test_player_sprite_states() -> void:
 	var pawn = PLAYER_PAWN.new()
 	root.add_child(pawn)
-	pawn.setup_player({"index": 0, "char_icon": "res://assets/characters/eco_roster/earth_turtle_tori.png"})
+	pawn.setup_player({"index": 0, "char_icon": "res://assets/characters/eco_roster/earth_turtle_tori.webp"})
 	_expect(pawn.idle_sprite_texture != null and pawn.move_sprite_texture != null, "플레이어는 생성된 정지·이동 스프라이트를 모두 불러와야 합니다.")
 	_expect(pawn.avatar_sprite.texture == pawn.idle_sprite_texture and not pawn.is_moving, "정지 중에는 정지 스프라이트 애니메이션이 표시되어야 합니다.")
 	pawn._process(0.25)
@@ -226,7 +226,7 @@ func _test_special_skills() -> void:
 		var skill: Dictionary = skill_variant
 		_expect(str(skill.get("id", "")) in audio_manager.SPECIAL_SKILL_SFX_IDS, "%s에 대응하는 전용 특수효과음이 있어야 합니다." % skill.get("name", "특수기술"))
 		_expect(str(skill.get("target_type", "")) != "player", "%s은 다른 플레이어를 대상으로 삼으면 안 됩니다." % skill.get("name", "특수기술"))
-	game_manager.players[0]["char_icon"] = "res://assets/characters/eco_roster/captain_eco.png"
+	game_manager.players[0]["char_icon"] = "res://assets/characters/eco_roster/captain_eco.webp"
 	game_manager.players[0]["skill_energy"] = 3
 	game_manager.current_turn_idx = 0
 	game_manager.current_state = game_manager.TurnState.WAIT_ACTION
@@ -245,7 +245,7 @@ func _test_special_skills() -> void:
 	game_manager.stop_game()
 
 	game_manager = _fresh_game()
-	game_manager.players[0]["char_icon"] = "res://assets/characters/eco_roster/water_popo.png"
+	game_manager.players[0]["char_icon"] = "res://assets/characters/eco_roster/water_popo.webp"
 	game_manager.players[0]["skill_energy"] = 3
 	game_manager.current_turn_idx = 0
 	game_manager.current_state = game_manager.TurnState.WAIT_ACTION
@@ -262,7 +262,7 @@ func _test_special_skills() -> void:
 	game_manager.stop_game()
 
 	game_manager = _fresh_game()
-	game_manager.players[0]["char_icon"] = "res://assets/characters/eco_roster/recycle_raccoon_ringo.png"
+	game_manager.players[0]["char_icon"] = "res://assets/characters/eco_roster/recycle_raccoon_ringo.webp"
 	game_manager.players[0]["skill_energy"] = 3
 	game_manager.current_turn_idx = 0
 	game_manager.current_state = game_manager.TurnState.WAIT_ACTION
@@ -276,7 +276,7 @@ func _test_ai_special_skills() -> void:
 	var game_manager = _fresh_game()
 	_expect(game_manager.AI_SPECIAL_SKILL_USE_CHANCE > 0.0 and game_manager.AI_SPECIAL_SKILL_USE_CHANCE < 1.0, "AI 특수기술은 무조건이 아닌 무작위 확률로 사용해야 합니다.")
 	game_manager.players[1]["is_ai"] = true
-	game_manager.players[1]["char_icon"] = "res://assets/characters/eco_roster/water_popo.png"
+	game_manager.players[1]["char_icon"] = "res://assets/characters/eco_roster/water_popo.webp"
 	game_manager.players[1]["skill_energy"] = 3
 	game_manager.current_turn_idx = 1
 	game_manager.current_state = game_manager.TurnState.WAIT_ACTION
@@ -293,7 +293,7 @@ func _test_ai_special_skills() -> void:
 
 	game_manager = _fresh_game()
 	game_manager.players[1]["is_ai"] = true
-	game_manager.players[1]["char_icon"] = "res://assets/characters/eco_roster/wind_rabbit_bori.png"
+	game_manager.players[1]["char_icon"] = "res://assets/characters/eco_roster/wind_rabbit_bori.webp"
 	game_manager.players[1]["skill_energy"] = 3
 	game_manager.players[1]["position"] = 10
 	game_manager.current_turn_idx = 1
@@ -342,7 +342,7 @@ func _test_expanded_renewable_projects() -> void:
 		_expect(ResourceLoader.exists(str(project["image"])), "신규 발전소 이미지가 존재해야 합니다: %s" % project["name"])
 	_expect("소수력 발전소" in project_names and "지열 발전소" in project_names and "조력 발전소" in project_names and "원자력 발전소" in project_names, "소수력·지열·조력·원자력 발전소가 건설 목록에 포함되어야 합니다.")
 	_expect("자원순환 생활센터" in project_names and "전기 대중교통 허브" in project_names, "발전소 이외의 친환경 생활 시설이 건설 목록에 포함되어야 합니다.")
-	_expect(ResourceLoader.exists("res://assets/items/recycled_composite.png") and ResourceLoader.exists("res://assets/items/fast_charge_module.png"), "생활 시설 전용 재료 이미지가 존재해야 합니다.")
+	_expect(ResourceLoader.exists("res://assets/items/recycled_composite.webp") and ResourceLoader.exists("res://assets/items/fast_charge_module.webp"), "생활 시설 전용 재료 이미지가 존재해야 합니다.")
 	var inventory: Dictionary = game_manager._create_empty_inventory()
 	inventory["hydro_turbine"] = 2
 	inventory["reactor_control_core"] = 2
@@ -499,11 +499,11 @@ func _test_hud_initialization() -> void:
 		placement_cell_total += terrain_cells.size()
 		_expect(terrain_cells.size() >= 4, "%s 지형에는 작은 건설 셀이 4개 이상 있어야 합니다." % terrain_id)
 	_expect(placement_cell_total >= 36, "지도 전체 건설 셀은 확장 전보다 충분히 많아야 합니다.")
-	_expect(ResourceLoader.exists("res://assets/maps/energy_village_map.png"), "고품질 에너지 마을 지도 배경이 존재해야 합니다.")
+	_expect(ResourceLoader.exists("res://assets/maps/energy_village_map.webp"), "고품질 에너지 마을 지도 배경이 존재해야 합니다.")
 	_expect(not hud.kingdom_health_bar.show_percentage, "왕국 완성도 바에는 숫자 퍼센트를 겹쳐 표시하지 않아야 합니다.")
 	for project in game_manager.CONSTRUCTION_PROJECTS:
 		_expect(ResourceLoader.exists(str(project.get("image", ""))), "모든 건설 프로젝트에 시설 이미지가 있어야 합니다: %s" % project.get("name", ""))
-	game_manager.players[0]["char_icon"] = "res://assets/characters/eco_roster/water_popo.png"
+	game_manager.players[0]["char_icon"] = "res://assets/characters/eco_roster/water_popo.webp"
 	game_manager.players[0]["skill_energy"] = 3
 	game_manager.current_turn_idx = 0
 	game_manager.current_state = game_manager.TurnState.WAIT_ACTION

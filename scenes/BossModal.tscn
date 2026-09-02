@@ -1,7 +1,7 @@
 [gd_scene load_steps=5 format=3 uid="uid://bbossmodal001"]
 
 [ext_resource type="Script" path="res://scripts/ui/BossUIController.gd" id="1_boss"]
-[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/panel_grey_bolts_red.png" id="2_panel_red"]
+[ext_resource type="Texture2D" path="res://assets/open_source/kenney_adventure/panel_grey_bolts_red.webp" id="2_panel_red"]
 
 [sub_resource type="StyleBoxTexture" id="StyleBossPanel"]
 texture = ExtResource("2_panel_red")

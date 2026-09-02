@@ -8,7 +8,7 @@ func _capture() -> void:
 	root.add_child(main)
 	await process_frame
 	var configs: Array[Dictionary] = [
-		{"name": "에코 히어로 1", "is_ai": false, "char_icon": "res://assets/characters/eco_roster/captain_eco.png"},
+		{"name": "에코 히어로 1", "is_ai": false, "char_icon": "res://assets/characters/eco_roster/captain_eco.webp"},
 		{"name": "포포 (AI)", "is_ai": true},
 		{"name": "퐁이 (AI)", "is_ai": true},
 		{"name": "솔 (AI)", "is_ai": true}

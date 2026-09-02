@@ -12,10 +12,10 @@ func _capture() -> void:
 	await process_frame
 	# 로비 전환 애니메이션에 의존하지 않고, 보드가 준비된 뒤 이동 장면을 촬영합니다.
 	var configs: Array[Dictionary] = [
-		{"name": "캡틴 에코", "is_ai": false, "char_icon": "res://assets/characters/eco_roster/captain_eco.png", "char_color": Color("#49d97b")},
-		{"name": "태양 여우 솔 (AI)", "is_ai": true, "char_icon": "res://assets/characters/eco_roster/solar_fox_sol.png", "char_color": Color("#ffd24a")},
-		{"name": "물방울 정령 포포 (AI)", "is_ai": true, "char_icon": "res://assets/characters/eco_roster/water_popo.png", "char_color": Color("#49bfff")},
-		{"name": "번개새 피카 (AI)", "is_ai": true, "char_icon": "res://assets/characters/eco_roster/lightning_bird_pika.png", "char_color": Color("#ff9d3d")},
+		{"name": "캡틴 에코", "is_ai": false, "char_icon": "res://assets/characters/eco_roster/captain_eco.webp", "char_color": Color("#49d97b")},
+		{"name": "태양 여우 솔 (AI)", "is_ai": true, "char_icon": "res://assets/characters/eco_roster/solar_fox_sol.webp", "char_color": Color("#ffd24a")},
+		{"name": "물방울 정령 포포 (AI)", "is_ai": true, "char_icon": "res://assets/characters/eco_roster/water_popo.webp", "char_color": Color("#49bfff")},
+		{"name": "번개새 피카 (AI)", "is_ai": true, "char_icon": "res://assets/characters/eco_roster/lightning_bird_pika.webp", "char_color": Color("#ff9d3d")},
 	]
 	main._on_start_game_requested(configs)
 	# start_board_game이 첫 턴을 여는 0.4초 타이머를 완료할 때까지 기다립니다.

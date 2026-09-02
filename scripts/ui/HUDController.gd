@@ -5,7 +5,7 @@ class_name HUDController
 
 signal board_zoom_requested(direction: float)
 
-const PLAYER_PANEL_TEXTURE: Texture2D = preload("res://assets/open_source/kenney_adventure/panel_grey_bolts_dark.png")
+const PLAYER_PANEL_TEXTURE: Texture2D = preload("res://assets/open_source/kenney_adventure/panel_grey_bolts_dark.webp")
 const VILLAGE_DRAG_CARD = preload("res://scripts/ui/ConstructionDragCard.gd")
 const SPECIAL_SKILL_CINEMATIC = preload("res://scripts/effects/SpecialSkillCinematic.gd")
 const ENDING_CINEMATIC = preload("res://scripts/effects/EndingCinematic.gd")
@@ -206,7 +206,7 @@ func _create_player_panel(p_data: Dictionary) -> Control:
 	avatar.custom_minimum_size = Vector2(52, 52)
 	avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	var icon_path = p_data.get("char_icon", "res://assets/images/char_captain_eco.jpg")
+	var icon_path = p_data.get("char_icon", "res://assets/images/char_captain_eco.webp")
 	if ResourceLoader.exists(icon_path):
 		avatar.texture = load(icon_path)
 	h_box.add_child(avatar)

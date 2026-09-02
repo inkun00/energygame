@@ -5,13 +5,13 @@ extends SceneTree
 ## white fur, highlights, clothing, eyes, and enclosed details stay intact.
 
 const TARGETS: Array[String] = [
-	"res://assets/characters/eco_roster/fairy_sparky.png",
-	"res://assets/characters/eco_roster/solar_fox_sol.png",
-	"res://assets/characters/eco_roster/wind_rabbit_bori.png",
-	"res://assets/characters/eco_roster/recycle_raccoon_ringo.png",
-	"res://assets/characters/eco_roster/earth_turtle_tori.png",
-	"res://assets/characters/eco_roster/lightning_bird_pika.png",
-	"res://assets/characters/eco_roster/mushroom_cat_momo.png",
+	"res://assets/characters/eco_roster/fairy_sparky.webp",
+	"res://assets/characters/eco_roster/solar_fox_sol.webp",
+	"res://assets/characters/eco_roster/wind_rabbit_bori.webp",
+	"res://assets/characters/eco_roster/recycle_raccoon_ringo.webp",
+	"res://assets/characters/eco_roster/earth_turtle_tori.webp",
+	"res://assets/characters/eco_roster/lightning_bird_pika.webp",
+	"res://assets/characters/eco_roster/mushroom_cat_momo.webp",
 ]
 
 const MIN_BACKGROUND_CHANNEL := 0.70

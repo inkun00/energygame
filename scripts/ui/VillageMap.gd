@@ -8,7 +8,7 @@ signal project_drop_rejected(message: String)
 const BUILDING_SIZE := Vector2(76, 62)
 const MAP_PADDING := Vector2(12, 12)
 const RECOVERY_VISUAL_TARGET := 70.0
-const MAP_TEXTURE: Texture2D = preload("res://assets/maps/energy_village_map.png")
+const MAP_TEXTURE: Texture2D = preload("res://assets/maps/energy_village_map.webp")
 const TERRAIN_ZONES := {
 	"wind_plain": {"label": "바람 초원", "rect": Rect2(0.08, 0.06, 0.33, 0.30), "color": Color("78d9ba")},
 	"wind_coast": {"label": "바람 해안 절벽", "rect": Rect2(0.05, 0.28, 0.27, 0.34), "color": Color("58c4dd")},
