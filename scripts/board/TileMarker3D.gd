@@ -8,9 +8,16 @@ var tile_data: Dictionary = {}
 var block_mesh: MeshInstance3D
 var num_label: Label3D
 var border_mesh: MeshInstance3D
+var block_material: StandardMaterial3D
+var target_ring: MeshInstance3D
+var target_ring_material: StandardMaterial3D
 var hover_tween: Tween
 var base_position: Vector3
 var base_scale := Vector3.ONE
+var skill_targetable := false
+var target_pulse_elapsed := 0.0
+var base_emission_enabled := false
+var base_emission := Color.BLACK
 
 func setup_tile_3d(idx: int) -> void:
 	tile_index = idx
@@ -77,7 +84,11 @@ func setup_tile_3d(idx: int) -> void:
 		_:
 			mat.albedo_color = Color(0.18, 0.26, 0.38) # 퀴즈 칸
 				
-	block_mesh.material_override = mat
+	block_material = mat
+	base_emission_enabled = mat.emission_enabled
+	base_emission = mat.emission
+	block_mesh.material_override = block_material
+	_create_target_ring(tile_size.y)
 
 	# 3. 게임판에는 칸 번호만 표시합니다. 재료 오브젝트가 중앙에 떠 있으므로
 	# 번호는 앞쪽에 배치해 확대했을 때도 가리지 않게 합니다.
@@ -90,6 +101,53 @@ func setup_tile_3d(idx: int) -> void:
 	num_label.position = Vector3(0, tile_size.y * 0.5 + 0.025, 0.52)
 	num_label.rotation_degrees = Vector3(-90, 0, 0)
 	add_child(num_label)
+
+func _process(delta: float) -> void:
+	if not skill_targetable or target_ring == null:
+		return
+	target_pulse_elapsed += delta
+	var pulse := 1.0 + sin(target_pulse_elapsed * 5.2) * 0.11
+	target_ring.scale = Vector3.ONE * pulse
+	target_ring.rotation.y += delta * 0.85
+	if target_ring_material:
+		target_ring_material.emission_energy_multiplier = 1.8 + (sin(target_pulse_elapsed * 5.2) + 1.0) * 0.55
+
+func _create_target_ring(tile_height: float) -> void:
+	target_ring = MeshInstance3D.new()
+	target_ring.name = "SkillTargetRing"
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.66
+	torus.outer_radius = 0.79
+	torus.rings = 32
+	torus.ring_segments = 10
+	target_ring.mesh = torus
+	target_ring.position = Vector3(0.0, tile_height * 0.5 + 0.08, 0.0)
+	target_ring_material = StandardMaterial3D.new()
+	target_ring_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	target_ring_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	target_ring_material.albedo_color = Color(0.25, 1.0, 0.72, 0.92)
+	target_ring_material.emission_enabled = true
+	target_ring_material.emission = Color("55ffd0")
+	target_ring_material.emission_energy_multiplier = 2.2
+	target_ring.material_override = target_ring_material
+	target_ring.visible = false
+	add_child(target_ring)
+
+func set_skill_targetable(is_targetable: bool) -> void:
+	skill_targetable = is_targetable
+	target_pulse_elapsed = 0.0
+	if target_ring:
+		target_ring.visible = is_targetable
+		target_ring.scale = Vector3.ONE
+	if block_material:
+		if is_targetable:
+			block_material.emission_enabled = true
+			block_material.emission = Color("3dffc5")
+			block_material.emission_energy_multiplier = 0.95
+		else:
+			block_material.emission_enabled = base_emission_enabled
+			block_material.emission = base_emission
+			block_material.emission_energy_multiplier = 1.0
 
 func set_hovered(is_hovered: bool) -> void:
 	if hover_tween and hover_tween.is_valid():

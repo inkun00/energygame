@@ -48,6 +48,13 @@ func _capture() -> void:
 	if not _save_frame("res://.godot/kingdom_success_ending_preview.png"):
 		quit(1)
 		return
+	if is_instance_valid(hud.ending_cinematic):
+		hud.ending_cinematic._finish()
+	await process_frame
+	if not hud.victory_modal.visible:
+		push_error("엔딩 애니메이션 종료 후 결과 화면이 열리지 않았습니다.")
+		quit(1)
+		return
 	print("[PASS] Kingdom visual previews captured")
 	quit(0)
 

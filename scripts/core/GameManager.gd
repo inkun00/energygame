@@ -23,6 +23,7 @@ signal game_time_changed(remaining_seconds, total_seconds)
 signal lap_completed(player_idx, lap_number, rank, reward_count)
 signal lap_reward_requested(player_idx, rank, reward_count)
 signal lap_reward_completed(player_idx, selected_items)
+signal open_market_state_changed(state)
 
 enum TurnState {
 	WAIT_ACTION,
@@ -34,11 +35,20 @@ enum TurnState {
 	GAME_OVER
 }
 
+enum OpenMarketPhase {
+	INACTIVE,
+	OFFERING,
+	TAKING
+}
+
 const DICE_ROLL_ANIMATION_SECONDS := 1.10
 const PLAYER_DICE_INPUT_SECONDS := 20.0
 const AI_SPECIAL_SKILL_USE_CHANCE := 0.5
 const AI_POST_SPECIAL_ACTION_DELAY_SECONDS := 1.0
 const AI_VILLAGE_BUILD_DELAY_SECONDS := 0.75
+const OPEN_MARKET_OFFER_SECONDS := 20.0
+const OPEN_MARKET_TAKE_SECONDS := 20.0
+const OPEN_MARKET_AI_ACTION_SECONDS := 0.55
 # AI가 문제를 읽고 답을 고르는 시간을 기존 3.9초보다 5초 늘렸습니다.
 const AI_QUIZ_THINK_SECONDS := 8.9
 const MAX_PLAYER_COUNT := 4
@@ -124,11 +134,28 @@ var dice_input_time_remaining := 0.0
 var _last_emitted_dice_input_seconds := -1
 var village_ai_builder_cursor := 0
 var village_ai_construction_running := false
+var open_market_active := false
+var open_market_phase: OpenMarketPhase = OpenMarketPhase.INACTIVE
+var open_market_time_remaining := 0.0
+var open_market_submitted_players: Dictionary = {}
+var open_market_stock: Dictionary = {}
+var open_market_take_allowances: Dictionary = {}
+var open_market_taken_counts: Dictionary = {}
+var _open_market_offers: Dictionary = {}
+var _last_open_market_time_seconds := -1
+var _open_market_ai_action_remaining := 0.0
 
 func _ready() -> void:
 	set_process(true)
 
 func _process(delta: float) -> void:
+	# 온라인 게임의 시간·턴·AI 처리는 방장 한 곳에서만 진행합니다.
+	# 참가자는 방장이 전송한 상태를 표시하므로 프레임 차이로 게임이 갈라지지 않습니다.
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		return
+	if open_market_active:
+		_update_open_market(delta)
+		return
 	if not is_game_active or village_construction_active or not pending_lap_reward.is_empty():
 		return
 	game_time_remaining = maxf(0.0, game_time_remaining - delta)
@@ -137,8 +164,8 @@ func _process(delta: float) -> void:
 		_last_emitted_time_seconds = display_seconds
 		game_time_changed.emit(display_seconds, game_duration_seconds)
 	if game_time_remaining <= 0.0:
-		status_message_posted.emit("⏰ 설정한 플레이 시간이 끝났습니다. 모은 개인 재료로 친환경 마을을 건설합니다!")
-		_start_village_construction_phase()
+		status_message_posted.emit("⏰ 설정한 플레이 시간이 끝났습니다. 남은 부품으로 오픈마켓을 엽니다!")
+		_start_open_market_phase()
 		return
 	_update_player_dice_input_timer(delta)
 
@@ -155,6 +182,16 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 	ai_fill_count = 0
 	special_skill_used_this_turn = false
 	village_construction_active = false
+	open_market_active = false
+	open_market_phase = OpenMarketPhase.INACTIVE
+	open_market_time_remaining = 0.0
+	open_market_submitted_players.clear()
+	open_market_stock.clear()
+	open_market_take_allowances.clear()
+	open_market_taken_counts.clear()
+	_open_market_offers.clear()
+	_last_open_market_time_seconds = -1
+	_open_market_ai_action_remaining = 0.0
 	built_project_ids.clear()
 	built_project_placements.clear()
 	built_project_owners.clear()
@@ -169,7 +206,12 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 	_last_emitted_time_seconds = game_duration_seconds
 	dice_input_time_remaining = 0.0
 	_last_emitted_dice_input_seconds = -1
-	BoardGrid.assign_random_shortcuts()
+	if NetworkManager.is_online and not NetworkManager.shared_board_tiles.is_empty():
+		BoardGrid.TILE_DATA.clear()
+		for shared_tile in NetworkManager.shared_board_tiles:
+			BoardGrid.TILE_DATA.append(shared_tile.duplicate(true))
+	else:
+		BoardGrid.assign_random_shortcuts()
 	
 	# 싱글플레이와 인원 미달 파티 모두 최대 4인까지 AI 동료로 자동 채웁니다.
 	var default_chars = [
@@ -253,6 +295,74 @@ func stop_game() -> void:
 	dice_input_time_remaining = 0.0
 	_last_emitted_dice_input_seconds = -1
 	village_ai_construction_running = false
+	open_market_active = false
+	open_market_phase = OpenMarketPhase.INACTIVE
+	open_market_time_remaining = 0.0
+	open_market_submitted_players.clear()
+	open_market_stock.clear()
+	open_market_take_allowances.clear()
+	open_market_taken_counts.clear()
+	_open_market_offers.clear()
+
+
+## 참가자 화면에 방장의 권한 상태를 적용하고, 해당 변화에 맞는 기존 UI 신호를 재생합니다.
+func apply_network_state(snapshot: Dictionary, event_name: String, event_args: Array) -> void:
+	if not NetworkManager.is_online or NetworkManager.is_host:
+		return
+	players.clear()
+	for player_value in snapshot.get("players", []):
+		players.append((player_value as Dictionary).duplicate(true))
+	current_state = int(snapshot.get("current_state", TurnState.WAIT_ACTION))
+	current_turn_idx = int(snapshot.get("current_turn_idx", 0))
+	total_turns = int(snapshot.get("total_turns", 0))
+	is_game_active = bool(snapshot.get("is_game_active", false))
+	active_quiz_data = (snapshot.get("active_quiz_data", {}) as Dictionary).duplicate(true)
+	active_quiz_player_idx = int(snapshot.get("active_quiz_player_idx", -1))
+	active_spectator_quiz_attempts = (snapshot.get("active_spectator_quiz_attempts", {}) as Dictionary).duplicate(true)
+	projects_built = int(snapshot.get("projects_built", 0))
+	kingdom_health = int(snapshot.get("kingdom_health", 0))
+	kingdom_recovered = bool(snapshot.get("kingdom_recovered", false))
+	team_quiz_correct = int(snapshot.get("team_quiz_correct", 0))
+	village_construction_active = bool(snapshot.get("village_construction_active", false))
+	open_market_active = bool(snapshot.get("open_market_active", false))
+	open_market_phase = int(snapshot.get("open_market_phase", OpenMarketPhase.INACTIVE))
+	open_market_time_remaining = float(snapshot.get("open_market_time_remaining", 0.0))
+	open_market_submitted_players = (snapshot.get("open_market_submitted_players", {}) as Dictionary).duplicate(true)
+	open_market_stock = (snapshot.get("open_market_stock", {}) as Dictionary).duplicate(true)
+	open_market_take_allowances = (snapshot.get("open_market_take_allowances", {}) as Dictionary).duplicate(true)
+	open_market_taken_counts = (snapshot.get("open_market_taken_counts", {}) as Dictionary).duplicate(true)
+	built_project_ids.clear()
+	for project_id in snapshot.get("built_project_ids", []):
+		built_project_ids.append(int(project_id))
+	built_project_placements = (snapshot.get("built_project_placements", {}) as Dictionary).duplicate(true)
+	built_project_owners = (snapshot.get("built_project_owners", {}) as Dictionary).duplicate(true)
+	collected_item_tiles = (snapshot.get("collected_item_tiles", {}) as Dictionary).duplicate(true)
+	special_skill_used_this_turn = bool(snapshot.get("special_skill_used_this_turn", false))
+	game_duration_seconds = int(snapshot.get("game_duration_seconds", DEFAULT_GAME_DURATION_SECONDS))
+	game_time_remaining = float(snapshot.get("game_time_remaining", game_duration_seconds))
+	lap_finish_orders = (snapshot.get("lap_finish_orders", {}) as Dictionary).duplicate(true)
+	pending_lap_reward = (snapshot.get("pending_lap_reward", {}) as Dictionary).duplicate(true)
+	dice_input_time_remaining = float(snapshot.get("dice_input_time_remaining", 0.0))
+	village_ai_construction_running = bool(snapshot.get("village_ai_construction_running", false))
+
+	if event_name.is_empty() or not has_signal(event_name):
+		return
+	match event_name:
+		"dice_rolled":
+			AudioManager.play_dice_sfx()
+		"player_moved":
+			AudioManager.play_move_sfx()
+		"quiz_resolved":
+			if event_args.size() >= 2 and bool(event_args[1]):
+				AudioManager.play_correct_sfx()
+			else:
+				AudioManager.play_wrong_sfx()
+		"special_skill_activated":
+			if event_args.size() >= 3:
+				AudioManager.play_special_skill_sfx(str((event_args[2] as Dictionary).get("id", "eco_dash")))
+	var signal_call: Array = [StringName(event_name)]
+	signal_call.append_array(event_args)
+	callv("emit_signal", signal_call)
 
 func start_first_turn() -> void:
 	current_turn_idx = 0
@@ -319,23 +429,7 @@ func _try_ai_use_random_special_skill(player_idx: int) -> bool:
 	if not can_use_special_skill(player_idx) or not bool(players[player_idx].get("is_ai", false)):
 		return false
 	var skill := get_player_special_skill(player_idx)
-	var target_type := str(skill.get("target_type", "tile"))
-	var effect := str(skill.get("effect", ""))
-	var valid_targets: Array[int] = []
-	if target_type == "self":
-		valid_targets.append(player_idx)
-	elif target_type == "player":
-		for target_player_idx in range(players.size()):
-			valid_targets.append(target_player_idx)
-	elif effect == "move":
-		var current_position := int(players[player_idx].get("position", 0))
-		var furthest_target: int = mini(BoardGrid.LAST_TILE_INDEX - 1, current_position + int(skill.get("range", 1)))
-		for target_tile in range(current_position + 1, furthest_target + 1):
-			valid_targets.append(target_tile)
-	else:
-		for target_tile in range(1, BoardGrid.LAST_TILE_INDEX):
-			if effect != "collect_material" or not collected_item_tiles.has(target_tile):
-				valid_targets.append(target_tile)
+	var valid_targets := get_valid_special_skill_targets(player_idx)
 	if valid_targets.is_empty():
 		return false
 	var selected_target := valid_targets[randi() % valid_targets.size()]
@@ -352,14 +446,13 @@ func _ai_roll_after_special(player_idx: int) -> void:
 func execute_roll_dice(player_idx: int) -> void:
 	if current_state != TurnState.WAIT_ACTION or player_idx != current_turn_idx:
 		return
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		NetworkManager.request_roll_dice(player_idx)
+		return
 	dice_input_time_remaining = 0.0
 	_last_emitted_dice_input_seconds = -1
 	var roll_val = randi() % 6 + 1
-
-	if NetworkManager.is_online and NetworkManager.is_host:
-		NetworkManager.rpc_roll_dice.rpc(player_idx, roll_val)
-	else:
-		on_network_dice_rolled(player_idx, roll_val)
+	on_network_dice_rolled(player_idx, roll_val)
 
 func on_network_dice_rolled(player_idx: int, dice_val: int) -> void:
 	if not is_game_active or player_idx != current_turn_idx or current_state != TurnState.WAIT_ACTION:
@@ -464,6 +557,8 @@ func _resolve_tile_event(player_idx: int, tile_idx: int, shortcut_history: Array
 func resolve_ai_quiz_if_pending(player_idx: int) -> void:
 	# 예약 콜백과 관전 UI 안전장치가 같은 진입점을 사용합니다. 먼저 도착한 호출만
 	# 결과를 확정하고, 뒤늦은 중복 호출은 현재 상태 검사에서 안전하게 무시됩니다.
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		return
 	if not is_game_active or current_state != TurnState.RESOLVING_QUIZ or player_idx != active_quiz_player_idx:
 		return
 	if player_idx < 0 or player_idx >= players.size() or not bool(players[player_idx].get("is_ai", false)):
@@ -665,6 +760,29 @@ func can_use_special_skill(player_idx: int) -> bool:
 	var skill := get_player_special_skill(player_idx)
 	return int(players[player_idx].get("skill_energy", 0)) >= int(skill.get("cost", 0))
 
+func get_valid_special_skill_targets(player_idx: int) -> Array[int]:
+	var valid_targets: Array[int] = []
+	if player_idx < 0 or player_idx >= players.size():
+		return valid_targets
+	var skill := get_player_special_skill(player_idx)
+	var target_type := str(skill.get("target_type", "tile"))
+	var effect := str(skill.get("effect", ""))
+	if target_type == "self":
+		valid_targets.append(player_idx)
+	elif target_type == "player":
+		for target_player_idx in range(players.size()):
+			valid_targets.append(target_player_idx)
+	elif effect == "move":
+		var current_position := int(players[player_idx].get("position", 0))
+		var furthest_target: int = mini(BoardGrid.LAST_TILE_INDEX - 1, current_position + int(skill.get("range", 1)))
+		for target_tile in range(current_position + 1, furthest_target + 1):
+			valid_targets.append(target_tile)
+	else:
+		for target_tile in range(1, BoardGrid.LAST_TILE_INDEX):
+			if effect != "collect_material" or not collected_item_tiles.has(target_tile):
+				valid_targets.append(target_tile)
+	return valid_targets
+
 func use_special_skill(player_idx: int, target_index: int) -> bool:
 	if not can_use_special_skill(player_idx):
 		status_message_posted.emit("⚠️ 특수기술은 자신의 턴에, 퀴즈 특수 에너지가 충분할 때만 사용할 수 있습니다.")
@@ -805,10 +923,263 @@ func get_player_inventories() -> Array[Dictionary]:
 		inventories.append(player.get("inventory", _create_empty_inventory()).duplicate(true))
 	return inventories
 
+
+func _start_open_market_phase() -> void:
+	if open_market_active or village_construction_active or kingdom_recovered:
+		return
+	pending_lap_reward.clear()
+	is_game_active = false
+	current_state = TurnState.GAME_OVER
+	if _total_all_player_materials() <= 0:
+		status_message_posted.emit("🧰 교환할 부품이 없어 바로 친환경 마을 건설을 시작합니다.")
+		_start_village_construction_phase()
+		return
+	open_market_active = true
+	open_market_phase = OpenMarketPhase.OFFERING
+	open_market_time_remaining = OPEN_MARKET_OFFER_SECONDS
+	open_market_submitted_players.clear()
+	open_market_stock = _create_empty_inventory()
+	open_market_take_allowances.clear()
+	open_market_taken_counts.clear()
+	_open_market_offers.clear()
+	_last_open_market_time_seconds = ceili(open_market_time_remaining)
+	_open_market_ai_action_remaining = 0.35
+	status_message_posted.emit("🛒 오픈마켓 준비! 각자 내놓을 부품을 고릅니다. 모두 결정하면 동시에 공개됩니다.")
+	_emit_open_market_state()
+
+
+func submit_open_market_offer(player_idx: int, requested_offer: Dictionary) -> bool:
+	if not open_market_active or open_market_phase != OpenMarketPhase.OFFERING:
+		return false
+	if player_idx < 0 or player_idx >= players.size() or open_market_submitted_players.has(player_idx):
+		return false
+	var inventory: Dictionary = players[player_idx].get("inventory", {})
+	var clean_offer := _create_empty_inventory()
+	for item_id_variant in ITEM_DEFINITIONS.keys():
+		var item_id := str(item_id_variant)
+		clean_offer[item_id] = clampi(int(requested_offer.get(item_id, 0)), 0, int(inventory.get(item_id, 0)))
+	_open_market_offers[player_idx] = clean_offer
+	open_market_submitted_players[player_idx] = true
+	status_message_posted.emit("🔒 [%s] 님이 판매 선택을 확정했습니다. 내용은 모두 결정한 뒤 공개됩니다." % players[player_idx]["name"])
+	_emit_open_market_state()
+	if open_market_submitted_players.size() >= players.size():
+		_reveal_open_market_offers()
+	return true
+
+
+func take_open_market_item(player_idx: int, item_id: String) -> bool:
+	if not open_market_active or open_market_phase != OpenMarketPhase.TAKING:
+		return false
+	if player_idx < 0 or player_idx >= players.size() or not ITEM_DEFINITIONS.has(item_id):
+		return false
+	var allowance := int(open_market_take_allowances.get(player_idx, 0))
+	var already_taken := int(open_market_taken_counts.get(player_idx, 0))
+	if already_taken >= allowance or int(open_market_stock.get(item_id, 0)) <= 0:
+		return false
+	open_market_stock[item_id] = int(open_market_stock[item_id]) - 1
+	open_market_taken_counts[player_idx] = already_taken + 1
+	var inventory: Dictionary = players[player_idx]["inventory"]
+	inventory[item_id] = int(inventory.get(item_id, 0)) + 1
+	player_inventory_changed.emit(player_idx, inventory.duplicate(true))
+	status_message_posted.emit("⚡ [%s] 님이 선착순으로 %s을(를) 가져갔습니다! (%d/%d)" % [players[player_idx]["name"], ITEM_DEFINITIONS[item_id]["name"], already_taken + 1, allowance])
+	_emit_open_market_state()
+	if _open_market_stock_total() <= 0:
+		_finish_open_market_phase()
+	return true
+
+
+func get_open_market_state() -> Dictionary:
+	return {
+		"active": open_market_active,
+		"phase": int(open_market_phase),
+		"time_remaining": ceili(open_market_time_remaining),
+		"submitted_players": open_market_submitted_players.duplicate(true),
+		"player_count": players.size(),
+		"stock": open_market_stock.duplicate(true),
+		"allowances": open_market_take_allowances.duplicate(true),
+		"taken_counts": open_market_taken_counts.duplicate(true)
+	}
+
+
+func _update_open_market(delta: float) -> void:
+	open_market_time_remaining = maxf(0.0, open_market_time_remaining - delta)
+	var display_seconds := ceili(open_market_time_remaining)
+	if display_seconds != _last_open_market_time_seconds:
+		_last_open_market_time_seconds = display_seconds
+		_emit_open_market_state()
+	_open_market_ai_action_remaining -= delta
+	if _open_market_ai_action_remaining <= 0.0:
+		_open_market_ai_action_remaining = OPEN_MARKET_AI_ACTION_SECONDS
+		if open_market_phase == OpenMarketPhase.OFFERING:
+			_submit_one_ai_market_offer()
+		elif open_market_phase == OpenMarketPhase.TAKING:
+			_take_one_ai_market_item()
+	if open_market_time_remaining > 0.0 or not open_market_active:
+		return
+	if open_market_phase == OpenMarketPhase.OFFERING:
+		for player_idx in range(players.size()):
+			if open_market_submitted_players.has(player_idx):
+				continue
+			var timed_offer := _choose_ai_market_offer(player_idx) if bool(players[player_idx].get("is_ai", false)) else {}
+			submit_open_market_offer(player_idx, timed_offer)
+	elif open_market_phase == OpenMarketPhase.TAKING:
+		_auto_fill_open_market_quotas()
+		if open_market_active:
+			_finish_open_market_phase()
+
+
+func _reveal_open_market_offers() -> void:
+	if not open_market_active or open_market_phase != OpenMarketPhase.OFFERING:
+		return
+	open_market_stock = _create_empty_inventory()
+	open_market_take_allowances.clear()
+	open_market_taken_counts.clear()
+	# 모든 선택을 검증·차감한 뒤 한 번에 공개합니다. 개별 제출 순서는 시장에 드러나지 않습니다.
+	for player_idx in range(players.size()):
+		var inventory: Dictionary = players[player_idx]["inventory"]
+		var offer: Dictionary = _open_market_offers.get(player_idx, _create_empty_inventory())
+		var offer_total := 0
+		for item_id_variant in ITEM_DEFINITIONS.keys():
+			var item_id := str(item_id_variant)
+			var amount := clampi(int(offer.get(item_id, 0)), 0, int(inventory.get(item_id, 0)))
+			inventory[item_id] = int(inventory.get(item_id, 0)) - amount
+			open_market_stock[item_id] = int(open_market_stock.get(item_id, 0)) + amount
+			offer_total += amount
+		open_market_take_allowances[player_idx] = offer_total
+		open_market_taken_counts[player_idx] = 0
+	for player_idx in range(players.size()):
+		player_inventory_changed.emit(player_idx, (players[player_idx]["inventory"] as Dictionary).duplicate(true))
+	open_market_phase = OpenMarketPhase.TAKING
+	open_market_time_remaining = OPEN_MARKET_TAKE_SECONDS
+	_last_open_market_time_seconds = ceili(open_market_time_remaining)
+	_open_market_ai_action_remaining = 0.25
+	status_message_posted.emit("🛍️ 오픈마켓 공개! 자신이 올린 개수만큼 원하는 부품을 선착순으로 가져가세요.")
+	_emit_open_market_state()
+	if _open_market_stock_total() <= 0:
+		_finish_open_market_phase()
+
+
+func _finish_open_market_phase() -> void:
+	if not open_market_active:
+		return
+	open_market_active = false
+	open_market_phase = OpenMarketPhase.INACTIVE
+	open_market_time_remaining = 0.0
+	status_message_posted.emit("✅ 오픈마켓이 끝났습니다. 교환한 개인 부품으로 친환경 시설을 건설하세요!")
+	_emit_open_market_state()
+	_start_village_construction_phase()
+
+
+func _emit_open_market_state() -> void:
+	open_market_state_changed.emit(get_open_market_state())
+
+
+func _submit_one_ai_market_offer() -> void:
+	for player_idx in range(players.size()):
+		if bool(players[player_idx].get("is_ai", false)) and not open_market_submitted_players.has(player_idx):
+			submit_open_market_offer(player_idx, _choose_ai_market_offer(player_idx))
+			return
+
+
+func _take_one_ai_market_item() -> void:
+	for player_idx in range(players.size()):
+		if not bool(players[player_idx].get("is_ai", false)):
+			continue
+		if int(open_market_taken_counts.get(player_idx, 0)) >= int(open_market_take_allowances.get(player_idx, 0)):
+			continue
+		var item_id := _best_market_item_for_player(player_idx)
+		if not item_id.is_empty():
+			take_open_market_item(player_idx, item_id)
+		return
+
+
+func _choose_ai_market_offer(player_idx: int) -> Dictionary:
+	var offer := _create_empty_inventory()
+	if player_idx < 0 or player_idx >= players.size():
+		return offer
+	var inventory: Dictionary = players[player_idx].get("inventory", {})
+	var target_requirements: Dictionary = {}
+	var least_missing := 999999
+	for project_index in range(CONSTRUCTION_PROJECTS.size()):
+		if project_index in built_project_ids:
+			continue
+		var requirements: Dictionary = CONSTRUCTION_PROJECTS[project_index]["requirements"]
+		var missing := 0
+		for item_id_variant in requirements.keys():
+			var item_id := str(item_id_variant)
+			missing += maxi(0, int(requirements[item_id]) - int(inventory.get(item_id, 0)))
+		if missing < least_missing:
+			least_missing = missing
+			target_requirements = requirements
+	for item_id_variant in ITEM_DEFINITIONS.keys():
+		var item_id := str(item_id_variant)
+		var keep_count := int(target_requirements.get(item_id, 0))
+		offer[item_id] = maxi(0, int(inventory.get(item_id, 0)) - keep_count)
+	return offer
+
+
+func _best_market_item_for_player(player_idx: int) -> String:
+	if player_idx < 0 or player_idx >= players.size():
+		return ""
+	var inventory: Dictionary = players[player_idx].get("inventory", {})
+	var before_missing := _minimum_unbuilt_project_missing(inventory)
+	var best_item := ""
+	var best_gain := -1
+	for item_id_variant in ITEM_DEFINITIONS.keys():
+		var item_id := str(item_id_variant)
+		if int(open_market_stock.get(item_id, 0)) <= 0:
+			continue
+		var simulated := inventory.duplicate(true)
+		simulated[item_id] = int(simulated.get(item_id, 0)) + 1
+		var gain := before_missing - _minimum_unbuilt_project_missing(simulated)
+		if gain > best_gain:
+			best_gain = gain
+			best_item = item_id
+	return best_item
+
+
+func _minimum_unbuilt_project_missing(inventory: Dictionary) -> int:
+	var least_missing := 999999
+	for project_index in range(CONSTRUCTION_PROJECTS.size()):
+		if project_index in built_project_ids:
+			continue
+		var missing := 0
+		var requirements: Dictionary = CONSTRUCTION_PROJECTS[project_index]["requirements"]
+		for item_id_variant in requirements.keys():
+			var item_id := str(item_id_variant)
+			missing += maxi(0, int(requirements[item_id]) - int(inventory.get(item_id, 0)))
+		least_missing = mini(least_missing, missing)
+	return 0 if least_missing == 999999 else least_missing
+
+
+func _auto_fill_open_market_quotas() -> void:
+	for player_idx in range(players.size()):
+		while open_market_active and int(open_market_taken_counts.get(player_idx, 0)) < int(open_market_take_allowances.get(player_idx, 0)):
+			var item_id := _best_market_item_for_player(player_idx)
+			if item_id.is_empty() or not take_open_market_item(player_idx, item_id):
+				break
+
+
+func _open_market_stock_total() -> int:
+	var total := 0
+	for amount in open_market_stock.values():
+		total += int(amount)
+	return total
+
+
+func _total_all_player_materials() -> int:
+	var total := 0
+	for player in players:
+		for amount in (player.get("inventory", {}) as Dictionary).values():
+			total += int(amount)
+	return total
+
 func _start_village_construction_phase() -> void:
 	if village_construction_active or kingdom_recovered:
 		return
 	pending_lap_reward.clear()
+	open_market_active = false
+	open_market_phase = OpenMarketPhase.INACTIVE
 	village_construction_active = true
 	is_game_active = false
 	current_state = TurnState.GAME_OVER

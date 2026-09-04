@@ -28,6 +28,7 @@ var spectator_guess_submitted := false
 var spectator_guess_correct := false
 var spectator_bonus_score := 0
 var quiz_display_token: int = 0
+var submitted_choice := ""
 
 @onready var panel: Panel = $Panel
 @onready var title_label: Label = $Panel/TitleLabel
@@ -38,6 +39,12 @@ var quiz_display_token: int = 0
 @onready var choice_container: VBoxContainer = $Panel/ChoiceContainer
 @onready var explanation_label: Label = $Panel/ExplanationLabel
 var timer_bar: ProgressBar
+
+
+func _local_player_index() -> int:
+	if NetworkManager and NetworkManager.is_online:
+		return NetworkManager.get_local_player_index()
+	return 0
 
 
 func _ready() -> void:
@@ -81,12 +88,13 @@ func display_quiz(player_idx: int, quiz_data: Dictionary) -> void:
 	spectator_guess_submitted = false
 	spectator_guess_correct = false
 	spectator_bonus_score = 0
+	submitted_choice = ""
 	var player_is_ai := false
 	var player_name := "플레이어 %d" % (player_idx + 1)
 	if GameManager and player_idx >= 0 and player_idx < GameManager.players.size():
 		player_is_ai = GameManager.players[player_idx].get("is_ai", false)
 		player_name = GameManager.players[player_idx].get("name", player_name)
-	spectator_mode = player_idx != 0 or player_is_ai
+	spectator_mode = player_idx != _local_player_index() or player_is_ai
 	is_active = not spectator_mode
 
 	title_label.text = ("%s님의 문제 풀이" % player_name) if spectator_mode else "에코 에너지 퀴즈"
@@ -275,18 +283,22 @@ func _on_choice_pressed(choice: String) -> void:
 		return
 	if not is_active:
 		return
+	submitted_choice = choice
 	_reveal_selected_answer(choice)
 	var correct_answer := str(current_quiz.get("answer", ""))
 	_show_result(choice == correct_answer)
 
 
 func _can_submit_spectator_guess() -> bool:
+	var local_idx := _local_player_index()
 	return spectator_mode \
 		and not spectator_guess_submitted \
 		and GameManager != null \
-		and target_player_idx != 0 \
+		and local_idx >= 0 \
+		and target_player_idx != local_idx \
 		and GameManager.players.size() > 0 \
-		and not bool(GameManager.players[0].get("is_ai", false)) \
+		and local_idx < GameManager.players.size() \
+		and not bool(GameManager.players[local_idx].get("is_ai", false)) \
 		and GameManager.current_state == GameManager.TurnState.RESOLVING_QUIZ \
 		and GameManager.active_quiz_player_idx == target_player_idx
 
@@ -294,9 +306,18 @@ func _can_submit_spectator_guess() -> bool:
 func _on_spectator_choice_pressed(choice: String) -> void:
 	if not _can_submit_spectator_guess():
 		return
-	var result: Dictionary = GameManager.submit_spectator_quiz_guess(0, target_player_idx, choice)
-	if not bool(result.get("accepted", false)):
-		return
+	var result: Dictionary
+	if NetworkManager.is_online:
+		NetworkManager.request_spectator_guess(target_player_idx, choice)
+		result = {
+			"accepted": true,
+			"is_correct": choice == str(current_quiz.get("answer", "")),
+			"bonus_score": GameManager.SPECTATOR_QUIZ_BONUS_SCORE if choice == str(current_quiz.get("answer", "")) else 0
+		}
+	else:
+		result = GameManager.submit_spectator_quiz_guess(_local_player_index(), target_player_idx, choice)
+		if not bool(result.get("accepted", false)):
+			return
 	spectator_guess_submitted = true
 	spectator_guess_correct = bool(result.get("is_correct", false))
 	spectator_bonus_score = int(result.get("bonus_score", 0))
@@ -314,6 +335,7 @@ func _on_spectator_choice_pressed(choice: String) -> void:
 func _on_time_out() -> void:
 	if not is_active:
 		return
+	submitted_choice = ""
 	_show_result(false, "⏰ 시간 초과!")
 
 
@@ -356,7 +378,9 @@ func _show_result(is_correct: bool, prefix: String = "", should_submit_result: b
 		visible = false
 		if should_submit_result:
 			quiz_completed.emit(is_correct)
-			if GameManager:
+			if NetworkManager.is_online:
+				NetworkManager.request_quiz_answer(target_player_idx, submitted_choice)
+			elif GameManager:
 				GameManager.on_network_quiz_resolved(target_player_idx, is_correct)
 	)
 

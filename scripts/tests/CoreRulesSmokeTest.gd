@@ -3,6 +3,7 @@ extends SceneTree
 const BOARD_GRID = preload("res://scripts/board/BoardGrid.gd")
 const QUIZ_DATABASE_SCRIPT = preload("res://scripts/quiz/QuizDatabase.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
+const TILE_MARKER = preload("res://scripts/board/TileMarker3D.gd")
 const ENDING_CINEMATIC = preload("res://scripts/effects/EndingCinematic.gd")
 
 var failures: Array[String] = []
@@ -22,6 +23,7 @@ func _run_tests() -> void:
 	_test_special_skills()
 	await _test_ai_special_skills()
 	_test_personal_material_inventory()
+	_test_open_market_exchange()
 	_test_expanded_renewable_projects()
 	await _test_ai_village_construction()
 	_test_movement_end_rewards()
@@ -159,6 +161,14 @@ func _test_player_sprite_states() -> void:
 	pawn.set_shield_active(false)
 	_expect(not pawn.shield_visual.visible, "방패 소모 시 캐릭터 보호막이 즉시 사라져야 합니다.")
 	pawn.queue_free()
+	var marker = TILE_MARKER.new()
+	root.add_child(marker)
+	marker.setup_tile_3d(4)
+	marker.set_skill_targetable(true)
+	_expect(marker.skill_targetable and marker.target_ring.visible, "이동 특수기술로 갈 수 있는 타일에는 빛나는 선택 표시가 보여야 합니다.")
+	marker.set_skill_targetable(false)
+	_expect(not marker.skill_targetable and not marker.target_ring.visible, "특수기술 대상 지정이 끝나면 타일 선택 표시가 사라져야 합니다.")
+	marker.queue_free()
 
 func _test_quiz_tile_mapping() -> void:
 	var game_manager = _fresh_game()
@@ -231,6 +241,7 @@ func _test_special_skills() -> void:
 	game_manager.current_turn_idx = 0
 	game_manager.current_state = game_manager.TurnState.WAIT_ACTION
 	_expect(game_manager.get_player_special_skill(0).get("target_type") == "tile", "캡틴 에코는 타일 지정형 특수기술을 가져야 합니다.")
+	_expect(game_manager.get_valid_special_skill_targets(0) == [1, 2, 3, 4, 5], "자연의 돌진은 현재 위치에서 실제 이동 가능한 1~5번 타일만 안내해야 합니다.")
 	_expect(game_manager.use_special_skill(0, 4), "충분한 특수 에너지로 타일 지정 기술을 사용할 수 있어야 합니다.")
 	_expect(game_manager.players[0]["skill_energy"] == 0, "특수기술 사용 시 퀴즈 특수 에너지를 소모해야 합니다.")
 	_expect(game_manager.players[0]["position"] == 4 and game_manager.current_state == game_manager.TurnState.PLAYER_MOVING, "질주 기술은 지정한 앞쪽 타일로 이동해야 합니다.")
@@ -332,6 +343,34 @@ func _test_personal_material_inventory() -> void:
 	_expect(game_manager.collected_item_tiles.get(1, -1) == 0, "칸별 재료의 최초 획득 플레이어가 기록되어야 합니다.")
 	game_manager.stop_game()
 
+func _test_open_market_exchange() -> void:
+	var game_manager = _fresh_game()
+	game_manager.players[0]["inventory"]["solar_panel"] = 2
+	game_manager.players[1]["inventory"]["wind_blade"] = 1
+	game_manager._start_open_market_phase()
+	_expect(game_manager.open_market_active, "게임 종료 뒤 남은 부품이 있으면 오픈마켓이 시작되어야 합니다.")
+	_expect(game_manager.open_market_phase == game_manager.OpenMarketPhase.OFFERING, "오픈마켓은 비공개 출품 선택 단계부터 시작해야 합니다.")
+
+	_expect(game_manager.submit_open_market_offer(0, {"solar_panel": 2}), "플레이어가 보유한 부품을 출품할 수 있어야 합니다.")
+	_expect(game_manager.submit_open_market_offer(1, {"wind_blade": 1}), "다른 플레이어도 자신의 부품을 출품할 수 있어야 합니다.")
+	_expect(game_manager.submit_open_market_offer(2, {}), "부품을 출품하지 않는 선택도 완료 처리되어야 합니다.")
+	_expect(game_manager._open_market_stock_total() == 0, "전원이 결정하기 전에는 출품 부품이 마켓에 공개되면 안 됩니다.")
+	_expect(game_manager.players[0]["inventory"]["solar_panel"] == 2, "동시 공개 전에는 개인 인벤토리에서 부품을 차감하면 안 됩니다.")
+
+	_expect(game_manager.submit_open_market_offer(3, {}), "마지막 플레이어의 선택이 정상적으로 제출되어야 합니다.")
+	_expect(game_manager.open_market_phase == game_manager.OpenMarketPhase.TAKING, "전원이 결정하면 모든 출품 부품이 동시에 공개되어야 합니다.")
+	_expect(game_manager.open_market_stock["solar_panel"] == 2 and game_manager.open_market_stock["wind_blade"] == 1, "동시 공개된 오픈마켓 재고가 모든 출품 수량과 일치해야 합니다.")
+	_expect(game_manager.open_market_take_allowances[0] == 2 and game_manager.open_market_take_allowances[1] == 1, "가져갈 수 있는 수량은 각자 출품한 수량과 같아야 합니다.")
+
+	_expect(game_manager.take_open_market_item(0, "wind_blade"), "먼저 누른 플레이어가 마켓 부품을 획득해야 합니다.")
+	_expect(game_manager.take_open_market_item(0, "solar_panel"), "남은 허용 수량만큼 추가 부품을 획득할 수 있어야 합니다.")
+	_expect(not game_manager.take_open_market_item(0, "solar_panel"), "출품 수량을 초과해 마켓 부품을 가져갈 수 없어야 합니다.")
+	_expect(game_manager.take_open_market_item(1, "solar_panel"), "남아 있는 부품은 다음 요청 플레이어가 선착순으로 획득해야 합니다.")
+	_expect(not game_manager.open_market_active and game_manager.village_construction_active, "마켓 재고 소진 뒤에는 최종 마을 건설 단계로 이어져야 합니다.")
+	_expect(game_manager.players[0]["inventory"]["solar_panel"] == 1 and game_manager.players[0]["inventory"]["wind_blade"] == 1, "교환 결과가 첫 번째 플레이어의 개인 인벤토리에 반영되어야 합니다.")
+	_expect(game_manager.players[1]["inventory"]["solar_panel"] == 1 and game_manager.players[1]["inventory"]["wind_blade"] == 0, "교환 결과가 두 번째 플레이어의 개인 인벤토리에 반영되어야 합니다.")
+	game_manager.stop_game()
+
 func _test_expanded_renewable_projects() -> void:
 	var game_manager = _fresh_game()
 	_expect(game_manager.ITEM_DEFINITIONS.size() == 11, "게임판에서 획득할 수 있는 발전·생활 시설 건설 재료가 11종이어야 합니다.")
@@ -427,15 +466,21 @@ func _test_ending_cinematics() -> void:
 	var success_ending = ENDING_CINEMATIC.new()
 	success_ending.setup(true, 80, 70)
 	root.add_child(success_ending)
-	_expect(success_ending.is_success and success_ending.title_text == "왕국 복원 성공!", "복원 성공 시 성공 전용 엔딩 애니메이션이 준비되어야 합니다.")
-	_expect(success_ending.particles.size() == success_ending.PARTICLE_COUNT, "성공 엔딩에는 축하 에너지 입자 효과가 있어야 합니다.")
+	_expect(success_ending.is_success and success_ending.scenes.size() == 3 and success_ending.title_text == "마지막 에너지 연결", "복원 성공 시 3장 구성의 성공 시나리오가 준비되어야 합니다.")
+	for scene in success_ending.scenes:
+		_expect(ResourceLoader.exists(str(scene["image"])), "성공 엔딩의 ImageGen 장면 이미지가 존재해야 합니다.")
+	success_ending._process(success_ending.SCENE_DURATION + 0.1)
+	_expect(success_ending.scene_index == 1 and success_ending.title_text == "마을을 달리는 깨끗한 빛", "엔딩 시간이 지나면 다음 이미지 장면으로 자동 전환되어야 합니다.")
 	success_ending.queue_free()
 
 	var failure_ending = ENDING_CINEMATIC.new()
 	failure_ending.setup(false, 35, 70)
 	root.add_child(failure_ending)
-	_expect(not failure_ending.is_success and failure_ending.title_text == "에너지 연결이 부족해요", "복원 미달 시 실패 전용 엔딩 애니메이션이 준비되어야 합니다.")
-	_expect(failure_ending.subtitle_text.contains("다시 도전"), "실패 엔딩은 다음 도전을 안내해야 합니다.")
+	_expect(not failure_ending.is_success and failure_ending.scenes.size() == 3 and failure_ending.title_text == "아직 이어지지 않은 에너지 길", "복원 미달 시 3장 구성의 실패 시나리오가 준비되어야 합니다.")
+	for scene in failure_ending.scenes:
+		_expect(ResourceLoader.exists(str(scene["image"])), "실패 엔딩의 ImageGen 장면 이미지가 존재해야 합니다.")
+	failure_ending._show_scene(2, true)
+	_expect(failure_ending.subtitle_text.contains("또 다시 도전"), "실패 엔딩의 마지막 장면은 다음 도전을 안내해야 합니다.")
 	failure_ending.queue_free()
 
 func _test_movement_end_rewards() -> void:
@@ -473,6 +518,7 @@ func _test_hud_initialization() -> void:
 
 	hud.initialize_hud()
 	_expect(hud.player_panel_nodes.size() == 4, "HUD가 4명의 플레이어 패널을 생성해야 합니다.")
+	_expect(hud.open_market_panel != null, "게임 종료 뒤 사용할 오픈마켓 패널이 HUD에 생성되어야 합니다.")
 	_expect(hud.special_skill_target_panel.size.x >= 700.0 and hud.special_skill_target_panel.size.y <= 130.0, "특수기술 안내창은 높이가 낮은 가로형 배너여야 합니다.")
 	_expect(hud.special_skill_target_panel.position.y <= 110.0, "특수기술 안내창은 지도 중앙을 가리지 않도록 화면 상단에 배치되어야 합니다.")
 	_expect(not hud.get_node("MissionPanel").visible, "게임 화면의 왕국 복원 현황 패널은 표시되지 않아야 합니다.")
@@ -503,6 +549,17 @@ func _test_hud_initialization() -> void:
 	_expect(not hud.kingdom_health_bar.show_percentage, "왕국 완성도 바에는 숫자 퍼센트를 겹쳐 표시하지 않아야 합니다.")
 	for project in game_manager.CONSTRUCTION_PROJECTS:
 		_expect(ResourceLoader.exists(str(project.get("image", ""))), "모든 건설 프로젝트에 시설 이미지가 있어야 합니다: %s" % project.get("name", ""))
+	game_manager.players[0]["char_icon"] = "res://assets/characters/eco_roster/captain_eco.webp"
+	game_manager.players[0]["skill_energy"] = 3
+	game_manager.current_turn_idx = 0
+	game_manager.current_state = game_manager.TurnState.WAIT_ACTION
+	var highlighted_targets := {"tiles": []}
+	hud.special_skill_tile_targets_changed.connect(func(tile_indices: Array): highlighted_targets["tiles"] = tile_indices.duplicate())
+	hud._refresh_special_skill_button()
+	hud._on_special_skill_pressed()
+	_expect(highlighted_targets["tiles"] == [1, 2, 3, 4, 5], "이동 특수기술 버튼을 누르면 갈 수 있는 타일 목록이 게임판으로 전달되어야 합니다.")
+	hud._cancel_special_skill_targeting()
+	_expect(highlighted_targets["tiles"].is_empty(), "특수기술을 취소하면 게임판의 이동 가능 표시를 모두 지워야 합니다.")
 	game_manager.players[0]["char_icon"] = "res://assets/characters/eco_roster/water_popo.webp"
 	game_manager.players[0]["skill_energy"] = 3
 	game_manager.current_turn_idx = 0

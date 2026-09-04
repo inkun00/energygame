@@ -86,6 +86,8 @@ func _ready() -> void:
 	viewport_container.gui_input.connect(_on_board_gui_input)
 	if hud.has_signal("board_zoom_requested"):
 		hud.connect("board_zoom_requested", _zoom_board)
+	if hud.has_signal("special_skill_tile_targets_changed"):
+		hud.connect("special_skill_tile_targets_changed", _on_special_skill_tile_targets_changed)
 	
 	if GameManager:
 		GameManager.turn_changed.connect(_on_turn_changed)
@@ -410,6 +412,15 @@ func _set_hovered_tile(tile_index: int) -> void:
 	else:
 		viewport_container.mouse_default_cursor_shape = Control.CURSOR_ARROW
 
+func _on_special_skill_tile_targets_changed(tile_indices: Array) -> void:
+	for marker in tile_markers:
+		if is_instance_valid(marker):
+			marker.set_skill_targetable(false)
+	for tile_index_variant in tile_indices:
+		var tile_index := int(tile_index_variant)
+		if tile_index >= 0 and tile_index < tile_markers.size() and is_instance_valid(tile_markers[tile_index]):
+			tile_markers[tile_index].set_skill_targetable(true)
+
 func _activate_tile(tile_index: int) -> void:
 	if tile_index < 0 or tile_index >= tile_markers.size():
 		return
@@ -497,7 +508,9 @@ func start_board_game(player_configs: Array[Dictionary], duration_seconds: int =
 		hud.initialize_hud()
 		
 	get_tree().create_timer(0.4).timeout.connect(func():
-		GameManager.start_first_turn()
+		# 온라인 참가자는 방장이 전송하는 첫 턴 상태를 기다립니다.
+		if not NetworkManager.is_online or NetworkManager.is_host:
+			GameManager.start_first_turn()
 	)
 
 func _refresh_random_shortcut_visuals() -> void:

@@ -4,6 +4,7 @@ class_name HUDController
 ## HUDController: 인게임 4인 상태창, 중앙 주사위, 건설재료 현황 및 랭킹 모달 제어
 
 signal board_zoom_requested(direction: float)
+signal special_skill_tile_targets_changed(tile_indices: Array)
 
 const PLAYER_PANEL_TEXTURE: Texture2D = preload("res://assets/open_source/kenney_adventure/panel_grey_bolts_dark.webp")
 const VILLAGE_DRAG_CARD = preload("res://scripts/ui/ConstructionDragCard.gd")
@@ -68,6 +69,16 @@ var lap_reward_panel: PanelContainer
 var lap_reward_title_label: Label
 var lap_reward_remaining_label: Label
 var ending_cinematic: Control
+var open_market_dimmer: ColorRect
+var open_market_panel: PanelContainer
+var open_market_title_label: Label
+var open_market_timer_label: Label
+var open_market_status_label: Label
+var open_market_quota_label: Label
+var open_market_item_grid: GridContainer
+var open_market_confirm_button: Button
+var open_market_offer_selection: Dictionary = {}
+var _open_market_last_phase := -1
 
 const MATERIAL_SHORT_NAMES := {
 	"solar_panel": "태양광 패널",
@@ -82,6 +93,12 @@ const MATERIAL_SHORT_NAMES := {
 	"recycled_composite": "재생 복합소재",
 	"fast_charge_module": "충전 모듈"
 }
+
+
+func _local_player_index() -> int:
+	if NetworkManager and NetworkManager.is_online:
+		return NetworkManager.get_local_player_index()
+	return 0
 
 func _ready() -> void:
 	_apply_commercial_ui()
@@ -110,6 +127,7 @@ func _ready() -> void:
 		_apply_secondary_button_style(special_skill_button)
 	_create_special_skill_target_panel()
 	_create_lap_reward_panel()
+	_create_open_market_panel()
 	if help_button:
 		help_button.pressed.connect(_on_help_pressed)
 	if sound_button:
@@ -138,6 +156,7 @@ func _ready() -> void:
 		GameManager.game_time_changed.connect(_on_game_time_changed)
 		GameManager.lap_reward_requested.connect(_on_lap_reward_requested)
 		GameManager.lap_reward_completed.connect(_on_lap_reward_completed)
+		GameManager.open_market_state_changed.connect(_on_open_market_state_changed)
 
 func initialize_hud() -> void:
 	if is_instance_valid(ending_cinematic):
@@ -149,12 +168,15 @@ func initialize_hud() -> void:
 	_set_village_construction_controls(false)
 	event_banner.visible = false
 	_hide_lap_reward_panel()
+	_hide_open_market_panel()
 	_on_game_time_changed(ceili(GameManager.game_time_remaining), GameManager.game_duration_seconds)
 	dice_face.value = 1
 	dice_value_label.text = "클릭해서 굴리기"
 	_set_center_dice_visible(false, false)
 	_update_kingdom_mission(GameManager.projects_built, GameManager.CONSTRUCTION_PROJECTS.size(), GameManager.kingdom_health)
-	_update_inventory(0, GameManager.players[0].get("inventory", {}))
+	var local_idx := _local_player_index()
+	if local_idx >= 0 and local_idx < GameManager.players.size():
+		_update_inventory(local_idx, GameManager.players[local_idx].get("inventory", {}))
 	village_map.reset_map()
 	_update_kingdom_visual(GameManager.kingdom_health)
 	_refresh_built_project_images()
@@ -394,6 +416,8 @@ func _create_lap_reward_panel() -> void:
 func _on_lap_reward_requested(player_idx: int, rank: int, reward_count: int) -> void:
 	if player_idx < 0 or player_idx >= GameManager.players.size():
 		return
+	if player_idx != _local_player_index():
+		return
 	lap_reward_title_label.text = "🏁 %d등 완주 보상" % rank
 	lap_reward_remaining_label.text = "%s님, 원하는 발전소 부품을 고르세요  ·  남은 선택 %d개" % [GameManager.players[player_idx]["name"], reward_count]
 	lap_reward_dimmer.visible = true
@@ -407,6 +431,9 @@ func _on_lap_reward_item_pressed(item_id: String) -> void:
 		_hide_lap_reward_panel()
 		return
 	var player_idx := int(GameManager.pending_lap_reward.get("player_idx", -1))
+	if NetworkManager.is_online:
+		NetworkManager.request_lap_reward(player_idx, item_id)
+		return
 	if GameManager.claim_lap_reward(player_idx, item_id) and not GameManager.pending_lap_reward.is_empty():
 		lap_reward_remaining_label.text = "%s님, 원하는 발전소 부품을 고르세요  ·  남은 선택 %d개" % [GameManager.players[player_idx]["name"], int(GameManager.pending_lap_reward.get("remaining", 0))]
 
@@ -418,6 +445,203 @@ func _hide_lap_reward_panel() -> void:
 		lap_reward_dimmer.visible = false
 	if lap_reward_panel:
 		lap_reward_panel.visible = false
+
+
+func _create_open_market_panel() -> void:
+	if open_market_panel:
+		return
+	open_market_dimmer = ColorRect.new()
+	open_market_dimmer.name = "OpenMarketDimmer"
+	open_market_dimmer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	open_market_dimmer.color = Color(0.005, 0.025, 0.04, 0.86)
+	open_market_dimmer.mouse_filter = Control.MOUSE_FILTER_STOP
+	open_market_dimmer.z_index = 58
+	add_child(open_market_dimmer)
+
+	open_market_panel = PanelContainer.new()
+	open_market_panel.name = "OpenMarketPanel"
+	open_market_panel.set_anchors_preset(Control.PRESET_CENTER)
+	open_market_panel.offset_left = -560.0
+	open_market_panel.offset_top = -305.0
+	open_market_panel.offset_right = 560.0
+	open_market_panel.offset_bottom = 305.0
+	open_market_panel.z_index = 59
+	open_market_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	open_market_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("0b2833fa"), UI.TEAL, 20.0, 22))
+	add_child(open_market_panel)
+
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 9)
+	open_market_panel.add_child(content)
+	var header := HBoxContainer.new()
+	content.add_child(header)
+	open_market_title_label = Label.new()
+	open_market_title_label.text = "오픈마켓 · 비공개 선택"
+	open_market_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	open_market_title_label.add_theme_font_size_override("font_size", 28)
+	open_market_title_label.add_theme_color_override("font_color", UI.GOLD)
+	header.add_child(open_market_title_label)
+	open_market_timer_label = Label.new()
+	open_market_timer_label.custom_minimum_size = Vector2(135, 0)
+	open_market_timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	open_market_timer_label.add_theme_font_size_override("font_size", 24)
+	open_market_timer_label.add_theme_color_override("font_color", UI.GOLD)
+	header.add_child(open_market_timer_label)
+
+	open_market_status_label = Label.new()
+	open_market_status_label.custom_minimum_size = Vector2(0, 48)
+	open_market_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	open_market_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	open_market_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	open_market_status_label.add_theme_font_size_override("font_size", 17)
+	open_market_status_label.add_theme_color_override("font_color", UI.TEXT)
+	content.add_child(open_market_status_label)
+
+	open_market_quota_label = Label.new()
+	open_market_quota_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	open_market_quota_label.add_theme_font_size_override("font_size", 17)
+	open_market_quota_label.add_theme_color_override("font_color", Color("8fffe0"))
+	content.add_child(open_market_quota_label)
+
+	open_market_item_grid = GridContainer.new()
+	open_market_item_grid.columns = 4
+	open_market_item_grid.add_theme_constant_override("h_separation", 8)
+	open_market_item_grid.add_theme_constant_override("v_separation", 8)
+	content.add_child(open_market_item_grid)
+
+	open_market_confirm_button = Button.new()
+	open_market_confirm_button.custom_minimum_size = Vector2(0, 50)
+	open_market_confirm_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	open_market_confirm_button.pressed.connect(_on_open_market_offer_confirmed)
+	UI.apply_primary_button(open_market_confirm_button)
+	content.add_child(open_market_confirm_button)
+
+	var hint := Label.new()
+	hint.text = "판매 선택은 모두가 확정할 때까지 비공개입니다. 공개 후에는 서버에 먼저 도착한 요청부터 처리됩니다."
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 13)
+	hint.add_theme_color_override("font_color", UI.TEXT_MUTED)
+	content.add_child(hint)
+	_hide_open_market_panel()
+
+
+func _on_open_market_state_changed(state: Dictionary) -> void:
+	if not bool(state.get("active", false)):
+		_hide_open_market_panel()
+		return
+	_hide_lap_reward_panel()
+	_set_center_dice_visible(false, false)
+	if victory_modal:
+		victory_modal.visible = false
+	if victory_dimmer:
+		victory_dimmer.visible = false
+	open_market_dimmer.visible = true
+	open_market_panel.visible = true
+	var phase := int(state.get("phase", GameManager.OpenMarketPhase.INACTIVE))
+	if phase != _open_market_last_phase:
+		_open_market_last_phase = phase
+		if phase == GameManager.OpenMarketPhase.OFFERING:
+			open_market_offer_selection = GameManager._create_empty_inventory()
+	_refresh_open_market_panel(state)
+
+
+func _refresh_open_market_panel(state: Dictionary) -> void:
+	if not open_market_panel or not open_market_item_grid:
+		return
+	for child in open_market_item_grid.get_children():
+		open_market_item_grid.remove_child(child)
+		child.queue_free()
+	var local_idx := _local_player_index()
+	var phase := int(state.get("phase", GameManager.OpenMarketPhase.INACTIVE))
+	var remaining_seconds := int(state.get("time_remaining", 0))
+	open_market_timer_label.text = "%d초" % maxi(remaining_seconds, 0)
+	open_market_timer_label.add_theme_color_override("font_color", UI.DANGER if remaining_seconds <= 5 else UI.GOLD)
+	var submitted: Dictionary = state.get("submitted_players", {})
+	var local_submitted := submitted.has(local_idx)
+	var local_is_ai := local_idx >= 0 and local_idx < GameManager.players.size() and bool(GameManager.players[local_idx].get("is_ai", false))
+
+	if phase == GameManager.OpenMarketPhase.OFFERING:
+		open_market_title_label.text = "오픈마켓 · 비공개 판매 선택"
+		open_market_status_label.text = "내놓을 부품 수량을 고르세요. 모두 확정한 순간에만 시장에 동시에 공개됩니다."
+		open_market_quota_label.text = "결정 완료 %d / %d명%s" % [submitted.size(), int(state.get("player_count", GameManager.players.size())), " · 내 선택 확정됨" if local_submitted else ""]
+		var inventory: Dictionary = GameManager.players[local_idx].get("inventory", {}) if local_idx >= 0 and local_idx < GameManager.players.size() else {}
+		for item_id_variant in GameManager.ITEM_DEFINITIONS.keys():
+			var item_id := str(item_id_variant)
+			var owned := int(inventory.get(item_id, 0))
+			var selected := clampi(int(open_market_offer_selection.get(item_id, 0)), 0, owned)
+			open_market_offer_selection[item_id] = selected
+			var button := _create_open_market_item_button(item_id, "%s\n판매 %d / 보유 %d" % [GameManager.ITEM_DEFINITIONS[item_id]["name"], selected, owned])
+			button.disabled = local_submitted or local_is_ai or owned <= 0
+			button.tooltip_text = "누를 때마다 판매 수량이 1개씩 늘고, 최대 수량 다음에는 0개로 돌아갑니다."
+			button.pressed.connect(_on_open_market_offer_item_pressed.bind(item_id, owned))
+			open_market_item_grid.add_child(button)
+		var selected_total := _get_inventory_total(open_market_offer_selection)
+		open_market_confirm_button.visible = true
+		open_market_confirm_button.disabled = local_submitted or local_is_ai
+		open_market_confirm_button.text = "선택한 부품 %d개를 동시에 올리기" % selected_total if not local_submitted else "판매 선택 확정 · 다른 플레이어를 기다리는 중"
+	else:
+		open_market_title_label.text = "오픈마켓 · 선착순 부품 획득"
+		var allowances: Dictionary = state.get("allowances", {})
+		var taken_counts: Dictionary = state.get("taken_counts", {})
+		var allowance := int(allowances.get(local_idx, 0))
+		var taken := int(taken_counts.get(local_idx, 0))
+		var quota_remaining := maxi(0, allowance - taken)
+		open_market_status_label.text = "시장에 공개된 부품을 누르세요. 먼저 도착한 요청이 가져갑니다!"
+		open_market_quota_label.text = "내가 올린 부품 %d개 · 가져갈 수 있는 부품 %d개 남음" % [allowance, quota_remaining]
+		var stock: Dictionary = state.get("stock", {})
+		for item_id_variant in GameManager.ITEM_DEFINITIONS.keys():
+			var item_id := str(item_id_variant)
+			var amount := int(stock.get(item_id, 0))
+			var button := _create_open_market_item_button(item_id, "%s\n시장 재고 ×%d" % [GameManager.ITEM_DEFINITIONS[item_id]["name"], amount])
+			button.disabled = local_is_ai or quota_remaining <= 0 or amount <= 0
+			button.tooltip_text = "클릭하면 이 부품 1개를 선착순으로 가져옵니다."
+			button.pressed.connect(_on_open_market_take_item_pressed.bind(item_id))
+			open_market_item_grid.add_child(button)
+		open_market_confirm_button.visible = false
+
+
+func _create_open_market_item_button(item_id: String, label_text: String) -> Button:
+	var item_data: Dictionary = GameManager.ITEM_DEFINITIONS[item_id]
+	var button := Button.new()
+	button.custom_minimum_size = Vector2(252, 82)
+	button.text = label_text
+	button.icon = load(str(item_data["asset"]))
+	button.expand_icon = true
+	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	UI.apply_secondary_button(button, UI.TEAL)
+	return button
+
+
+func _on_open_market_offer_item_pressed(item_id: String, owned: int) -> void:
+	var selected := int(open_market_offer_selection.get(item_id, 0)) + 1
+	open_market_offer_selection[item_id] = 0 if selected > owned else selected
+	_refresh_open_market_panel(GameManager.get_open_market_state())
+
+
+func _on_open_market_offer_confirmed() -> void:
+	var local_idx := _local_player_index()
+	if NetworkManager.is_online:
+		NetworkManager.request_open_market_offer(local_idx, open_market_offer_selection)
+	else:
+		GameManager.submit_open_market_offer(local_idx, open_market_offer_selection)
+
+
+func _on_open_market_take_item_pressed(item_id: String) -> void:
+	var local_idx := _local_player_index()
+	if NetworkManager.is_online:
+		NetworkManager.request_open_market_take(local_idx, item_id)
+	else:
+		GameManager.take_open_market_item(local_idx, item_id)
+
+
+func _hide_open_market_panel() -> void:
+	if open_market_dimmer:
+		open_market_dimmer.visible = false
+	if open_market_panel:
+		open_market_panel.visible = false
+	_open_market_last_phase = -1
+	open_market_offer_selection.clear()
 
 func _on_game_time_changed(remaining_seconds: int, _total_seconds: int) -> void:
 	if not game_time_label:
@@ -433,34 +657,43 @@ func _refresh_special_skill_button() -> void:
 	if GameManager.players.is_empty():
 		special_skill_button.disabled = true
 		return
-	var local_player: Dictionary = GameManager.players[0]
-	var skill := GameManager.get_player_special_skill(0)
+	var local_idx := _local_player_index()
+	if local_idx < 0 or local_idx >= GameManager.players.size():
+		special_skill_button.disabled = true
+		return
+	var local_player: Dictionary = GameManager.players[local_idx]
+	var skill := GameManager.get_player_special_skill(local_idx)
 	var skill_energy := int(local_player.get("skill_energy", 0))
 	var cost := int(skill.get("cost", 0))
-	if GameManager.current_turn_idx == 0 and GameManager.special_skill_used_this_turn:
+	if GameManager.current_turn_idx == local_idx and GameManager.special_skill_used_this_turn:
 		special_skill_button.text = "%s\n이번 턴 사용 완료" % skill["name"]
 	else:
 		special_skill_button.text = "%s\nSP %d / %d" % [skill["name"], skill_energy, cost]
 	var target_label := "자신" if skill.get("target_type") == "self" else ("플레이어" if skill.get("target_type") == "player" else "게임판 타일")
 	special_skill_button.tooltip_text = "%s\n대상: %s · 퀴즈 특수 에너지 %d / %d" % [skill["description"], target_label, skill_energy, cost]
 	var local_is_human := not bool(local_player.get("is_ai", false))
-	special_skill_button.disabled = not local_is_human or not GameManager.can_use_special_skill(0)
+	special_skill_button.disabled = not local_is_human or not GameManager.can_use_special_skill(local_idx)
 
 func _on_special_skill_pressed() -> void:
-	if not GameManager.can_use_special_skill(0):
+	var local_idx := _local_player_index()
+	if not GameManager.can_use_special_skill(local_idx):
 		_show_event_banner("특수기술은 내 턴에, 퀴즈 정답으로 모은 특수 에너지가 충분할 때 사용할 수 있습니다.")
 		_refresh_special_skill_button()
 		return
-	active_special_skill_player_idx = 0
-	active_special_skill = GameManager.get_player_special_skill(0)
+	active_special_skill_player_idx = local_idx
+	active_special_skill = GameManager.get_player_special_skill(local_idx)
 	if active_special_skill.get("target_type") == "self":
-		_try_activate_special_skill(0)
+		_try_activate_special_skill(local_idx)
 		return
 	if special_skill_target_panel:
 		special_skill_title_label.text = "%s  ·  필요 SP %d" % [active_special_skill["name"], int(active_special_skill["cost"])]
 		special_skill_description_label.text = str(active_special_skill["description"])
 		if active_special_skill.get("target_type") == "player":
 			special_skill_target_hint_label.text = "상단의 플레이어 카드를 눌러 대상을 지정하세요."
+		elif active_special_skill.get("effect") == "move":
+			var valid_targets := GameManager.get_valid_special_skill_targets(active_special_skill_player_idx)
+			special_skill_target_hint_label.text = "게임판에서 밝게 표시된 타일을 선택하세요."
+			special_skill_tile_targets_changed.emit(valid_targets)
 		else:
 			special_skill_target_hint_label.text = "게임판의 타일을 눌러 대상을 지정하세요."
 		special_skill_target_panel.visible = true
@@ -480,11 +713,16 @@ func try_select_special_skill_tile(tile_index: int) -> bool:
 func _try_activate_special_skill(target_index: int) -> void:
 	if active_special_skill_player_idx < 0:
 		return
+	if NetworkManager.is_online:
+		NetworkManager.request_special_skill(active_special_skill_player_idx, target_index)
+		_cancel_special_skill_targeting()
+		return
 	if GameManager.use_special_skill(active_special_skill_player_idx, target_index):
 		_cancel_special_skill_targeting()
 		_refresh_special_skill_button()
 
 func _cancel_special_skill_targeting() -> void:
+	special_skill_tile_targets_changed.emit([])
 	active_special_skill_player_idx = -1
 	active_special_skill.clear()
 	if special_skill_target_panel:
@@ -497,7 +735,8 @@ func _refresh_primary_action_controls() -> void:
 	var action_ready := false
 	var is_local_turn := false
 	if GameManager and not GameManager.players.is_empty():
-		is_local_turn = GameManager.current_turn_idx == 0 and not bool(GameManager.players[0].get("is_ai", false))
+		var local_idx := _local_player_index()
+		is_local_turn = local_idx >= 0 and GameManager.current_turn_idx == local_idx and not bool(GameManager.players[local_idx].get("is_ai", false))
 		action_ready = is_local_turn and GameManager.current_state == GameManager.TurnState.WAIT_ACTION and active_special_skill_player_idx < 0
 	# 굴림 중에는 결과 연출이 끝날 때까지 중앙 주사위를 유지합니다.
 	if GameManager and GameManager.current_state == GameManager.TurnState.ROLLING_DICE:
@@ -507,7 +746,7 @@ func _refresh_primary_action_controls() -> void:
 
 
 func _on_special_skill_completed(player_idx: int) -> void:
-	if player_idx != 0:
+	if player_idx != _local_player_index():
 		return
 	_refresh_special_skill_button()
 	_refresh_primary_action_controls()
@@ -544,17 +783,20 @@ func _update_kingdom_mission(projects_built: int, total_projects: int, _health: 
 		kingdom_progress_bar.max_value = max(total_projects, 1)
 		kingdom_progress_bar.value = clampi(projects_built, 0, total_projects)
 	if kingdom_status_label:
-		var shown_player_idx := clampi(GameManager.current_turn_idx, 0, max(GameManager.players.size() - 1, 0))
+		var shown_player_idx := clampi(_local_player_index(), 0, max(GameManager.players.size() - 1, 0))
 		var material_total := _get_inventory_total(GameManager.players[shown_player_idx].get("inventory", {})) if not GameManager.players.is_empty() else 0
 		# 이 패널은 현재 플레이어의 개인 재료를 보여주므로, 마을 전체 공동 지수를
 		# 개인 능력치처럼 함께 표시하지 않습니다.
 		kingdom_status_label.text = "개인 재료 %d개  •  공동 건설 %d / %d" % [material_total, projects_built, total_projects]
 
 func _on_player_inventory_changed(player_idx: int, inventory: Dictionary) -> void:
-	if player_idx == GameManager.current_turn_idx or GameManager.village_construction_active:
+	var local_idx := _local_player_index()
+	if player_idx == local_idx:
 		_update_inventory(player_idx, inventory)
-	if player_idx == GameManager.current_turn_idx:
+	if player_idx == local_idx:
 		_update_kingdom_mission(GameManager.projects_built, GameManager.CONSTRUCTION_PROJECTS.size(), GameManager.kingdom_health)
+		if not GameManager.pending_lap_reward.is_empty() and int(GameManager.pending_lap_reward.get("player_idx", -1)) == local_idx and lap_reward_remaining_label:
+			lap_reward_remaining_label.text = "%s님, 원하는 발전소 부품을 고르세요  ·  남은 선택 %d개" % [GameManager.players[local_idx]["name"], int(GameManager.pending_lap_reward.get("remaining", 0))]
 	if GameManager.village_construction_active:
 		_refresh_construction_choices()
 
@@ -711,8 +953,9 @@ func _create_construction_guide() -> void:
 		recipe_card.tooltip_text = "%s · 필요 재료: %s · 건설 지형: %s" % [project["name"], ", ".join(tooltip_requirements), project.get("terrain_label", "지정 구역")]
 		guide_recipe_requirement_labels.append(requirement_labels)
 	_set_descendant_mouse_filter_ignore(construction_guide_panel)
-	var initial_inventory: Dictionary = GameManager.players[0].get("inventory", {}) if GameManager and not GameManager.players.is_empty() else {}
-	_refresh_construction_guide(0, initial_inventory)
+	var local_idx := _local_player_index()
+	var initial_inventory: Dictionary = GameManager.players[local_idx].get("inventory", {}) if GameManager and local_idx >= 0 and local_idx < GameManager.players.size() else {}
+	_refresh_construction_guide(local_idx, initial_inventory)
 
 
 func _refresh_construction_guide(player_idx: int, inventory: Dictionary) -> void:
@@ -800,9 +1043,11 @@ func _on_turn_changed(turn_idx: int) -> void:
 	_cancel_special_skill_targeting()
 	update_all_player_panels()
 	var cur_p = GameManager.players[turn_idx]
-	_update_inventory(turn_idx, cur_p.get("inventory", {}))
+	var local_idx := _local_player_index()
+	if local_idx >= 0 and local_idx < GameManager.players.size():
+		_update_inventory(local_idx, GameManager.players[local_idx].get("inventory", {}))
 	_update_kingdom_mission(GameManager.projects_built, GameManager.CONSTRUCTION_PROJECTS.size(), GameManager.kingdom_health)
-	var is_my_turn = (turn_idx == 0 and not cur_p["is_ai"])
+	var is_my_turn = (turn_idx == local_idx and not cur_p["is_ai"])
 	if turn_prompt_label:
 		if is_my_turn:
 			turn_prompt_label.text = "내 턴  •  중앙 주사위 또는 특수기술을 선택하세요"
@@ -814,12 +1059,16 @@ func _on_turn_changed(turn_idx: int) -> void:
 	_refresh_primary_action_controls()
 
 func _on_center_dice_pressed() -> void:
-	if not GameManager or GameManager.current_turn_idx != 0 or GameManager.current_state != GameManager.TurnState.WAIT_ACTION:
+	var local_idx := _local_player_index()
+	if not GameManager or GameManager.current_turn_idx != local_idx or GameManager.current_state != GameManager.TurnState.WAIT_ACTION:
 		return
 	_set_center_dice_visible(true, false)
 	if turn_prompt_label:
 		turn_prompt_label.text = "중앙 주사위가 회전합니다!"
-	GameManager.execute_roll_dice(0)
+	if NetworkManager.is_online:
+		NetworkManager.request_roll_dice(local_idx)
+	else:
+		GameManager.execute_roll_dice(local_idx)
 
 func _on_player_moved(_p_idx: int, _from_t: int, _to_t: int) -> void:
 	update_all_player_panels()
@@ -854,7 +1103,7 @@ func _on_dice_rolled(_p_idx: int, val: int) -> void:
 	dice_tween.tween_callback(_set_center_dice_visible.bind(false, false))
 
 func _on_dice_input_time_changed(player_idx: int, remaining_seconds: int) -> void:
-	if player_idx != 0 or not dice_value_label or not GameManager or GameManager.current_state != GameManager.TurnState.WAIT_ACTION:
+	if player_idx != _local_player_index() or not dice_value_label or not GameManager or GameManager.current_state != GameManager.TurnState.WAIT_ACTION:
 		return
 	dice_value_label.text = "클릭해서 굴리기  ·  %d초" % maxi(remaining_seconds, 0)
 	dice_value_label.add_theme_color_override("font_color", UI.DANGER if remaining_seconds <= 3 else UI.GOLD)
@@ -910,9 +1159,9 @@ func _play_ending_cinematic(is_success: bool, rankings: Array) -> void:
 		ending_cinematic.queue_free()
 	ending_cinematic = ENDING_CINEMATIC.new()
 	ending_cinematic.name = "EndingCinematic"
-	add_child(ending_cinematic)
 	ending_cinematic.setup(is_success, GameManager.kingdom_health, GameManager.VILLAGE_RECOVERY_TARGET)
 	ending_cinematic.animation_finished.connect(_show_game_over_results.bind(rankings.duplicate(true)), CONNECT_ONE_SHOT)
+	add_child(ending_cinematic)
 
 func _show_game_over_results(_rankings: Array) -> void:
 	ending_cinematic = null
@@ -962,6 +1211,8 @@ func _set_village_construction_controls(is_construction_phase: bool) -> void:
 		construction_list.visible = is_construction_phase
 	if evaluate_button:
 		evaluate_button.visible = is_construction_phase
+		evaluate_button.disabled = is_construction_phase and NetworkManager.is_online and not NetworkManager.is_host
+		evaluate_button.tooltip_text = "방장이 공동 마을의 완성도를 확인합니다." if evaluate_button.disabled else "현재 공동 마을의 완성도를 확인합니다."
 	if victory_rankings_label:
 		victory_rankings_label.visible = false
 	if rankings_container:
@@ -994,6 +1245,10 @@ func _refresh_construction_choices() -> void:
 		if not already_built:
 			builders = GameManager.get_project_builder_indices(project_index)
 		var builder_idx := builders[0] if not builders.is_empty() else -1
+		# 온라인에서는 각 화면에서 자기 개인 재료로만 건설을 요청할 수 있습니다.
+		if NetworkManager.is_online:
+			var local_idx := _local_player_index()
+			builder_idx = local_idx if local_idx in builders else -1
 		build_button.tooltip_text = "%s · 공동 친환경 지수 +%d · 적합 지형: %s · 마을 지도 위로 끌어 배치하세요." % [project["name"], int(project["health"]), project.get("terrain_label", "지정 구역")]
 		_apply_secondary_button_style(build_button)
 
@@ -1149,10 +1404,16 @@ func _refresh_ranking_cards(rankings: Array) -> void:
 		row.add_child(score_label)
 
 func _on_build_project_pressed(project_index: int, player_idx: int) -> void:
+	if NetworkManager.is_online:
+		NetworkManager.request_build_project(project_index, player_idx, Vector2(-1, -1))
+		return
 	if GameManager.build_village_project(project_index, player_idx):
 		_refresh_construction_choices()
 
 func _on_village_project_dropped(project_index: int, player_idx: int, map_position: Vector2) -> void:
+	if NetworkManager.is_online:
+		NetworkManager.request_build_project(project_index, player_idx, map_position)
+		return
 	if not GameManager.build_village_project(project_index, player_idx, map_position):
 		village_map.cancel_project_placement(project_index)
 		_show_event_banner("이 시설은 지금 배치할 수 없습니다. 개인 재료를 확인하세요.")
@@ -1161,6 +1422,12 @@ func _on_village_project_drop_rejected(message: String) -> void:
 	_show_event_banner("이 시설은 %s" % message)
 
 func _on_evaluate_village_pressed() -> void:
+	if NetworkManager.is_online:
+		if NetworkManager.is_host:
+			NetworkManager.request_evaluate_village()
+		else:
+			_show_event_banner("마을 완성도 확인은 방장이 진행합니다.")
+		return
 	GameManager.evaluate_village()
 
 func _on_save_village_pressed() -> void:

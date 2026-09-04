@@ -1,0 +1,8 @@
+name = "energygame-room-directory"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "energygame-room-directory"
+database_id = "baf8e5a6-6171-435a-952d-b1323f369aac"

@@ -9,6 +9,11 @@ class_name MainController
 func _ready() -> void:
 	if lobby_ui:
 		lobby_ui.start_game_requested.connect(_on_start_game_requested)
+	if NetworkManager:
+		if not NetworkManager.game_started_signal.is_connected(_on_network_game_started):
+			NetworkManager.game_started_signal.connect(_on_network_game_started)
+		if not NetworkManager.server_disconnected.is_connected(_on_network_server_disconnected):
+			NetworkManager.server_disconnected.connect(_on_network_server_disconnected)
 	switch_to_lobby()
 
 func switch_to_lobby() -> void:
@@ -24,6 +29,8 @@ func switch_to_lobby() -> void:
 		game_board.visible = false
 	if lobby_ui:
 		lobby_ui.visible = true
+		if lobby_ui.has_method("reset_network_controls"):
+			lobby_ui.reset_network_controls()
 
 func _on_start_game_requested(player_configs: Array[Dictionary], duration_seconds: int = GameManager.DEFAULT_GAME_DURATION_SECONDS) -> void:
 	if lobby_ui:
@@ -35,3 +42,18 @@ func _on_start_game_requested(player_configs: Array[Dictionary], duration_second
 			game_board.visible = true
 		if game_board.has_method("start_board_game"):
 			game_board.start_board_game(player_configs, duration_seconds)
+
+
+func _on_network_game_started(player_configs: Array[Dictionary], duration_seconds: int) -> void:
+	_on_start_game_requested(player_configs, duration_seconds)
+
+
+func _on_network_server_disconnected() -> void:
+	if GameManager:
+		GameManager.stop_game()
+	if game_board and game_board.has_method("stop_board_game"):
+		game_board.stop_board_game()
+	if lobby_ui:
+		lobby_ui.visible = true
+		if lobby_ui.has_method("reset_network_controls"):
+			lobby_ui.reset_network_controls("방장과의 연결이 끊어져 로비로 돌아왔습니다.")

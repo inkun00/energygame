@@ -89,6 +89,21 @@ func _ready() -> void:
 		opening_story.gui_input.connect(_on_opening_story_input)
 	if opening_skip_button:
 		opening_skip_button.pressed.connect(_skip_opening_story)
+	if NetworkManager:
+		if not NetworkManager.connection_succeeded.is_connected(_on_network_connection_succeeded):
+			NetworkManager.connection_succeeded.connect(_on_network_connection_succeeded)
+		if not NetworkManager.connection_failed.is_connected(_on_network_connection_failed):
+			NetworkManager.connection_failed.connect(_on_network_connection_failed)
+		if not NetworkManager.room_state_changed.is_connected(_on_room_state_changed):
+			NetworkManager.room_state_changed.connect(_on_room_state_changed)
+		if not NetworkManager.room_code_lookup_failed.is_connected(_on_room_code_lookup_failed):
+			NetworkManager.room_code_lookup_failed.connect(_on_room_code_lookup_failed)
+		if not NetworkManager.room_code_created.is_connected(_on_room_code_created):
+			NetworkManager.room_code_created.connect(_on_room_code_created)
+		if not NetworkManager.external_room_ready.is_connected(_on_external_room_ready):
+			NetworkManager.external_room_ready.connect(_on_external_room_ready)
+		if not NetworkManager.external_room_failed.is_connected(_on_external_room_failed):
+			NetworkManager.external_room_failed.connect(_on_external_room_failed)
 	_play_intro_animation()
 
 
@@ -196,7 +211,7 @@ func _select_character_from_button(index: int) -> void:
 func _setup_mode_selector() -> void:
 	mode_option_button.clear()
 	mode_option_button.add_item("싱글 플레이  •  AI가 빈 자리 자동 채움")
-	mode_option_button.add_item("온라인 모험  •  최대 4인")
+	mode_option_button.add_item("온라인 모험  •  플레이어 호스트 · 최대 4인")
 	mode_option_button.item_selected.connect(_on_mode_selected)
 
 func _setup_game_time_selector() -> void:
@@ -277,6 +292,8 @@ func _on_character_selected(idx: int) -> void:
 		var tween := create_tween()
 		tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		tween.tween_property(hero_portrait, "scale", Vector2.ONE, 0.28)
+	if NetworkManager and NetworkManager.is_online:
+		NetworkManager.update_local_player_info(_get_local_player_info())
 
 func _update_character_button_styles(selected_index: int) -> void:
 	for index in range(_character_buttons.size()):
@@ -291,9 +308,12 @@ func _update_character_button_styles(selected_index: int) -> void:
 
 func _on_mode_selected(idx: int) -> void:
 	var is_online_mode := idx == 1
+	if not is_online_mode and NetworkManager.is_online and not NetworkManager.game_has_started:
+		NetworkManager.disconnect_network()
+		reset_network_controls()
 	online_box.visible = is_online_mode
 	local_start_button.visible = not is_online_mode
-	status_label.text = "서버를 만들거나 IP 주소를 입력해 왕국 복원대와 합류하세요. 부족한 자리는 AI 동료로 채울 수 있습니다." if is_online_mode else "혼자 시작해도 AI 동료가 남은 3자리를 채워 4인 파티로 출발합니다."
+	status_label.text = _online_mode_hint() if is_online_mode else "혼자 시작해도 AI 동료가 남은 3자리를 채워 4인 파티로 출발합니다."
 
 func _on_local_start_pressed() -> void:
 	_commit_line_edit_ime(nickname_edit)
@@ -315,22 +335,125 @@ func _on_local_start_pressed() -> void:
 	_begin_opening_story(configs)
 
 func _on_host_pressed() -> void:
-	var error := NetworkManager.create_room()
+	if NetworkManager.is_online and NetworkManager.is_host:
+		_pending_game_duration_seconds = int(game_time_option_button.get_selected_metadata())
+		if NetworkManager.start_hosted_game(_pending_game_duration_seconds):
+			status_label.text = "참가자들과 게임을 시작합니다..."
+			host_button.disabled = true
+		else:
+			status_label.text = "이미 게임을 시작했거나 방을 시작할 수 없습니다."
+		return
+	var error := NetworkManager.create_room(NetworkManager.DEFAULT_PORT, _get_local_player_info())
 	if error == OK:
-		status_label.text = "방이 열렸습니다. 다른 히어로를 기다리는 중..."
-		_on_local_start_pressed()
+		ip_edit.text = NetworkManager.room_code
+		if NetworkManager.is_external_room_directory_configured():
+			status_label.text = "방 생성 완료 · 코드 %s · 외부 네트워크 연결을 준비하는 중..." % NetworkManager.room_code
+		else:
+			status_label.text = "방 생성 완료 · 코드 %s · 같은 네트워크에서 참가할 수 있습니다. 현재 1/4명" % NetworkManager.room_code
+		host_button.text = "게임 시작  •  빈 자리 AI 채움 ▶"
+		join_button.disabled = true
+		ip_edit.editable = false
 	else:
 		status_label.text = "방을 만들지 못했습니다. 포트 사용 상태를 확인하세요."
 
 func _on_join_pressed() -> void:
 	_commit_line_edit_ime(ip_edit)
-	var target_ip := ip_edit.text.strip_edges()
-	if target_ip.is_empty():
-		target_ip = "127.0.0.1"
-	status_label.text = "%s 서버에 연결하는 중..." % target_ip
-	var error := NetworkManager.join_room(target_ip)
+	var target_code := ip_edit.text.strip_edges()
+	if not NetworkManager.is_valid_room_code(target_code):
+		status_label.text = "방장이 알려준 숫자 6자리를 정확히 입력하세요."
+		return
+	status_label.text = "방 코드 %s를 찾는 중..." % target_code
+	var error := NetworkManager.join_room_by_code(target_code, _get_local_player_info())
 	if error != OK:
-		status_label.text = "서버에 연결하지 못했습니다. IP 주소를 확인하세요."
+		status_label.text = "방 코드 검색을 시작하지 못했습니다. 네트워크 상태를 확인하세요."
+	else:
+		host_button.disabled = true
+		join_button.disabled = true
+
+
+func _get_local_player_info() -> Dictionary:
+	_commit_line_edit_ime(nickname_edit)
+	var player_name := nickname_edit.text.strip_edges()
+	if player_name.is_empty():
+		player_name = "에코 히어로"
+	var selected_index := clampi(char_option_button.selected, 0, characters.size() - 1)
+	var character: Dictionary = characters[selected_index]
+	return {
+		"name": player_name,
+		"char_icon": character["icon"],
+		"char_color": character["color"]
+	}
+
+
+func _on_network_connection_succeeded() -> void:
+	status_label.text = "게임방 참가 완료 · 방장이 게임을 시작할 때까지 기다려 주세요."
+	char_option_button.disabled = true
+	nickname_edit.editable = false
+	ip_edit.editable = false
+
+
+func _on_network_connection_failed() -> void:
+	status_label.text = "게임방에 연결하지 못했습니다. 방 코드와 방장의 연결 상태를 확인하세요."
+	host_button.disabled = false
+	join_button.disabled = false
+	ip_edit.editable = true
+
+
+func _on_room_state_changed(players_data: Dictionary) -> void:
+	if not visible or not NetworkManager.is_online:
+		return
+	var names: Array[String] = []
+	for peer_id in players_data.keys():
+		var info: Dictionary = players_data[peer_id]
+		names.append(str(info.get("name", "플레이어")))
+	names.sort()
+	var roster := ", ".join(names)
+	if NetworkManager.is_host:
+		status_label.text = "방 코드 %s · %d/4명 [%s] · 준비되면 게임 시작을 누르세요." % [NetworkManager.room_code, players_data.size(), roster]
+		host_button.disabled = false
+	else:
+		status_label.text = "게임방 참가 · %d/4명 [%s] · 방장의 시작을 기다리는 중" % [players_data.size(), roster]
+
+
+func reset_network_controls(message: String = "") -> void:
+	host_button.text = "방 만들기"
+	host_button.disabled = false
+	join_button.disabled = false
+	nickname_edit.editable = true
+	char_option_button.disabled = false
+	ip_edit.editable = true
+	if not message.is_empty():
+		status_label.text = message
+	elif mode_option_button.selected == 1:
+		status_label.text = _online_mode_hint()
+
+
+func _on_room_code_lookup_failed(message: String) -> void:
+	status_label.text = message
+	host_button.disabled = false
+	join_button.disabled = false
+	ip_edit.editable = true
+
+
+func _on_room_code_created(code: String) -> void:
+	if NetworkManager.is_host:
+		ip_edit.text = code
+
+
+func _on_external_room_ready(code: String) -> void:
+	if visible and NetworkManager.is_host and not NetworkManager.game_has_started:
+		status_label.text = "외부 네트워크 접속 준비 완료 · 참가자에게 코드 %s 를 알려주세요." % code
+
+
+func _on_external_room_failed(message: String) -> void:
+	if visible and NetworkManager.is_host and not NetworkManager.game_has_started:
+		status_label.text = message
+
+
+func _online_mode_hint() -> String:
+	if NetworkManager.is_external_room_directory_configured():
+		return "방장이 만든 6자리 코드만 입력하면 다른 네트워크에서도 참가할 수 있습니다. 빈 자리는 AI가 채웁니다."
+	return "방장이 만든 6자리 코드를 같은 네트워크의 친구가 입력하면 자동으로 참가합니다. 빈 자리는 AI가 채웁니다."
 
 func _on_help_pressed() -> void:
 	status_label.text = "퀴즈로 발전소 자재를 모아 화력발전소를 재생에너지 발전소로 바꿔 보세요!"

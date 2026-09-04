@@ -544,7 +544,7 @@ theme_override_constants/separation = 7
 layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 0.85, 0.65, 1)
 theme_override_font_sizes/font_size = 17
-text = "서버 IP 주소"
+text = "6자리 방 코드"
 
 [node name="IPEdit" type="LineEdit" parent="MenuPanel/Content/OnlineBox"]
 custom_minimum_size = Vector2(0, 44)
@@ -553,8 +553,8 @@ theme_override_colors/font_color = Color(0.94, 1, 0.92, 1)
 theme_override_font_sizes/font_size = 20
 theme_override_styles/normal = SubResource("StyleInput")
 theme_override_styles/focus = SubResource("StyleInputFocus")
-text = "127.0.0.1"
-placeholder_text = "접속할 IP 주소"
+max_length = 6
+placeholder_text = "예: 482731"
 
 [node name="NetworkButtons" type="HBoxContainer" parent="MenuPanel/Content/OnlineBox"]
 layout_mode = 2

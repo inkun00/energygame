@@ -37,9 +37,19 @@ func _capture() -> void:
 	await create_timer(1.1).timeout
 	var image := root.get_texture().get_image()
 	var error := image.save_png("res://.godot/lobby_preview.png")
-	if error == OK:
-		print("[PASS] Lobby preview captured")
-		quit(0)
-	else:
+	if error != OK:
 		push_error("로비 미리보기 저장 실패: %s" % error)
 		quit(1)
+		return
+	lobby.mode_option_button.select(1)
+	lobby._on_mode_selected(1)
+	await process_frame
+	await create_timer(0.15).timeout
+	var multiplayer_image := root.get_texture().get_image()
+	var multiplayer_error := multiplayer_image.save_png("res://.godot/multiplayer_lobby_preview.png")
+	if multiplayer_error != OK:
+		push_error("멀티플레이 로비 미리보기 저장 실패: %s" % multiplayer_error)
+		quit(1)
+		return
+	print("[PASS] Single and 6-digit room-code lobby previews captured")
+	quit(0)
