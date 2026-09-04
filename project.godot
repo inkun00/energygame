@@ -37,7 +37,7 @@ window/stretch/mode="canvas_items"
 
 [gui]
 
-theme/custom_font="res://assets/fonts/NotoSansKR-Variable.ttf"
+theme/custom_font="res://assets/fonts/Pretendard-Medium.otf"
 
 [network]
 
