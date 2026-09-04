@@ -2,22 +2,22 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ci27j7oy0j4ko"
-path="res://.godot/imported/success_01_last_connection.png-89dbcde2a1c6beb90e07507acdeaf105.ctex"
+uid="uid://du07ytbdrytlw"
+path="res://.godot/imported/failure_01_incomplete_grid.webp-66a44fe6a3c2e7402631ea3f6f0010b6.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/story/ending/success_01_last_connection.png"
-dest_files=["res://.godot/imported/success_01_last_connection.png-89dbcde2a1c6beb90e07507acdeaf105.ctex"]
+source_file="res://assets/story/ending/failure_01_incomplete_grid.webp"
+dest_files=["res://.godot/imported/failure_01_incomplete_grid.webp-66a44fe6a3c2e7402631ea3f6f0010b6.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=1
 compress/high_quality=false
-compress/lossy_quality=0.7
+compress/lossy_quality=0.82
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

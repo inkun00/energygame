@@ -2,22 +2,22 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cwn2lvxq0j5hp"
-path="res://.godot/imported/success_03_restored_kingdom.png-f523370c5d73c6c285188993b85fc3b9.ctex"
+uid="uid://beewovfgqo8ix"
+path="res://.godot/imported/failure_03_new_plan.webp-83a381e675a39c899c38ccfe99e69846.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/story/ending/success_03_restored_kingdom.png"
-dest_files=["res://.godot/imported/success_03_restored_kingdom.png-f523370c5d73c6c285188993b85fc3b9.ctex"]
+source_file="res://assets/story/ending/failure_03_new_plan.webp"
+dest_files=["res://.godot/imported/failure_03_new_plan.webp-83a381e675a39c899c38ccfe99e69846.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=1
 compress/high_quality=false
-compress/lossy_quality=0.7
+compress/lossy_quality=0.82
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

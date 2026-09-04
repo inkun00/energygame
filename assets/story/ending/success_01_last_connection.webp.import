@@ -2,22 +2,22 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dd3aksv7xjftd"
-path="res://.godot/imported/failure_02_safe_night.png-56c48c057d367f489462e2d64cfd582f.ctex"
+uid="uid://bb33ng7vn5gkm"
+path="res://.godot/imported/success_01_last_connection.webp-6da8a4df025ac614e3ad529122908787.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/story/ending/failure_02_safe_night.png"
-dest_files=["res://.godot/imported/failure_02_safe_night.png-56c48c057d367f489462e2d64cfd582f.ctex"]
+source_file="res://assets/story/ending/success_01_last_connection.webp"
+dest_files=["res://.godot/imported/success_01_last_connection.webp-6da8a4df025ac614e3ad529122908787.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=1
 compress/high_quality=false
-compress/lossy_quality=0.7
+compress/lossy_quality=0.82
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

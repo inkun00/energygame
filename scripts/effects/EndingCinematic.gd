@@ -11,17 +11,17 @@ const DURATION := SCENE_DURATION * 3.0
 
 const SUCCESS_SCENES: Array[Dictionary] = [
 	{
-		"image": "res://assets/story/ending/success_01_last_connection.png",
+		"image": "res://assets/story/ending/success_01_last_connection.webp",
 		"title": "마지막 에너지 연결",
 		"caption": "탐험대는 마을의 마지막 에너지 연결 장치 앞에 섰습니다. 모두의 힘을 하나로 모을 시간입니다."
 	},
 	{
-		"image": "res://assets/story/ending/success_02_energy_wave.png",
+		"image": "res://assets/story/ending/success_02_energy_wave.webp",
 		"title": "마을을 달리는 깨끗한 빛",
 		"caption": "태양과 바람, 물의 에너지가 이어지며 밝은 빛이 요정마을 곳곳으로 퍼져 나갑니다."
 	},
 	{
-		"image": "res://assets/story/ending/success_03_restored_kingdom.png",
+		"image": "res://assets/story/ending/success_03_restored_kingdom.webp",
 		"title": "다시 빛나는 에너지 요정 왕국",
 		"caption": "모든 시설이 힘차게 움직이고 주민들의 웃음이 돌아왔습니다. 에너지요정왕국의 에너지 위기 탈출에 성공했습니다!"
 	}
@@ -29,17 +29,17 @@ const SUCCESS_SCENES: Array[Dictionary] = [
 
 const FAILURE_SCENES: Array[Dictionary] = [
 	{
-		"image": "res://assets/story/ending/failure_01_incomplete_grid.png",
+		"image": "res://assets/story/ending/failure_01_incomplete_grid.webp",
 		"title": "아직 이어지지 않은 에너지 길",
 		"caption": "몇몇 시설은 움직였지만 마을 전체를 밝히기에는 연결과 에너지가 조금 부족했습니다."
 	},
 	{
-		"image": "res://assets/story/ending/failure_02_safe_night.png",
+		"image": "res://assets/story/ending/failure_02_safe_night.webp",
 		"title": "어둠 속에서도 함께",
 		"caption": "탐험대는 작은 빛을 나누며 주민들을 안전하게 도왔습니다. 누구도 포기하지 않았습니다."
 	},
 	{
-		"image": "res://assets/story/ending/failure_03_new_plan.png",
+		"image": "res://assets/story/ending/failure_03_new_plan.webp",
 		"title": "다음 도전을 위한 약속",
 		"caption": "비가 그친 새벽, 탐험대는 남은 재료와 지도를 펼치고 에너지요정왕국의 회복을 위해 또 다시 도전할 계획입니다."
 	}
