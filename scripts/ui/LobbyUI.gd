@@ -48,6 +48,13 @@ var characters: Array[Dictionary] = [
 ]
 
 var _character_buttons: Array[Button] = []
+var _room_popup: Control
+var _room_cards: HBoxContainer
+var _room_code_label: Label
+var _room_count_label: Label
+var _room_status_label: Label
+var _room_start_button: Button
+var _room_browser: Control
 
 var _hero_base_y := 178.0
 var _intro_finished := false
@@ -78,6 +85,11 @@ func _ready() -> void:
 	_setup_mode_selector()
 	_setup_game_time_selector()
 	_connect_actions()
+	_build_room_popup()
+	_room_browser = preload("res://scripts/ui/RoomBrowser.gd").new()
+	add_child(_room_browser)
+	_room_browser.create_requested.connect(_create_configured_room)
+	_room_browser.join_requested.connect(_join_listed_room)
 	char_option_button.select(0)
 	_on_character_selected(0)
 	_on_mode_selected(0)
@@ -169,6 +181,8 @@ func _apply_commercial_ui() -> void:
 		UI.apply_secondary_button(opening_skip_button, UI.GOLD)
 
 func _process(_delta: float) -> void:
+	if _room_popup and _room_popup.visible:
+		_room_status_label.text = status_label.text
 	if not _intro_finished or not is_instance_valid(hero_portrait):
 		return
 	var time := Time.get_ticks_msec() / 1000.0
@@ -314,6 +328,8 @@ func _on_mode_selected(idx: int) -> void:
 	online_box.visible = is_online_mode
 	local_start_button.visible = not is_online_mode
 	status_label.text = _online_mode_hint() if is_online_mode else "혼자 시작해도 AI 동료가 남은 3자리를 채워 4인 파티로 출발합니다."
+	if is_online_mode and _room_browser:
+		_room_browser.open_browser()
 
 func _on_local_start_pressed() -> void:
 	_commit_line_edit_ime(nickname_edit)
@@ -343,7 +359,11 @@ func _on_host_pressed() -> void:
 		else:
 			status_label.text = "이미 게임을 시작했거나 방을 시작할 수 없습니다."
 		return
-	var error := NetworkManager.create_room(NetworkManager.DEFAULT_PORT, _get_local_player_info())
+	_room_browser.open_browser()
+
+
+func _create_configured_room(settings: Dictionary) -> void:
+	var error := NetworkManager.create_room(NetworkManager.DEFAULT_PORT, _get_local_player_info(), settings)
 	if error == OK:
 		ip_edit.text = NetworkManager.room_code
 		if NetworkManager.is_external_room_directory_configured():
@@ -353,8 +373,17 @@ func _on_host_pressed() -> void:
 		host_button.text = "게임 시작  •  빈 자리 AI 채움 ▶"
 		join_button.disabled = true
 		ip_edit.editable = false
+		_show_room_popup(NetworkManager.connected_players)
 	else:
 		status_label.text = "방을 만들지 못했습니다. 포트 사용 상태를 확인하세요."
+		_room_browser.show_error(status_label.text)
+
+
+func _join_listed_room(code: String, password: String) -> void:
+	ip_edit.text = code
+	var error := NetworkManager.join_room_by_code(code, _get_local_player_info(), password)
+	if error != OK:
+		_room_browser.show_error("방에 참가하지 못했습니다. 네트워크 상태를 확인하세요.")
 
 func _on_join_pressed() -> void:
 	_commit_line_edit_ime(ip_edit)
@@ -362,13 +391,8 @@ func _on_join_pressed() -> void:
 	if not NetworkManager.is_valid_room_code(target_code):
 		status_label.text = "방장이 알려준 숫자 6자리를 정확히 입력하세요."
 		return
-	status_label.text = "방 코드 %s를 찾는 중..." % target_code
-	var error := NetworkManager.join_room_by_code(target_code, _get_local_player_info())
-	if error != OK:
-		status_label.text = "방 코드 검색을 시작하지 못했습니다. 네트워크 상태를 확인하세요."
-	else:
-		host_button.disabled = true
-		join_button.disabled = true
+	_room_browser.open_browser()
+	_room_browser.prompt_code_join(target_code)
 
 
 func _get_local_player_info() -> Dictionary:
@@ -390,33 +414,37 @@ func _on_network_connection_succeeded() -> void:
 	char_option_button.disabled = true
 	nickname_edit.editable = false
 	ip_edit.editable = false
+	_show_room_popup(NetworkManager.connected_players)
 
 
 func _on_network_connection_failed() -> void:
+	reset_network_controls()
 	status_label.text = "게임방에 연결하지 못했습니다. 방 코드와 방장의 연결 상태를 확인하세요."
 	host_button.disabled = false
 	join_button.disabled = false
 	ip_edit.editable = true
+	_room_browser.show_error(status_label.text)
 
 
 func _on_room_state_changed(players_data: Dictionary) -> void:
 	if not visible or not NetworkManager.is_online:
 		return
-	var names: Array[String] = []
-	for peer_id in players_data.keys():
-		var info: Dictionary = players_data[peer_id]
-		names.append(str(info.get("name", "플레이어")))
-	names.sort()
-	var roster := ", ".join(names)
+	_show_room_popup(players_data)
 	if NetworkManager.is_host:
-		status_label.text = "방 코드 %s · %d/4명 [%s] · 준비되면 게임 시작을 누르세요." % [NetworkManager.room_code, players_data.size(), roster]
+		status_label.text = "모두 모이면 게임 시작을 누르세요. 선택한 플레이 시간은 %d분입니다." % (int(game_time_option_button.get_selected_metadata()) / 60)
 		host_button.disabled = false
 	else:
-		status_label.text = "게임방 참가 · %d/4명 [%s] · 방장의 시작을 기다리는 중" % [players_data.size(), roster]
+		status_label.text = "게임방에 참가했습니다. 방장이 모험을 시작할 때까지 기다려 주세요."
 
 
 func reset_network_controls(message: String = "") -> void:
-	host_button.text = "방 만들기"
+	if _room_popup:
+		_room_popup.hide()
+	mode_option_button.disabled = false
+	game_time_option_button.disabled = false
+	if _room_browser:
+		_room_browser.set_busy(false)
+	host_button.text = "방 목록 / 만들기"
 	host_button.disabled = false
 	join_button.disabled = false
 	nickname_edit.editable = true
@@ -433,11 +461,14 @@ func _on_room_code_lookup_failed(message: String) -> void:
 	host_button.disabled = false
 	join_button.disabled = false
 	ip_edit.editable = true
+	_room_browser.show_error(message)
 
 
 func _on_room_code_created(code: String) -> void:
 	if NetworkManager.is_host:
 		ip_edit.text = code
+		if _room_code_label:
+			_room_code_label.text = "방 코드  %s" % code
 
 
 func _on_external_room_ready(code: String) -> void:
@@ -446,8 +477,155 @@ func _on_external_room_ready(code: String) -> void:
 
 
 func _on_external_room_failed(message: String) -> void:
-	if visible and NetworkManager.is_host and not NetworkManager.game_has_started:
-		status_label.text = message
+	if not visible or NetworkManager.game_has_started:
+		return
+	status_label.text = message
+	if not NetworkManager.is_online:
+		reset_network_controls(message)
+		_room_browser.open_browser()
+		_room_browser.show_error(message)
+		host_button.disabled = false
+		join_button.disabled = false
+		join_button.visible = true
+		host_button.text = "멀티 방 만들기  •  코드 자동 생성 ▶"
+		char_option_button.disabled = false
+		nickname_edit.editable = true
+		ip_edit.editable = true
+
+
+func _build_room_popup() -> void:
+	_room_popup = Control.new()
+	_room_popup.name = "OnlineRoomPopup"
+	_room_popup.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_room_popup.z_index = 50
+	add_child(_room_popup)
+	var dim := ColorRect.new()
+	dim.color = Color(0.01, 0.04, 0.06, 0.86)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_room_popup.add_child(dim)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_room_popup.add_child(center)
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(1080, 570)
+	panel.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL, UI.TEAL_DARK, 28, 20))
+	center.add_child(panel)
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 16)
+	panel.add_child(content)
+	var header := HBoxContainer.new()
+	content.add_child(header)
+	var title := _room_label("온라인 모험 · 대기실", 30, UI.TEXT)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	_room_count_label = _room_label("1 / 4명", 23, UI.TEAL)
+	header.add_child(_room_count_label)
+	_room_code_label = _room_label("방 코드", 34, UI.GOLD)
+	content.add_child(_room_code_label)
+	content.add_child(_room_label("친구에게 6자리 코드를 알려주고 함께 모험을 준비하세요.", 18, UI.TEXT_MUTED))
+	_room_cards = HBoxContainer.new()
+	_room_cards.add_theme_constant_override("separation", 14)
+	content.add_child(_room_cards)
+	_room_status_label = _room_label("", 18, UI.TEXT_MUTED)
+	_room_status_label.custom_minimum_size.y = 50
+	_room_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_room_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_child(_room_status_label)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 16)
+	content.add_child(actions)
+	var leave := Button.new()
+	leave.text = "방 나가기"
+	leave.custom_minimum_size = Vector2(190, 52)
+	UI.apply_secondary_button(leave)
+	leave.pressed.connect(_leave_room_popup)
+	actions.add_child(leave)
+	_room_start_button = Button.new()
+	_room_start_button.custom_minimum_size.y = 52
+	_room_start_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UI.apply_primary_button(_room_start_button)
+	_room_start_button.pressed.connect(_on_host_pressed)
+	actions.add_child(_room_start_button)
+	_room_popup.hide()
+
+
+func _room_label(text: String, font_size: int, color: Color) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", color)
+	return label
+
+
+func _show_room_popup(players_data: Dictionary) -> void:
+	if NetworkManager.game_has_started:
+		return
+	if _room_browser:
+		_room_browser.hide()
+		_room_browser.set_busy(false)
+	_room_popup.show()
+	_room_popup.move_to_front()
+	nickname_edit.editable = false
+	char_option_button.disabled = true
+	mode_option_button.disabled = true
+	game_time_option_button.disabled = true
+	_room_code_label.text = "%s  ·  %s" % [NetworkManager.room_code, NetworkManager.room_title]
+	_room_code_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_room_count_label.text = "%d / %d명" % [players_data.size(), NetworkManager.room_capacity]
+	_room_start_button.disabled = not NetworkManager.is_host
+	_room_start_button.text = "게임 시작 · 빈 자리는 AI가 채워요 ▶" if NetworkManager.is_host else "방장이 게임을 시작할 때까지 기다려 주세요"
+	for child in _room_cards.get_children():
+		_room_cards.remove_child(child)
+		child.queue_free()
+	var peer_ids := players_data.keys()
+	peer_ids.sort()
+	for slot in range(NetworkManager.room_capacity):
+		var occupied := slot < peer_ids.size()
+		var peer_id := int(peer_ids[slot]) if occupied else 0
+		var info: Dictionary = players_data[peer_ids[slot]] if occupied else {}
+		var character: Dictionary = {}
+		for candidate in characters:
+			if str(candidate["icon"]) == str(info.get("char_icon", "")):
+				character = candidate
+				break
+		var accent: Color = character.get("color", UI.TEAL_DARK)
+		var card := PanelContainer.new()
+		card.custom_minimum_size = Vector2(0, 265)
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL_RAISED if occupied else UI.INK, accent if occupied else Color("31515c"), 14, 12))
+		_room_cards.add_child(card)
+		var column := VBoxContainer.new()
+		column.add_theme_constant_override("separation", 8)
+		card.add_child(column)
+		var tag := "방장" if peer_id == 1 else "참가자"
+		if peer_id == NetworkManager.my_peer_id:
+			tag += " · 나"
+		var badge := _room_label(tag if occupied else "빈 자리", 16, accent if occupied else UI.TEXT_MUTED)
+		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		column.add_child(badge)
+		var portrait := TextureRect.new()
+		portrait.custom_minimum_size.y = 140
+		portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		if not character.is_empty():
+			portrait.texture = load(str(character["icon"]))
+		column.add_child(portrait)
+		var nickname := _room_label(str(info.get("name", "플레이어")) if occupied else "친구를 기다리는 중", 22, UI.TEXT if occupied else UI.TEXT_MUTED)
+		nickname.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		nickname.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		nickname.tooltip_text = nickname.text
+		column.add_child(nickname)
+		var character_name := _room_label(str(character.get("name", "에코 히어로")) if occupied else "시작하면 AI가 참가해요", 16, UI.TEXT_MUTED)
+		character_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		character_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		column.add_child(character_name)
+
+
+func _leave_room_popup() -> void:
+	NetworkManager.disconnect_network()
+	reset_network_controls("방에서 나왔습니다. 새 방을 만들거나 다른 방에 참가하세요.")
+	ip_edit.text = ""
+	_room_browser.open_browser()
 
 
 func _online_mode_hint() -> String:

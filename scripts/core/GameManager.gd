@@ -221,7 +221,8 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 		{"name": "태양 여우 솔", "icon": "res://assets/characters/eco_roster/solar_fox_sol.webp", "color": Color(1.0, 0.58, 0.12)}
 	]
 	
-	for i in range(MAX_PLAYER_COUNT):
+	var party_size: int = NetworkManager.room_capacity if NetworkManager.is_online else MAX_PLAYER_COUNT
+	for i in range(party_size):
 		var p_info: Dictionary = {}
 		if i < player_configs.size():
 			p_info = player_configs[i]

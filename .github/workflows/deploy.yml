@@ -28,7 +28,7 @@ jobs:
       - name: Setup Godot 4
         uses: chickensoft-games/setup-godot@v1
         with:
-          version: 4.3.0
+          version: 4.7.2
           use-dotnet: false
           include-templates: true
 
@@ -36,7 +36,9 @@ jobs:
         run: mkdir -p build/web
 
       - name: Export Godot Project to Web (HTML5)
-        run: godot --headless --export-release "Web" build/web/index.html
+        run: |
+          godot --headless --editor --import
+          godot --headless --export-release "Web" build/web/index.html
 
       - name: Setup Cross-Origin Isolation (coi-serviceworker)
         run: |

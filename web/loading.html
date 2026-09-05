@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#071e25">
+<title>그린 킹덤 리빌드</title>
+$GODOT_HEAD_INCLUDE
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#071e25;color:#edf9ed;font-family:"Malgun Gothic",Arial,sans-serif}#canvas{display:block;margin:0;outline:0}#loading{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:28px;background:radial-gradient(ellipse at 50% 40%,#174c45 0%,#092d32 42%,#061820 100%)}.content{text-align:center;width:min(540px,100%)}.eyebrow{font-size:12px;letter-spacing:4px;color:#9dd9bf}.emblem{width:110px;height:110px;margin:26px auto;filter:drop-shadow(0 0 30px #74e8aa55);animation:breathe 2.5s ease-in-out infinite}h1{font-size:clamp(28px,6vw,44px);letter-spacing:-2px;color:#ffe08b;margin:20px 0 10px}p{color:#b9d8d0;font-size:15px;line-height:1.8}.track{margin-top:36px}progress{appearance:none;width:100%;height:12px;border:0;border-radius:20px;overflow:hidden;background:#ffffff15}progress::-webkit-progress-bar{background:#ffffff15;border-radius:20px}progress::-webkit-progress-value{background:linear-gradient(90deg,#44cba0,#e7ec89);border-radius:20px}progress::-moz-progress-bar{background:#72dcab;border-radius:20px}.status{display:flex;justify-content:space-between;font-size:13px;color:#b9d8d0;margin-top:12px;gap:12px}.tip{margin-top:42px;font-size:13px;color:#88b5a9}#retry{border:1px solid #ffe08b;background:#ffe08b;color:#102a2c;padding:12px 26px;border-radius:10px;font:inherit;cursor:pointer;margin-top:20px}#error{color:#ffd2c9;white-space:pre-line}#loading.done{opacity:0;pointer-events:none;transition:opacity .3s}@keyframes breathe{50%{transform:translateY(-6px);filter:drop-shadow(0 0 40px #74e8aa88)}}@media(prefers-reduced-motion:reduce){.emblem{animation:none}#loading.done{transition:none}}
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="0">이 브라우저는 게임 화면을 지원하지 않습니다.</canvas>
+<section id="loading" aria-label="게임 로딩">
+  <div class="content">
+    <div class="eyebrow">GREEN KINGDOM REBUILD</div>
+    <svg class="emblem" viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="55" fill="#143f3b" stroke="#78d8a7" stroke-width="1"/><path d="M32 81C19 41 54 23 92 28C96 68 72 98 40 84Z" fill="#85d99a"/><path d="M30 95L78 42M45 77L43 52M58 64L80 63" fill="none" stroke="#174b41" stroke-width="5" stroke-linecap="round"/></svg>
+    <h1>그린 킹덤 리빌드</h1>
+    <p>우리의 에너지로 다시 초록빛 왕국을!</p>
+    <div class="track"><progress id="progress" max="100" value="0" aria-label="게임 다운로드 진행률"></progress></div>
+    <div class="status" role="status"><span id="stage">모험을 준비하고 있어요</span><span id="percent">0%</span></div>
+    <p class="tip">퀴즈를 풀고, 재료를 모아 친환경 왕국을 복원하세요.</p>
+    <p id="error" role="alert" hidden></p>
+    <button id="retry" hidden onclick="location.reload()">다시 불러오기</button>
+    <noscript><p>게임을 실행하려면 브라우저에서 JavaScript를 켜 주세요.</p></noscript>
+  </div>
+</section>
+<script>
+window.energyGameReady = function () {
+  const overlay = document.getElementById('loading');
+  if (!overlay) return;
+  overlay.classList.add('done');
+  setTimeout(() => overlay.remove(), 320);
+};
+</script>
+<script src="$GODOT_URL"></script>
+<script>
+(() => {
+  const progress = document.getElementById('progress');
+  const percent = document.getElementById('percent');
+  const stage = document.getElementById('stage');
+  function fail(error) {
+    console.error(error);
+    stage.textContent = '게임을 불러오지 못했어요';
+    const notice = document.getElementById('error');
+    notice.textContent = '인터넷 연결을 확인하고 다시 불러오기를 눌러 주세요.\n계속 실패하면 최신 Chrome 또는 Edge에서 실행해 주세요.';
+    notice.hidden = false;
+    document.getElementById('retry').hidden = false;
+  }
+  if (typeof Engine === 'undefined') { fail('Engine download failed'); return; }
+  const config = $GODOT_CONFIG;
+  const missing = Engine.getMissingFeatures({threads: $GODOT_THREADS_ENABLED});
+  if (missing.length) { fail(missing.join(', ')); return; }
+  const engine = new Engine(config);
+  engine.startGame({onProgress(current, total) {
+    if (total > 0) {
+      const value = Math.min(100, Math.floor(current / total * 100));
+      progress.value = value;
+      percent.textContent = value + '%';
+      stage.textContent = value < 100 ? '왕국의 에너지를 모으는 중...' : '모험 화면을 준비하는 중...';
+    } else {
+      progress.removeAttribute('value');
+      percent.textContent = '';
+    }
+  }}).catch(fail);
+})();
+</script>
+</body>
+</html>

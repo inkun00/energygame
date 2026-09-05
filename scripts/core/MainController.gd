@@ -15,6 +15,13 @@ func _ready() -> void:
 		if not NetworkManager.server_disconnected.is_connected(_on_network_server_disconnected):
 			NetworkManager.server_disconnected.connect(_on_network_server_disconnected)
 	switch_to_lobby()
+	if OS.has_feature("web"):
+		_finish_web_loading.call_deferred()
+
+
+func _finish_web_loading() -> void:
+	await RenderingServer.frame_post_draw
+	JavaScriptBridge.eval("if (window.energyGameReady) window.energyGameReady();")
 
 func switch_to_lobby() -> void:
 	if GameManager and GameManager.is_game_active:

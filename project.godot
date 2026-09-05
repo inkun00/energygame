@@ -19,7 +19,8 @@ config/description="퀴즈와 협동 건설로 재생에너지 왕국을 복원�
 config/version="1.0.0"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
-boot_splash/bg_color=Color(0.12, 0.16, 0.22, 1)
+boot_splash/bg_color=Color(0.027, 0.118, 0.145, 1)
+boot_splash/show_image=false
 config/icon="res://assets/images/card_back_mascot.webp"
 
 [autoload]
