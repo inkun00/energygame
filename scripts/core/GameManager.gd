@@ -51,6 +51,8 @@ const OPEN_MARKET_TAKE_SECONDS := 20.0
 const OPEN_MARKET_AI_ACTION_SECONDS := 0.55
 # AI가 문제를 읽고 답을 고르는 시간을 기존 3.9초보다 5초 늘렸습니다.
 const AI_QUIZ_THINK_SECONDS := 8.9
+const AI_WAIT_ACTION_RECOVERY_SECONDS := 4.0
+const AI_QUIZ_RECOVERY_GRACE_SECONDS := 2.0
 const MAX_PLAYER_COUNT := 4
 const DEFAULT_GAME_DURATION_SECONDS := 600
 const MIN_GAME_DURATION_SECONDS := 60
@@ -144,6 +146,8 @@ var open_market_taken_counts: Dictionary = {}
 var _open_market_offers: Dictionary = {}
 var _last_open_market_time_seconds := -1
 var _open_market_ai_action_remaining := 0.0
+var _progress_watch_signature := ""
+var _progress_watch_elapsed := 0.0
 
 func _ready() -> void:
 	set_process(true)
@@ -153,6 +157,7 @@ func _process(delta: float) -> void:
 	# 참가자는 방장이 전송한 상태를 표시하므로 프레임 차이로 게임이 갈라지지 않습니다.
 	if NetworkManager.is_online and not NetworkManager.is_host:
 		return
+	_update_ai_progress_watchdog(delta)
 	if open_market_active:
 		_update_open_market(delta)
 		return
@@ -192,6 +197,8 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 	_open_market_offers.clear()
 	_last_open_market_time_seconds = -1
 	_open_market_ai_action_remaining = 0.0
+	_progress_watch_signature = ""
+	_progress_watch_elapsed = 0.0
 	built_project_ids.clear()
 	built_project_placements.clear()
 	built_project_owners.clear()
@@ -410,6 +417,40 @@ func _update_player_dice_input_timer(delta: float) -> void:
 	if dice_input_time_remaining <= 0.0:
 		status_message_posted.emit("⏱️ [%s] 주사위 선택 시간이 20초를 넘어 자동으로 굴립니다!" % players[player_idx]["name"])
 		execute_roll_dice(player_idx)
+
+func _update_ai_progress_watchdog(delta: float) -> void:
+	var cannot_advance := (
+		not is_game_active
+		or open_market_active
+		or village_construction_active
+		or not pending_lap_reward.is_empty()
+		or players.is_empty()
+		or current_turn_idx < 0
+		or current_turn_idx >= players.size()
+	)
+	if cannot_advance:
+		_progress_watch_signature = ""
+		_progress_watch_elapsed = 0.0
+		return
+	var player_idx := current_turn_idx
+	var is_current_ai := bool(players[player_idx].get("is_ai", false))
+	var watched_state := current_state == TurnState.WAIT_ACTION or current_state == TurnState.RESOLVING_QUIZ
+	if not is_current_ai or not watched_state:
+		_progress_watch_signature = ""
+		_progress_watch_elapsed = 0.0
+		return
+	var signature := "%d:%d:%d:%d" % [game_session_id, total_turns, player_idx, int(current_state)]
+	if signature != _progress_watch_signature:
+		_progress_watch_signature = signature
+		_progress_watch_elapsed = 0.0
+	_progress_watch_elapsed += delta
+	if current_state == TurnState.WAIT_ACTION and _progress_watch_elapsed >= AI_WAIT_ACTION_RECOVERY_SECONDS:
+		# 브라우저가 잠시 중단되거나 예약 콜백이 유실돼도 AI 턴을 다시 진행합니다.
+		_progress_watch_elapsed = 0.0
+		_ai_execute_turn()
+	elif current_state == TurnState.RESOLVING_QUIZ and _progress_watch_elapsed >= AI_QUIZ_THINK_SECONDS + AI_QUIZ_RECOVERY_GRACE_SECONDS:
+		_progress_watch_elapsed = 0.0
+		resolve_ai_quiz_if_pending(player_idx)
 
 func _ai_execute_turn() -> void:
 	if current_state != TurnState.WAIT_ACTION:

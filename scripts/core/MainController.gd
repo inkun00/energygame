@@ -20,7 +20,15 @@ func _ready() -> void:
 
 
 func _finish_web_loading() -> void:
-	await RenderingServer.frame_post_draw
+	if game_board and game_board.has_method("begin_render_warmup"):
+		game_board.begin_render_warmup()
+		# 첫 프레임에서 셰이더를 컴파일하고 다음 프레임까지 실제 출력이 끝났는지
+		# 확인한 뒤 로딩 화면을 닫습니다.
+		await RenderingServer.frame_post_draw
+		await RenderingServer.frame_post_draw
+		game_board.end_render_warmup()
+	else:
+		await RenderingServer.frame_post_draw
 	JavaScriptBridge.eval("if (window.energyGameReady) window.energyGameReady();")
 
 func switch_to_lobby() -> void:

@@ -25,6 +25,7 @@ const EnergyFairyVillage3D = preload("res://scripts/board/EnergyFairyVillage3D.g
 var player_pawns: Array[PlayerPawn] = []
 var tile_markers: Array = []
 var item_pickups: Dictionary = {}
+var item_shadow_material: ShaderMaterial
 var board_base_material: StandardMaterial3D
 var renewable_landmarks: Node3D
 var built_landmark_count := 0
@@ -83,6 +84,9 @@ func _ready() -> void:
 	_build_3d_path_guides()
 	_spawn_3d_tile_markers()
 	_build_3d_shortcut_rails()
+	# 아이템과 텍스처도 로딩 화면이 떠 있는 초기화 단계에서 한 번 만들어 둡니다.
+	# 게임 시작 버튼을 누른 뒤 98개 Sprite3D를 만드는 정지를 없앱니다.
+	_reset_tile_item_pickups()
 	viewport_container.gui_input.connect(_on_board_gui_input)
 	if hud.has_signal("board_zoom_requested"):
 		hud.connect("board_zoom_requested", _zoom_board)
@@ -318,17 +322,21 @@ func _spawn_3d_tile_markers() -> void:
 		tile_markers.append(marker)
 
 func _reset_tile_item_pickups() -> void:
-	for child in items_container.get_children():
-		child.queue_free()
-	item_pickups.clear()
 	# 0번 출발 칸과 99번 도착 칸을 제외한 모든 칸에 재료 하나를 배치합니다.
+	# 이미 만든 오브젝트는 재사용해 게임 시작 시 노드·텍스처 할당을 반복하지 않습니다.
 	for tile_idx in range(1, BoardGrid.LAST_TILE_INDEX):
 		var item_id := GameManager.get_tile_item_id(tile_idx)
 		if item_id.is_empty():
 			continue
+		var existing = item_pickups.get(tile_idx)
+		if is_instance_valid(existing):
+			existing.reset_pickup()
+			continue
 		var pickup = BoardItemPickup3D.new()
 		items_container.add_child(pickup)
-		pickup.setup_pickup(tile_idx, item_id, GameManager.ITEM_DEFINITIONS[item_id])
+		pickup.setup_pickup(tile_idx, item_id, GameManager.ITEM_DEFINITIONS[item_id], item_shadow_material)
+		if item_shadow_material == null:
+			item_shadow_material = pickup.shadow_material
 		item_pickups[tile_idx] = pickup
 
 func _on_tile_item_collected(tile_idx: int, _player_idx: int, _item_id: String) -> void:
@@ -507,22 +515,32 @@ func start_board_game(player_configs: Array[Dictionary], duration_seconds: int =
 	if hud and hud.has_method("initialize_hud"):
 		hud.initialize_hud()
 		
-	get_tree().create_timer(0.4).timeout.connect(func():
+	get_tree().create_timer(0.1).timeout.connect(func():
 		# 온라인 참가자는 방장이 전송하는 첫 턴 상태를 기다립니다.
 		if not NetworkManager.is_online or NetworkManager.is_host:
 			GameManager.start_first_turn()
 	)
 
 func _refresh_random_shortcut_visuals() -> void:
-	for child in tiles_container.get_children():
-		tiles_container.remove_child(child)
-		child.queue_free()
-	tile_markers.clear()
-	_spawn_3d_tile_markers()
+	# 타일 100개의 메시·라벨을 폐기하지 않고 바뀐 종류의 머티리얼만 갱신합니다.
+	for marker in tile_markers:
+		if is_instance_valid(marker):
+			marker.refresh_tile_data()
 	for child in rails_container.get_children():
 		rails_container.remove_child(child)
 		child.queue_free()
 	_build_3d_shortcut_rails()
+
+func begin_render_warmup() -> void:
+	# HTML 로딩 화면 뒤에서 실제 3D 보드를 몇 프레임 렌더링해 WebGL 셰이더를
+	# 미리 컴파일합니다. HUD와 모달은 로비 위로 나타나지 않게 유지합니다.
+	visible = true
+	viewport_container.visible = true
+	ui_layer.visible = false
+	modals_layer.visible = false
+
+func end_render_warmup() -> void:
+	set_board_active(false)
 
 func stop_board_game() -> void:
 	_cancel_camera_follow()

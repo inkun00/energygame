@@ -35,6 +35,7 @@ func _run_tests() -> void:
 	await _test_quiz_popup_text_integrity()
 	await _test_other_player_quiz_observation()
 	await _test_ai_quiz_failsafe()
+	_test_ai_turn_progress_watchdog()
 	await _test_player_dice_auto_roll_timeout()
 	await _test_local_game_start()
 	await create_timer(1.5).timeout
@@ -743,6 +744,23 @@ func _test_player_dice_auto_roll_timeout() -> void:
 	game_manager.stop_game()
 	await process_frame
 
+func _test_ai_turn_progress_watchdog() -> void:
+	var configs: Array[Dictionary] = []
+	for i in range(4):
+		configs.append({"name": "복구 AI %d" % i, "is_ai": true})
+	var game_manager = root.get_node("GameManager")
+	game_manager.setup_game(configs)
+	game_manager.current_turn_idx = 0
+	game_manager.current_state = game_manager.TurnState.WAIT_ACTION
+	var roll_count := {"value": 0}
+	var capture_roll = func(_player_idx: int, _value: int): roll_count["value"] += 1
+	game_manager.dice_rolled.connect(capture_roll)
+	game_manager._update_ai_progress_watchdog(game_manager.AI_WAIT_ACTION_RECOVERY_SECONDS + 0.1)
+	_expect(roll_count["value"] == 1, "AI 행동 예약이 누락돼도 진행 감시 장치가 주사위를 굴려야 합니다.")
+	_expect(game_manager.current_state == game_manager.TurnState.ROLLING_DICE, "AI 턴 복구 뒤 주사위 애니메이션 상태로 진행해야 합니다.")
+	game_manager.dice_rolled.disconnect(capture_roll)
+	game_manager.stop_game()
+
 func _test_local_game_start() -> void:
 	var main = load("res://scenes/Main.tscn").instantiate()
 	root.add_child(main)
@@ -762,6 +780,12 @@ func _test_local_game_start() -> void:
 	_expect(game_board.visible, "로컬 게임 시작 후 보드가 표시되어야 합니다.")
 	_expect(game_board.player_pawns.size() == 4, "로컬 게임 시작 시 플레이어 말 4개를 생성해야 합니다.")
 	_expect(game_board.item_pickups.size() == BoardGrid.LAST_TILE_INDEX - 1, "1~98번 게임 칸마다 3D 건설 재료가 하나씩 표시되어야 합니다.")
+	var static_pickup = game_board.item_pickups[2]
+	var static_pickup_position: Vector3 = static_pickup.position
+	await create_timer(0.2).timeout
+	_expect(static_pickup.position.is_equal_approx(static_pickup_position), "게임 칸의 건설 재료는 위아래로 떠다니지 않고 고정되어야 합니다.")
+	_expect(static_pickup.item_sprite.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF, "건설 재료 형상의 조명 그림자는 꺼져야 합니다.")
+	_expect(static_pickup.shadow_mesh != null and static_pickup.shadow_mesh.visible, "건설 재료 아래의 부드러운 바닥 그림자는 유지되어야 합니다.")
 	_expect(game_board.energy_fairy_village != null and game_board.energy_fairy_village.get_child_count() >= 40, "게임판 바깥에 에너지요정 마을 3D 배경이 충분히 구성되어야 합니다.")
 	_expect(game_board.energy_fairy_village.animated_rotors.size() >= 3, "에너지요정 마을 배경에 움직이는 풍력 터빈이 있어야 합니다.")
 	_expect(game_board.energy_fairy_village.floating_lights.size() >= 12, "에너지요정 마을 배경에 빛나는 마법 에너지 장식이 있어야 합니다.")

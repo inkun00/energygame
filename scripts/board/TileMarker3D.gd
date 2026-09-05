@@ -50,47 +50,16 @@ func setup_tile_3d(idx: int) -> void:
 	add_child(border_mesh)
 	move_child(border_mesh, 0)
 	
-	# 2. 타입별 3D 머티리얼 세팅
-	var mat = StandardMaterial3D.new()
-	mat.roughness = 0.3
-	mat.metallic = 0.2
-	
-	var t_type = tile_data.get("type", BoardGrid.TileType.QUIZ_OX)
-	match t_type:
-		BoardGrid.TileType.START:
-			mat.albedo_color = Color(0.12, 0.58, 0.28) # 출발 에메랄드
-			mat.emission_enabled = true
-			mat.emission = Color(0.15, 0.65, 0.32) * 0.4
-		BoardGrid.TileType.FINISH:
-			mat.albedo_color = Color(0.85, 0.65, 0.12) # 골든 챔피언
-			mat.emission_enabled = true
-			mat.emission = Color(1.0, 0.85, 0.2) * 0.5
-		BoardGrid.TileType.LADDER:
-			mat.albedo_color = Color(0.88, 0.62, 0.10) # 황금 사다리
-			mat.emission_enabled = true
-			mat.emission = Color(1.0, 0.75, 0.15) * 0.35
-		BoardGrid.TileType.SLIDE:
-			mat.albedo_color = Color(0.78, 0.18, 0.20) # 낭비 미끄럼틀
-			mat.emission_enabled = true
-			mat.emission = Color(0.9, 0.2, 0.2) * 0.3
-		BoardGrid.TileType.POWERPLANT:
-			mat.albedo_color = Color(0.15, 0.52, 0.82) # 청정 발전소
-			mat.emission_enabled = true
-			mat.emission = Color(0.2, 0.6, 0.9) * 0.35
-		BoardGrid.TileType.CHANCE_CARD:
-			mat.albedo_color = Color(0.32, 0.45, 0.78)
-		BoardGrid.TileType.REST_TURN:
-			mat.albedo_color = Color(0.28, 0.48, 0.52)
-		_:
-			mat.albedo_color = Color(0.18, 0.26, 0.38) # 퀴즈 칸
-				
-	block_material = mat
-	base_emission_enabled = mat.emission_enabled
-	base_emission = mat.emission
+	# 2. 타입별 3D 머티리얼 세팅. 게임을 새로 시작할 때에는 메시와
+	# 노드를 다시 만들지 않고 이 머티리얼만 갱신합니다.
+	block_material = StandardMaterial3D.new()
+	block_material.roughness = 0.3
+	block_material.metallic = 0.2
 	block_mesh.material_override = block_material
+	_refresh_tile_style()
 	_create_target_ring(tile_size.y)
 
-	# 3. 게임판에는 칸 번호만 표시합니다. 재료 오브젝트가 중앙에 떠 있으므로
+	# 3. 게임판에는 칸 번호만 표시합니다. 재료 오브젝트가 중앙에 있으므로
 	# 번호는 앞쪽에 배치해 확대했을 때도 가리지 않게 합니다.
 	num_label = Label3D.new()
 	num_label.text = str(idx)
@@ -101,6 +70,47 @@ func setup_tile_3d(idx: int) -> void:
 	num_label.position = Vector3(0, tile_size.y * 0.5 + 0.025, 0.52)
 	num_label.rotation_degrees = Vector3(-90, 0, 0)
 	add_child(num_label)
+
+func refresh_tile_data() -> void:
+	tile_data = BoardGrid.get_tile_data(tile_index)
+	_refresh_tile_style()
+
+func _refresh_tile_style() -> void:
+	if block_material == null:
+		return
+	block_material.emission_enabled = false
+	block_material.emission = Color.BLACK
+	block_material.emission_energy_multiplier = 1.0
+	var t_type = tile_data.get("type", BoardGrid.TileType.QUIZ_OX)
+	match t_type:
+		BoardGrid.TileType.START:
+			block_material.albedo_color = Color(0.12, 0.58, 0.28) # 출발 에메랄드
+			block_material.emission_enabled = true
+			block_material.emission = Color(0.15, 0.65, 0.32) * 0.4
+		BoardGrid.TileType.FINISH:
+			block_material.albedo_color = Color(0.85, 0.65, 0.12) # 골든 챔피언
+			block_material.emission_enabled = true
+			block_material.emission = Color(1.0, 0.85, 0.2) * 0.5
+		BoardGrid.TileType.LADDER:
+			block_material.albedo_color = Color(0.88, 0.62, 0.10) # 황금 사다리
+			block_material.emission_enabled = true
+			block_material.emission = Color(1.0, 0.75, 0.15) * 0.35
+		BoardGrid.TileType.SLIDE:
+			block_material.albedo_color = Color(0.78, 0.18, 0.20) # 낭비 미끄럼틀
+			block_material.emission_enabled = true
+			block_material.emission = Color(0.9, 0.2, 0.2) * 0.3
+		BoardGrid.TileType.POWERPLANT:
+			block_material.albedo_color = Color(0.15, 0.52, 0.82) # 청정 발전소
+			block_material.emission_enabled = true
+			block_material.emission = Color(0.2, 0.6, 0.9) * 0.35
+		BoardGrid.TileType.CHANCE_CARD:
+			block_material.albedo_color = Color(0.32, 0.45, 0.78)
+		BoardGrid.TileType.REST_TURN:
+			block_material.albedo_color = Color(0.28, 0.48, 0.52)
+		_:
+			block_material.albedo_color = Color(0.18, 0.26, 0.38) # 퀴즈 칸
+	base_emission_enabled = block_material.emission_enabled
+	base_emission = block_material.emission
 
 func _process(delta: float) -> void:
 	if not skill_targetable or target_ring == null:
