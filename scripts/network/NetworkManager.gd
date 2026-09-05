@@ -25,6 +25,7 @@ const DISCOVERY_BROADCAST_INTERVAL := 0.65
 const DISCOVERY_TIMEOUT_SECONDS := 12.0
 const DIRECTORY_HEARTBEAT_SECONDS := 20.0
 const WEB_SIGNAL_POLL_INTERVAL := 0.35
+const FULL_GAME_SNAPSHOT_INTERVAL_SECONDS := 5.0
 const WEB_ICE_SERVERS := [
 	{"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]}
 ]
@@ -69,6 +70,8 @@ var _web_signal_poll_remaining := 0.0
 var _web_signal_poll_pending := false
 var _web_signaling_active := false
 var _web_connect_remaining := 0.0
+var _full_game_snapshot_remaining := 0.0
+var _last_open_market_sync_signature := ""
 
 
 func _ready() -> void:
@@ -114,6 +117,13 @@ func _process(delta: float) -> void:
 		if _directory_heartbeat_remaining <= 0.0:
 			_directory_heartbeat_remaining = DIRECTORY_HEARTBEAT_SECONDS
 			_send_directory_heartbeat()
+	if is_online and is_host and game_has_started and (
+		GameManager.is_game_active or GameManager.open_market_active or GameManager.village_construction_active
+	):
+		_full_game_snapshot_remaining -= delta
+		if _full_game_snapshot_remaining <= 0.0:
+			_full_game_snapshot_remaining = FULL_GAME_SNAPSHOT_INTERVAL_SECONDS
+			_rpc_apply_full_game_state.rpc(_capture_game_state())
 
 
 func create_room(port: int = DEFAULT_PORT, player_info: Dictionary = {}, settings: Dictionary = {}) -> Error:
@@ -238,6 +248,8 @@ func disconnect_network() -> void:
 	_web_signal_poll_pending = false
 	_web_signaling_active = false
 	_web_connect_remaining = 0.0
+	_full_game_snapshot_remaining = 0.0
+	_last_open_market_sync_signature = ""
 
 
 func update_local_player_info(player_info: Dictionary) -> void:
@@ -283,6 +295,8 @@ func start_hosted_game(duration_seconds: int) -> bool:
 	for tile in BoardGrid.TILE_DATA:
 		shared_board_tiles.append((tile as Dictionary).duplicate(true))
 	game_has_started = true
+	_full_game_snapshot_remaining = FULL_GAME_SNAPSHOT_INTERVAL_SECONDS
+	_last_open_market_sync_signature = ""
 	if _external_room_registered:
 		_unregister_external_room()
 	_stop_room_announcement()
@@ -1101,14 +1115,148 @@ func _connect_game_signals() -> void:
 func _broadcast_game_event(event_name: String, event_args: Array) -> void:
 	if not is_online or not is_host or not game_has_started:
 		return
-	_rpc_apply_game_state.rpc(_capture_game_state(), event_name, event_args)
+	if event_name == "game_time_changed" or event_name == "dice_input_time_changed":
+		_rpc_apply_time_event.rpc(_capture_time_patch(event_name, event_args), event_name, event_args)
+		return
+	if event_name == "open_market_state_changed":
+		var market_state: Dictionary = event_args[0] if not event_args.is_empty() else {}
+		var market_signature := var_to_str([
+			market_state.get("active", false),
+			market_state.get("phase", 0),
+			market_state.get("submitted_players", {}),
+			market_state.get("stock", {}),
+			market_state.get("allowances", {}),
+			market_state.get("taken_counts", {})
+		])
+		if market_signature == _last_open_market_sync_signature:
+			_rpc_apply_time_event.rpc(_capture_time_patch(event_name, event_args), event_name, event_args)
+			return
+		_last_open_market_sync_signature = market_signature
+	_rpc_apply_game_patch.rpc(_capture_game_state_patch(event_name, event_args), event_name, event_args)
 
 
 @rpc("authority", "call_remote", "reliable")
-func _rpc_apply_game_state(snapshot: Dictionary, event_name: String, event_args: Array) -> void:
+func _rpc_apply_game_patch(patch: Dictionary, event_name: String, event_args: Array) -> void:
 	if is_host:
 		return
-	GameManager.apply_network_state(snapshot, event_name, event_args)
+	GameManager.apply_network_patch(patch, event_name, event_args)
+
+
+@rpc("authority", "call_remote", "unreliable_ordered")
+func _rpc_apply_time_event(patch: Dictionary, event_name: String, event_args: Array) -> void:
+	if is_host:
+		return
+	GameManager.apply_network_patch(patch, event_name, event_args)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_apply_full_game_state(snapshot: Dictionary) -> void:
+	if is_host:
+		return
+	GameManager.apply_network_state(snapshot, "", [])
+
+
+func _capture_time_patch(event_name: String, event_args: Array) -> Dictionary:
+	match event_name:
+		"game_time_changed":
+			return {
+				"game_time_remaining": float(event_args[0]) if event_args.size() >= 1 else GameManager.game_time_remaining,
+				"game_duration_seconds": int(event_args[1]) if event_args.size() >= 2 else GameManager.game_duration_seconds
+			}
+		"dice_input_time_changed":
+			return {
+				"dice_input_time_remaining": float(event_args[1]) if event_args.size() >= 2 else GameManager.dice_input_time_remaining
+			}
+		"open_market_state_changed":
+			return {
+				"open_market_time_remaining": float((event_args[0] as Dictionary).get("time_remaining", GameManager.open_market_time_remaining)) if not event_args.is_empty() else GameManager.open_market_time_remaining
+			}
+	return {}
+
+
+func _capture_game_state_patch(event_name: String, event_args: Array) -> Dictionary:
+	var patch := {
+		"current_state": int(GameManager.current_state),
+		"current_turn_idx": GameManager.current_turn_idx,
+		"total_turns": GameManager.total_turns,
+		"is_game_active": GameManager.is_game_active
+	}
+	match event_name:
+		"turn_changed":
+			patch["special_skill_used_this_turn"] = GameManager.special_skill_used_this_turn
+			patch["dice_input_time_remaining"] = GameManager.dice_input_time_remaining
+			patch["active_quiz_data"] = GameManager.active_quiz_data.duplicate(true)
+			patch["active_quiz_player_idx"] = GameManager.active_quiz_player_idx
+			patch["active_spectator_quiz_attempts"] = GameManager.active_spectator_quiz_attempts.duplicate(true)
+			patch["pending_lap_reward"] = GameManager.pending_lap_reward.duplicate(true)
+		"player_moved", "player_state_changed", "player_inventory_changed":
+			_add_player_update(patch, int(event_args[0]) if not event_args.is_empty() else -1)
+			patch["pending_lap_reward"] = GameManager.pending_lap_reward.duplicate(true)
+		"quiz_requested":
+			patch["active_quiz_data"] = GameManager.active_quiz_data.duplicate(true)
+			patch["active_quiz_player_idx"] = GameManager.active_quiz_player_idx
+			patch["active_spectator_quiz_attempts"] = GameManager.active_spectator_quiz_attempts.duplicate(true)
+		"quiz_resolved":
+			_add_player_update(patch, int(event_args[0]) if not event_args.is_empty() else -1)
+			patch["active_quiz_data"] = GameManager.active_quiz_data.duplicate(true)
+			patch["active_quiz_player_idx"] = GameManager.active_quiz_player_idx
+			patch["active_spectator_quiz_attempts"] = GameManager.active_spectator_quiz_attempts.duplicate(true)
+		"spectator_quiz_bonus_resolved":
+			_add_player_update(patch, int(event_args[0]) if not event_args.is_empty() else -1)
+			patch["active_spectator_quiz_attempts"] = GameManager.active_spectator_quiz_attempts.duplicate(true)
+		"kingdom_progress_changed":
+			_add_kingdom_state(patch)
+		"tile_item_collected":
+			if event_args.size() >= 2:
+				patch["collected_item_update"] = {int(event_args[0]): int(event_args[1])}
+		"special_skill_activated", "special_skill_completed":
+			_add_player_update(patch, int(event_args[0]) if not event_args.is_empty() else -1)
+			patch["special_skill_used_this_turn"] = GameManager.special_skill_used_this_turn
+		"lap_completed", "lap_reward_requested", "lap_reward_completed":
+			_add_player_update(patch, int(event_args[0]) if not event_args.is_empty() else -1)
+			patch["lap_finish_orders"] = GameManager.lap_finish_orders.duplicate(true)
+			patch["pending_lap_reward"] = GameManager.pending_lap_reward.duplicate(true)
+		"open_market_state_changed":
+			_add_open_market_state(patch)
+		"village_construction_started", "village_construction_changed":
+			patch["players"] = GameManager.players.duplicate(true)
+			_add_kingdom_state(patch)
+			patch["village_construction_active"] = GameManager.village_construction_active
+			patch["village_ai_construction_running"] = GameManager.village_ai_construction_running
+			patch["built_project_ids"] = GameManager.built_project_ids.duplicate()
+			patch["built_project_placements"] = GameManager.built_project_placements.duplicate(true)
+			patch["built_project_owners"] = GameManager.built_project_owners.duplicate(true)
+		"game_over":
+			patch["players"] = GameManager.players.duplicate(true)
+			_add_kingdom_state(patch)
+			patch["village_construction_active"] = GameManager.village_construction_active
+			patch["village_ai_construction_running"] = GameManager.village_ai_construction_running
+	return patch
+
+
+func _add_player_update(patch: Dictionary, player_idx: int) -> void:
+	if player_idx < 0 or player_idx >= GameManager.players.size():
+		return
+	var player_updates: Dictionary = patch.get("player_updates", {})
+	player_updates[player_idx] = GameManager.players[player_idx].duplicate(true)
+	patch["player_updates"] = player_updates
+
+
+func _add_kingdom_state(patch: Dictionary) -> void:
+	patch["projects_built"] = GameManager.projects_built
+	patch["kingdom_health"] = GameManager.kingdom_health
+	patch["kingdom_recovered"] = GameManager.kingdom_recovered
+	patch["team_quiz_correct"] = GameManager.team_quiz_correct
+
+
+func _add_open_market_state(patch: Dictionary) -> void:
+	patch["open_market_active"] = GameManager.open_market_active
+	patch["open_market_phase"] = int(GameManager.open_market_phase)
+	patch["open_market_time_remaining"] = GameManager.open_market_time_remaining
+	patch["open_market_submitted_players"] = GameManager.open_market_submitted_players.duplicate(true)
+	patch["open_market_stock"] = GameManager.open_market_stock.duplicate(true)
+	patch["open_market_take_allowances"] = GameManager.open_market_take_allowances.duplicate(true)
+	patch["open_market_taken_counts"] = GameManager.open_market_taken_counts.duplicate(true)
 
 
 func _capture_game_state() -> Dictionary:

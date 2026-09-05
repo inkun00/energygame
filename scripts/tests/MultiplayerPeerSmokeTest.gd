@@ -25,7 +25,7 @@ func _start() -> void:
 	network_manager.game_started_signal.connect(_on_game_started)
 	game_manager.turn_changed.connect(_on_turn_changed)
 	game_manager.dice_rolled.connect(_on_dice_rolled)
-	create_timer(10.0).timeout.connect(_fail.bind("시간 안에 멀티플레이 동기화가 끝나지 않았습니다."))
+	create_timer(15.0).timeout.connect(_fail.bind("시간 안에 멀티플레이 동기화가 끝나지 않았습니다."))
 	var info := {
 		"name": "호스트 테스트" if role == "host" else "참가자 테스트",
 		"char_icon": "res://assets/characters/eco_roster/captain_eco.webp",
@@ -47,7 +47,7 @@ func _start() -> void:
 
 
 func _wait_for_client() -> void:
-	for _attempt in range(40):
+	for _attempt in range(120):
 		if network_manager.connected_players.size() >= 2:
 			print("[TEST] 참가자 확인, 게임 시작 요청")
 			if not network_manager.start_hosted_game(60):

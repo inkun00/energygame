@@ -317,42 +317,98 @@ func stop_game() -> void:
 func apply_network_state(snapshot: Dictionary, event_name: String, event_args: Array) -> void:
 	if not NetworkManager.is_online or NetworkManager.is_host:
 		return
-	players.clear()
-	for player_value in snapshot.get("players", []):
-		players.append((player_value as Dictionary).duplicate(true))
-	current_state = int(snapshot.get("current_state", TurnState.WAIT_ACTION))
-	current_turn_idx = int(snapshot.get("current_turn_idx", 0))
-	total_turns = int(snapshot.get("total_turns", 0))
-	is_game_active = bool(snapshot.get("is_game_active", false))
-	active_quiz_data = (snapshot.get("active_quiz_data", {}) as Dictionary).duplicate(true)
-	active_quiz_player_idx = int(snapshot.get("active_quiz_player_idx", -1))
-	active_spectator_quiz_attempts = (snapshot.get("active_spectator_quiz_attempts", {}) as Dictionary).duplicate(true)
-	projects_built = int(snapshot.get("projects_built", 0))
-	kingdom_health = int(snapshot.get("kingdom_health", 0))
-	kingdom_recovered = bool(snapshot.get("kingdom_recovered", false))
-	team_quiz_correct = int(snapshot.get("team_quiz_correct", 0))
-	village_construction_active = bool(snapshot.get("village_construction_active", false))
-	open_market_active = bool(snapshot.get("open_market_active", false))
-	open_market_phase = int(snapshot.get("open_market_phase", OpenMarketPhase.INACTIVE))
-	open_market_time_remaining = float(snapshot.get("open_market_time_remaining", 0.0))
-	open_market_submitted_players = (snapshot.get("open_market_submitted_players", {}) as Dictionary).duplicate(true)
-	open_market_stock = (snapshot.get("open_market_stock", {}) as Dictionary).duplicate(true)
-	open_market_take_allowances = (snapshot.get("open_market_take_allowances", {}) as Dictionary).duplicate(true)
-	open_market_taken_counts = (snapshot.get("open_market_taken_counts", {}) as Dictionary).duplicate(true)
-	built_project_ids.clear()
-	for project_id in snapshot.get("built_project_ids", []):
-		built_project_ids.append(int(project_id))
-	built_project_placements = (snapshot.get("built_project_placements", {}) as Dictionary).duplicate(true)
-	built_project_owners = (snapshot.get("built_project_owners", {}) as Dictionary).duplicate(true)
-	collected_item_tiles = (snapshot.get("collected_item_tiles", {}) as Dictionary).duplicate(true)
-	special_skill_used_this_turn = bool(snapshot.get("special_skill_used_this_turn", false))
-	game_duration_seconds = int(snapshot.get("game_duration_seconds", DEFAULT_GAME_DURATION_SECONDS))
-	game_time_remaining = float(snapshot.get("game_time_remaining", game_duration_seconds))
-	lap_finish_orders = (snapshot.get("lap_finish_orders", {}) as Dictionary).duplicate(true)
-	pending_lap_reward = (snapshot.get("pending_lap_reward", {}) as Dictionary).duplicate(true)
-	dice_input_time_remaining = float(snapshot.get("dice_input_time_remaining", 0.0))
-	village_ai_construction_running = bool(snapshot.get("village_ai_construction_running", false))
+	_apply_network_values(snapshot)
+	_replay_network_event(event_name, event_args)
 
+
+## 이벤트마다 전체 게임을 덮어쓰지 않고 방장이 보낸 변경분만 적용합니다.
+func apply_network_patch(patch: Dictionary, event_name: String, event_args: Array) -> void:
+	if not NetworkManager.is_online or NetworkManager.is_host:
+		return
+	_apply_network_values(patch)
+	_replay_network_event(event_name, event_args)
+
+
+func _apply_network_values(values: Dictionary) -> void:
+	if values.has("players"):
+		players.clear()
+		for player_value in values["players"]:
+			players.append((player_value as Dictionary).duplicate(true))
+	if values.has("player_updates"):
+		var player_updates: Dictionary = values["player_updates"]
+		for player_idx_variant in player_updates.keys():
+			var player_idx := int(player_idx_variant)
+			if player_idx >= 0 and player_idx < players.size():
+				players[player_idx] = (player_updates[player_idx_variant] as Dictionary).duplicate(true)
+	if values.has("current_state"):
+		current_state = int(values["current_state"])
+	if values.has("current_turn_idx"):
+		current_turn_idx = int(values["current_turn_idx"])
+	if values.has("total_turns"):
+		total_turns = int(values["total_turns"])
+	if values.has("is_game_active"):
+		is_game_active = bool(values["is_game_active"])
+	if values.has("active_quiz_data"):
+		active_quiz_data = (values["active_quiz_data"] as Dictionary).duplicate(true)
+	if values.has("active_quiz_player_idx"):
+		active_quiz_player_idx = int(values["active_quiz_player_idx"])
+	if values.has("active_spectator_quiz_attempts"):
+		active_spectator_quiz_attempts = (values["active_spectator_quiz_attempts"] as Dictionary).duplicate(true)
+	if values.has("projects_built"):
+		projects_built = int(values["projects_built"])
+	if values.has("kingdom_health"):
+		kingdom_health = int(values["kingdom_health"])
+	if values.has("kingdom_recovered"):
+		kingdom_recovered = bool(values["kingdom_recovered"])
+	if values.has("team_quiz_correct"):
+		team_quiz_correct = int(values["team_quiz_correct"])
+	if values.has("village_construction_active"):
+		village_construction_active = bool(values["village_construction_active"])
+	if values.has("open_market_active"):
+		open_market_active = bool(values["open_market_active"])
+	if values.has("open_market_phase"):
+		open_market_phase = int(values["open_market_phase"])
+	if values.has("open_market_time_remaining"):
+		open_market_time_remaining = float(values["open_market_time_remaining"])
+	if values.has("open_market_submitted_players"):
+		open_market_submitted_players = (values["open_market_submitted_players"] as Dictionary).duplicate(true)
+	if values.has("open_market_stock"):
+		open_market_stock = (values["open_market_stock"] as Dictionary).duplicate(true)
+	if values.has("open_market_take_allowances"):
+		open_market_take_allowances = (values["open_market_take_allowances"] as Dictionary).duplicate(true)
+	if values.has("open_market_taken_counts"):
+		open_market_taken_counts = (values["open_market_taken_counts"] as Dictionary).duplicate(true)
+	if values.has("built_project_ids"):
+		built_project_ids.clear()
+		for project_id in values["built_project_ids"]:
+			built_project_ids.append(int(project_id))
+	if values.has("built_project_placements"):
+		built_project_placements = (values["built_project_placements"] as Dictionary).duplicate(true)
+	if values.has("built_project_owners"):
+		built_project_owners = (values["built_project_owners"] as Dictionary).duplicate(true)
+	if values.has("collected_item_tiles"):
+		collected_item_tiles = (values["collected_item_tiles"] as Dictionary).duplicate(true)
+	if values.has("collected_item_update"):
+		var collected_update: Dictionary = values["collected_item_update"]
+		for tile_idx_variant in collected_update.keys():
+			collected_item_tiles[int(tile_idx_variant)] = int(collected_update[tile_idx_variant])
+	if values.has("special_skill_used_this_turn"):
+		special_skill_used_this_turn = bool(values["special_skill_used_this_turn"])
+	if values.has("game_duration_seconds"):
+		game_duration_seconds = int(values["game_duration_seconds"])
+	if values.has("game_time_remaining"):
+		game_time_remaining = float(values["game_time_remaining"])
+	if values.has("lap_finish_orders"):
+		lap_finish_orders = (values["lap_finish_orders"] as Dictionary).duplicate(true)
+	if values.has("pending_lap_reward"):
+		pending_lap_reward = (values["pending_lap_reward"] as Dictionary).duplicate(true)
+	if values.has("dice_input_time_remaining"):
+		dice_input_time_remaining = float(values["dice_input_time_remaining"])
+	if values.has("village_ai_construction_running"):
+		village_ai_construction_running = bool(values["village_ai_construction_running"])
+
+
+func _replay_network_event(event_name: String, event_args: Array) -> void:
 	if event_name.is_empty() or not has_signal(event_name):
 		return
 	match event_name:
@@ -391,6 +447,7 @@ func start_turn() -> void:
 	# 휴식 턴 체크
 	if cur_p["skip_turn"]:
 		cur_p["skip_turn"] = false
+		player_state_changed.emit(current_turn_idx)
 		status_message_posted.emit("💤 [%s] 님은 에코 쉼터에서 쉬어갑니다." % cur_p["name"])
 		end_turn()
 		return
