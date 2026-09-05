@@ -59,6 +59,12 @@ test("public rooms, input validation, expiration and simultaneous last-seat join
     assert.equal((await req("", "POST", {code: "123456", host_token: host, max_players})).status, 400);
   }
   assert.equal((await req("", "POST", {code: "123456", host_token: host, title: " "})).status, 400);
+  assert.equal((await req("", "POST", {code: "123456", host_token: host, title: "가".repeat(16)})).status, 400);
+  assert.equal((await req("", "POST", {code: "222222", host_token: host, title: "가".repeat(15), host_name: "가나다라마바사"})).status, 201);
+  const boundaryRoom = (await (await req("")).json()).rooms.find(room => room.code === "222222");
+  assert.equal(boundaryRoom.title.length, 15);
+  assert.equal(boundaryRoom.host_name, "가나다라마바");
+  await req("/222222", "DELETE", undefined, host);
   assert.equal((await req("", "POST", {code: "123456", host_token: host, max_players: 2})).status, 201);
   const responses = await Promise.all([guest, "a".repeat(48)].map(peer_token => req("/123456/join", "POST", {peer_token})));
   assert.deepEqual(responses.map(r => r.status).sort(), [201, 409]);

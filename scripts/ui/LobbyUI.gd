@@ -227,11 +227,37 @@ func _setup_mode_selector() -> void:
 	mode_option_button.add_item("싱글 플레이  •  AI가 빈 자리 자동 채움")
 	mode_option_button.add_item("온라인 모험  •  플레이어 호스트 · 최대 4인")
 	mode_option_button.item_selected.connect(_on_mode_selected)
+	mode_option_button.hide()
+	$MenuPanel/Content/ModeLabel.hide()
+	var actions := HBoxContainer.new()
+	actions.name = "PlayModeButtons"
+	actions.add_theme_constant_override("separation", 12)
+	var content := local_start_button.get_parent()
+	var action_index := local_start_button.get_index()
+	content.add_child(actions)
+	content.move_child(actions, action_index)
+	local_start_button.reparent(actions)
+	local_start_button.text = "싱글 플레이"
+	local_start_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var online_button := Button.new()
+	online_button.name = "OnlinePlayButton"
+	online_button.text = "온라인 모험"
+	online_button.custom_minimum_size.y = 68
+	online_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	online_button.add_theme_font_size_override("font_size", 23)
+	online_button.focus_mode = Control.FOCUS_NONE
+	UI.apply_secondary_button(online_button, UI.TEAL)
+	online_button.pressed.connect(func():
+		_commit_line_edit_ime(nickname_edit)
+		mode_option_button.select(1)
+		_on_mode_selected(1)
+	)
+	actions.add_child(online_button)
 
 func _setup_game_time_selector() -> void:
 	game_time_option_button.clear()
 	for minutes in [5, 10, 15, 20]:
-		game_time_option_button.add_item("%d분 동안 계속 플레이" % minutes)
+		game_time_option_button.add_item("%d분" % minutes)
 		game_time_option_button.set_item_metadata(game_time_option_button.item_count - 1, minutes * 60)
 	game_time_option_button.select(1)
 
@@ -325,15 +351,15 @@ func _on_mode_selected(idx: int) -> void:
 	if not is_online_mode and NetworkManager.is_online and not NetworkManager.game_has_started:
 		NetworkManager.disconnect_network()
 		reset_network_controls()
-	online_box.visible = is_online_mode
-	local_start_button.visible = not is_online_mode
+	online_box.visible = false
+	local_start_button.visible = true
 	status_label.text = _online_mode_hint() if is_online_mode else "혼자 시작해도 AI 동료가 남은 3자리를 채워 4인 파티로 출발합니다."
 	if is_online_mode and _room_browser:
 		_room_browser.open_browser()
 
 func _on_local_start_pressed() -> void:
 	_commit_line_edit_ime(nickname_edit)
-	var my_name := nickname_edit.text.strip_edges()
+	var my_name := nickname_edit.text.strip_edges().left(6)
 	if my_name.is_empty():
 		my_name = "에코 히어로"
 
@@ -397,7 +423,7 @@ func _on_join_pressed() -> void:
 
 func _get_local_player_info() -> Dictionary:
 	_commit_line_edit_ime(nickname_edit)
-	var player_name := nickname_edit.text.strip_edges()
+	var player_name := nickname_edit.text.strip_edges().left(6)
 	if player_name.is_empty():
 		player_name = "에코 히어로"
 	var selected_index := clampi(char_option_button.selected, 0, characters.size() - 1)

@@ -327,7 +327,7 @@ func _uses_browser_webrtc() -> bool:
 
 
 func _configure_room(settings: Dictionary) -> void:
-	room_title = str(settings.get("title", "함께하는 에너지 모험")).strip_edges().left(40)
+	room_title = str(settings.get("title", "함께하는 에너지 모험")).strip_edges().left(15)
 	room_capacity = clampi(int(settings.get("max_players", 4)), 2, 4)
 	_room_password = str(settings.get("password", ""))
 
@@ -1153,7 +1153,7 @@ func _sanitize_player_info(info: Dictionary) -> Dictionary:
 	var clean_name := str(info.get("name", "플레이어")).strip_edges()
 	if clean_name.is_empty():
 		clean_name = "플레이어"
-	clean_name = clean_name.left(20)
+	clean_name = clean_name.left(6)
 	return {
 		"name": clean_name,
 		"char_icon": str(info.get("char_icon", "res://assets/characters/eco_roster/captain_eco.webp")),

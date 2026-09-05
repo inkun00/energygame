@@ -218,14 +218,14 @@ async function createWebRtcRoom(request, env) {
   const title = payload.title === undefined ? "함께하는 에너지 모험" : payload.title;
   const capacity = payload.max_players === undefined ? 4 : payload.max_players;
   const password = payload.password === undefined ? "" : payload.password;
-  if (typeof title !== "string" || !title.trim() || title.length > 40 ||
+  if (typeof title !== "string" || !title.trim() || [...title].length > 15 ||
       !Number.isInteger(capacity) || capacity < 2 || capacity > 4 ||
       typeof password !== "string" || password.length > 64) {
-    return json({error: "방 제목(1~40자), 정원(2~4명), 비밀번호(최대 64자)를 확인하세요."}, 400);
+    return json({error: "방 제목(1~15자), 정원(2~4명), 비밀번호(최대 64자)를 확인하세요."}, 400);
   }
   const salt = password ? crypto.randomUUID() : "";
   const passwordDigest = password ? await passwordHash(password, salt) : "";
-  const hostName = typeof payload.host_name === "string" ? payload.host_name.slice(0, 24) : "방장";
+  const hostName = typeof payload.host_name === "string" ? [...payload.host_name].slice(0, 6).join("") : "방장";
   const now = Math.floor(Date.now() / 1000);
   await cleanupExpiredWebRtcRoom(env, payload.code, now);
   const existing = await env.DB.prepare(

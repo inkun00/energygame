@@ -75,7 +75,7 @@ func _ready() -> void:
 	form.add_child(_label("새 방 만들기", 25))
 	form.add_child(_label("방 제목", 17))
 	_title = LineEdit.new()
-	_title.max_length = 40
+	_title.max_length = 15
 	_title.text = "함께하는 에너지 모험"
 	UI.apply_input(_title)
 	form.add_child(_title)
