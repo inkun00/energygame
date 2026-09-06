@@ -50,10 +50,10 @@ func _create_materials() -> void:
 		_material(Color("6d9f4f"), 0.9)
 	]
 	glow_materials = [
-		_material(Color("75f4cf"), 0.2, Color("45d8bd"), 1.4),
-		_material(Color("ffe36d"), 0.2, Color("ffc83d"), 1.25),
-		_material(Color("77d9ff"), 0.2, Color("39aee8"), 1.3),
-		_material(Color("c89cff"), 0.2, Color("9c68e8"), 1.1)
+		_material(Color("75f4cf"), 0.2, Color("45d8bd"), 0.3),
+		_material(Color("ffe36d"), 0.2, Color("ffc83d"), 0.3),
+		_material(Color("77d9ff"), 0.2, Color("39aee8"), 0.3),
+		_material(Color("c89cff"), 0.2, Color("9c68e8"), 0.3)
 	]
 
 func _build_island_ground() -> void:

@@ -1,7 +1,7 @@
 extends Control
 class_name HUDController
 
-## HUDController: 인게임 4인 상태창, 중앙 주사위, 건설재료 현황 및 랭킹 모달 제어
+## HUDController: 인게임 4인 상태창, 오른쪽 주사위, 건설재료 현황 및 랭킹 모달 제어
 
 signal board_zoom_requested(direction: float)
 signal special_skill_tile_targets_changed(tile_indices: Array)
@@ -10,6 +10,7 @@ const PLAYER_PANEL_TEXTURE: Texture2D = preload("res://assets/open_source/kenney
 const VILLAGE_DRAG_CARD = preload("res://scripts/ui/ConstructionDragCard.gd")
 const SPECIAL_SKILL_CINEMATIC = preload("res://scripts/effects/SpecialSkillCinematic.gd")
 const ENDING_CINEMATIC = preload("res://scripts/effects/EndingCinematic.gd")
+const ADVENTURE_PLANNER = preload("res://scripts/ui/AdventurePlanner.gd")
 const UI = preload("res://scripts/ui/CommercialUI.gd")
 
 @onready var player_panels_container: HBoxContainer = $TopHUD/PlayerPanels
@@ -60,10 +61,9 @@ var special_skill_description_label: Label
 var special_skill_target_hint_label: Label
 var active_special_skill_player_idx := -1
 var active_special_skill: Dictionary = {}
-var construction_guide_title: Label
+var adventure_planner: Control
 var guide_inventory_count_labels: Dictionary = {}
 var guide_recipe_cards: Array[PanelContainer] = []
-var guide_recipe_requirement_labels: Array[Dictionary] = []
 var lap_reward_dimmer: ColorRect
 var lap_reward_panel: PanelContainer
 var lap_reward_title_label: Label
@@ -79,21 +79,6 @@ var open_market_item_grid: GridContainer
 var open_market_confirm_button: Button
 var open_market_offer_selection: Dictionary = {}
 var _open_market_last_phase := -1
-
-const MATERIAL_SHORT_NAMES := {
-	"solar_panel": "태양광 패널",
-	"wind_blade": "풍력 날개",
-	"battery": "배터리",
-	"insulation": "단열재",
-	"smart_grid": "스마트 그리드",
-	"hydro_turbine": "수력 터빈",
-	"geothermal_core": "지열 코어",
-	"tidal_generator": "조력 기어",
-	"reactor_control_core": "원자로 코어",
-	"recycled_composite": "재생 복합소재",
-	"fast_charge_module": "충전 모듈"
-}
-
 
 func _local_player_index() -> int:
 	if NetworkManager and NetworkManager.is_online:
@@ -159,6 +144,7 @@ func _ready() -> void:
 		GameManager.open_market_state_changed.connect(_on_open_market_state_changed)
 
 func initialize_hud() -> void:
+	adventure_planner.begin_exploration(_local_player_index())
 	if is_instance_valid(ending_cinematic):
 		ending_cinematic.queue_free()
 	ending_cinematic = null
@@ -213,8 +199,8 @@ func _create_player_panel(p_data: Dictionary) -> Control:
 
 	var turn_marker = Label.new()
 	turn_marker.name = "TurnMarker"
-	turn_marker.custom_minimum_size = Vector2(44, 0)
-	turn_marker.text = "TURN"
+	turn_marker.custom_minimum_size = Vector2(26, 0)
+	turn_marker.text = "▶"
 	turn_marker.visible = false
 	turn_marker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	turn_marker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -251,7 +237,7 @@ func _create_player_panel(p_data: Dictionary) -> Control:
 	
 	var stat_lbl = Label.new()
 	stat_lbl.name = "StatLabel"
-	stat_lbl.text = "퀴즈%d · 보너스%d · SP%d · 완주%d · %d번" % [p_data.get("quiz_correct", 0), p_data.get("bonus_quiz_score", 0), p_data.get("skill_energy", 0), p_data.get("laps_completed", 0), p_data.get("position", 0)]
+	stat_lbl.text = "에너지 %d  ·  SP %d" % [p_data.get("energy", 0), p_data.get("skill_energy", 0)]
 	stat_lbl.add_theme_font_size_override("font_size", 12)
 	stat_lbl.add_theme_color_override("font_color", Color(0.48, 0.98, 0.90))
 	stat_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
@@ -738,7 +724,7 @@ func _refresh_primary_action_controls() -> void:
 		var local_idx := _local_player_index()
 		is_local_turn = local_idx >= 0 and GameManager.current_turn_idx == local_idx and not bool(GameManager.players[local_idx].get("is_ai", false))
 		action_ready = is_local_turn and GameManager.current_state == GameManager.TurnState.WAIT_ACTION and active_special_skill_player_idx < 0
-	# 굴림 중에는 결과 연출이 끝날 때까지 중앙 주사위를 유지합니다.
+	# 굴림 중에는 결과 연출이 끝날 때까지 오른쪽 주사위를 유지합니다.
 	if GameManager and GameManager.current_state == GameManager.TurnState.ROLLING_DICE:
 		_set_center_dice_visible(true, false)
 	else:
@@ -751,7 +737,7 @@ func _on_special_skill_completed(player_idx: int) -> void:
 	_refresh_special_skill_button()
 	_refresh_primary_action_controls()
 	if turn_prompt_label:
-		turn_prompt_label.text = "특수기술 완료  •  중앙 주사위를 클릭하세요"
+		turn_prompt_label.text = "특수기술 완료  •  오른쪽 주사위를 클릭하세요"
 		turn_prompt_label.add_theme_color_override("font_color", UI.GOLD)
 		_animate_turn_prompt()
 
@@ -836,163 +822,16 @@ func _configure_inventory_item_icons() -> void:
 
 
 func _create_construction_guide() -> void:
-	if not construction_guide_panel:
-		return
-	for child in construction_guide_panel.get_children():
-		child.queue_free()
-	guide_inventory_count_labels.clear()
-	guide_recipe_cards.clear()
-	guide_recipe_requirement_labels.clear()
-	construction_guide_panel.add_theme_stylebox_override("panel", UI.panel(Color("0a222ceb"), UI.TEAL_DARK, 12, 2, 7))
+	construction_guide_panel.hide()
+	adventure_planner = ADVENTURE_PLANNER.new()
+	adventure_planner.name = "AdventurePlanner"
+	adventure_planner.z_index = 3
+	add_child(adventure_planner)
+	guide_inventory_count_labels = adventure_planner.inventory_labels
+	guide_recipe_cards = adventure_planner.recipe_cards
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_top", 6)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_bottom", 6)
-	construction_guide_panel.add_child(margin)
-	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 3)
-	margin.add_child(content)
-
-	var header := HBoxContainer.new()
-	header.custom_minimum_size = Vector2(0, 18)
-	content.add_child(header)
-	construction_guide_title = Label.new()
-	construction_guide_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	construction_guide_title.add_theme_font_size_override("font_size", 13)
-	construction_guide_title.add_theme_color_override("font_color", UI.GOLD)
-	header.add_child(construction_guide_title)
-	var guide_legend := Label.new()
-	guide_legend.text = "친환경 시설 설계도  ·  재료 숫자는 보유 / 필요"
-	guide_legend.add_theme_font_size_override("font_size", 12)
-	guide_legend.add_theme_color_override("font_color", UI.TEXT_MUTED)
-	header.add_child(guide_legend)
-
-	var inventory_row := HBoxContainer.new()
-	inventory_row.custom_minimum_size = Vector2(0, 30)
-	inventory_row.add_theme_constant_override("separation", 4)
-	content.add_child(inventory_row)
-	var compact_inventory_chips := GameManager.ITEM_DEFINITIONS.size() > 9
-	for item_id_variant in GameManager.ITEM_DEFINITIONS:
-		var item_id := str(item_id_variant)
-		var item_data: Dictionary = GameManager.ITEM_DEFINITIONS[item_id]
-		var item_chip := PanelContainer.new()
-		item_chip.custom_minimum_size = Vector2(106 if compact_inventory_chips else 132, 30)
-		item_chip.tooltip_text = str(item_data["name"])
-		item_chip.add_theme_stylebox_override("panel", UI.panel(Color("14333f"), Color("315d68"), 7, 1, 1))
-		inventory_row.add_child(item_chip)
-		var item_content := HBoxContainer.new()
-		item_content.add_theme_constant_override("separation", 3)
-		item_content.alignment = BoxContainer.ALIGNMENT_CENTER
-		item_chip.add_child(item_content)
-		var icon := _create_asset_texture_rect(str(item_data["asset"]), Vector2(19, 19) if compact_inventory_chips else Vector2(22, 22))
-		item_content.add_child(icon)
-		var name_label := Label.new()
-		name_label.text = str(MATERIAL_SHORT_NAMES.get(item_id, item_data["name"]))
-		name_label.add_theme_font_size_override("font_size", 9 if compact_inventory_chips else 10)
-		name_label.add_theme_color_override("font_color", UI.TEXT)
-		item_content.add_child(name_label)
-		var count_label := Label.new()
-		count_label.text = "0개"
-		count_label.add_theme_font_size_override("font_size", 11)
-		count_label.add_theme_color_override("font_color", UI.GOLD)
-		item_content.add_child(count_label)
-		guide_inventory_count_labels[item_id] = count_label
-
-	var recipe_row := HBoxContainer.new()
-	recipe_row.custom_minimum_size = Vector2(0, 62)
-	recipe_row.add_theme_constant_override("separation", 4)
-	content.add_child(recipe_row)
-	var compact_recipe_cards := GameManager.CONSTRUCTION_PROJECTS.size() > 8
-	for project_index in range(GameManager.CONSTRUCTION_PROJECTS.size()):
-		var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[project_index]
-		var recipe_card := PanelContainer.new()
-		recipe_card.custom_minimum_size = Vector2(116 if compact_recipe_cards else 146, 60)
-		recipe_card.set_meta("project_index", project_index)
-		recipe_row.add_child(recipe_card)
-		guide_recipe_cards.append(recipe_card)
-		var recipe_content := VBoxContainer.new()
-		recipe_content.alignment = BoxContainer.ALIGNMENT_CENTER
-		recipe_content.add_theme_constant_override("separation", 0)
-		recipe_card.add_child(recipe_content)
-		var project_name := Label.new()
-		project_name.text = str(project["name"])
-		project_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		project_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		project_name.add_theme_font_size_override("font_size", 9 if compact_recipe_cards else 11)
-		project_name.add_theme_color_override("font_color", UI.TEXT)
-		recipe_content.add_child(project_name)
-		var requirements_row := HBoxContainer.new()
-		requirements_row.alignment = BoxContainer.ALIGNMENT_CENTER
-		requirements_row.add_theme_constant_override("separation", 5)
-		recipe_content.add_child(requirements_row)
-		var requirement_labels: Dictionary = {}
-		var tooltip_requirements: Array[String] = []
-		for requirement_id_variant in project["requirements"]:
-			var requirement_id := str(requirement_id_variant)
-			var needed := int(project["requirements"][requirement_id])
-			var requirement_data: Dictionary = GameManager.ITEM_DEFINITIONS[requirement_id]
-			var requirement_group := HBoxContainer.new()
-			requirement_group.add_theme_constant_override("separation", 1)
-			requirement_group.tooltip_text = str(requirement_data["name"])
-			requirements_row.add_child(requirement_group)
-			requirement_group.add_child(_create_asset_texture_rect(str(requirement_data["asset"]), Vector2(18, 18)))
-			var requirement_count := Label.new()
-			requirement_count.text = "0/%d" % needed
-			requirement_count.add_theme_font_size_override("font_size", 10)
-			requirement_group.add_child(requirement_count)
-			requirement_labels[requirement_id] = requirement_count
-			tooltip_requirements.append("%s %d개" % [requirement_data["name"], needed])
-		var status_label := Label.new()
-		status_label.name = "Status"
-		status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		status_label.add_theme_font_size_override("font_size", 9)
-		recipe_content.add_child(status_label)
-		recipe_card.tooltip_text = "%s · 필요 재료: %s · 건설 지형: %s" % [project["name"], ", ".join(tooltip_requirements), project.get("terrain_label", "지정 구역")]
-		guide_recipe_requirement_labels.append(requirement_labels)
-	_set_descendant_mouse_filter_ignore(construction_guide_panel)
-	var local_idx := _local_player_index()
-	var initial_inventory: Dictionary = GameManager.players[local_idx].get("inventory", {}) if GameManager and local_idx >= 0 and local_idx < GameManager.players.size() else {}
-	_refresh_construction_guide(local_idx, initial_inventory)
-
-
-func _refresh_construction_guide(player_idx: int, inventory: Dictionary) -> void:
-	if not construction_guide_panel:
-		return
-	var player_name := "플레이어"
-	if GameManager and player_idx >= 0 and player_idx < GameManager.players.size():
-		player_name = str(GameManager.players[player_idx].get("name", player_name))
-	if construction_guide_title:
-		construction_guide_title.text = "%s의 건설 재료" % player_name
-	for item_id_variant in GameManager.ITEM_DEFINITIONS:
-		var item_id := str(item_id_variant)
-		var count_label := guide_inventory_count_labels.get(item_id) as Label
-		if count_label:
-			count_label.text = "%d개" % int(inventory.get(item_id, 0))
-			count_label.add_theme_color_override("font_color", UI.GOLD if int(inventory.get(item_id, 0)) > 0 else UI.TEXT_MUTED)
-	for project_index in range(mini(guide_recipe_cards.size(), GameManager.CONSTRUCTION_PROJECTS.size())):
-		var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[project_index]
-		var can_build := true
-		var requirement_labels: Dictionary = guide_recipe_requirement_labels[project_index]
-		for requirement_id_variant in project["requirements"]:
-			var requirement_id := str(requirement_id_variant)
-			var owned := int(inventory.get(requirement_id, 0))
-			var needed := int(project["requirements"][requirement_id])
-			can_build = can_build and owned >= needed
-			var requirement_label := requirement_labels.get(requirement_id) as Label
-			if requirement_label:
-				requirement_label.text = "%d/%d" % [owned, needed]
-				requirement_label.add_theme_color_override("font_color", UI.SUCCESS if owned >= needed else UI.DANGER)
-		var recipe_card := guide_recipe_cards[project_index]
-		var status_label := recipe_card.find_child("Status", true, false) as Label
-		if status_label:
-			status_label.text = "건설 가능" if can_build else "재료 부족"
-			status_label.add_theme_color_override("font_color", UI.SUCCESS if can_build else UI.TEXT_MUTED)
-		var border_color := UI.SUCCESS if can_build else Color("355763")
-		var background_color := Color("153b38") if can_build else Color("122c36")
-		recipe_card.add_theme_stylebox_override("panel", UI.panel(background_color, border_color, 7, 1, 1))
+func _refresh_construction_guide(_player_idx: int, inventory: Dictionary) -> void:
+	adventure_planner.refresh(inventory)
 
 func _update_inventory(player_idx: int, inventory: Dictionary) -> void:
 	if not item_icons:
@@ -1017,7 +856,14 @@ func update_all_player_panels() -> void:
 			var stat_lbl = panel.find_child("StatLabel", true, false)
 			if stat_lbl:
 				var shield_tag = "  ·  방패" if p_data.get("shield", false) else ""
-				stat_lbl.text = "퀴즈%d · 보너스%d · SP%d · 완주%d · %d번%s" % [p_data.get("quiz_correct", 0), p_data.get("bonus_quiz_score", 0), p_data.get("skill_energy", 0), p_data.get("laps_completed", 0), p_data["position"], shield_tag]
+				var energy_rank := 1
+				for other in GameManager.players:
+					if int(other.get("energy", 0)) > int(p_data.get("energy", 0)): energy_rank += 1
+				stat_lbl.text = "에너지 %d  ·  현재 %d위\nSP %d  ·  %d번 칸%s" % [p_data.get("energy", 0), energy_rank, p_data.get("skill_energy", 0), p_data["position"], shield_tag]
+				panel.tooltip_text = "현재 에너지 순위 · 종료 시 이동 보상이 합산됩니다. 클릭하면 상세 상태를 볼 수 있어요."
+			var name_label := panel.find_child("NameLabel", true, false) as Label
+			if name_label:
+				name_label.text = str(p_data.get("name", "")) + (" · 나" if i == _local_player_index() else "")
 			var turn_marker = panel.find_child("TurnMarker", true, false)
 				
 			# 현재 턴 플레이어는 밝은 초록 골드 테두리 및 펄스
@@ -1050,10 +896,10 @@ func _on_turn_changed(turn_idx: int) -> void:
 	var is_my_turn = (turn_idx == local_idx and not cur_p["is_ai"])
 	if turn_prompt_label:
 		if is_my_turn:
-			turn_prompt_label.text = "내 턴  •  중앙 주사위 또는 특수기술을 선택하세요"
+			turn_prompt_label.text = "내 턴  •  오른쪽 주사위 또는 특수기술을 선택하세요"
 			turn_prompt_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.32))
 		else:
-			turn_prompt_label.text = "%s  •  전략을 계산하는 중..." % cur_p["name"]
+			turn_prompt_label.text = "%s의 턴  ·  다음 건설 목표를 골라보세요" % cur_p["name"]
 			turn_prompt_label.add_theme_color_override("font_color", Color(0.48, 0.9, 0.86))
 		_animate_turn_prompt()
 	_refresh_primary_action_controls()
@@ -1064,7 +910,7 @@ func _on_center_dice_pressed() -> void:
 		return
 	_set_center_dice_visible(true, false)
 	if turn_prompt_label:
-		turn_prompt_label.text = "중앙 주사위가 회전합니다!"
+		turn_prompt_label.text = "오른쪽 주사위가 회전합니다!"
 	if NetworkManager.is_online:
 		NetworkManager.request_roll_dice(local_idx)
 	else:
@@ -1538,6 +1384,7 @@ func _animate_turn_prompt() -> void:
 	create_tween().tween_property(turn_prompt_label, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _on_help_pressed() -> void:
+	adventure_planner.replay_tutorial()
 	_show_event_banner("말 이동 중: 자동 추적·확대  •  왼쪽 드래그: 카메라 이동  •  오른쪽 드래그: 회전  •  휠: 확대/축소")
 
 func _on_sound_pressed() -> void:

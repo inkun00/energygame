@@ -536,7 +536,7 @@ func _test_hud_initialization() -> void:
 	guide_inventory["solar_panel"] = 2
 	guide_inventory["battery"] = 1
 	hud._update_inventory(0, guide_inventory)
-	_expect((hud.guide_recipe_cards[0].find_child("Status", true, false) as Label).text == "건설 가능", "보유 재료가 충족된 발전소는 즉시 건설 가능으로 표시되어야 합니다.")
+	_expect((hud.guide_recipe_cards[0].find_child("Status", true, false) as Label).text == "재료 준비 완료", "탐험 중에는 재료 준비 상태를 건설 가능 여부와 구분해야 합니다.")
 	_expect((hud.guide_recipe_cards[1].find_child("Status", true, false) as Label).text == "재료 부족", "보유 재료가 부족한 발전소는 부족 상태로 표시되어야 합니다.")
 	_expect(hud.village_map != null, "왕국 완성도 화면에는 직접 시설을 놓을 수 있는 마을 지도가 있어야 합니다.")
 	_expect(hud.village_map.BUILDING_SIZE.x < 100.0 and hud.village_map.BUILDING_SIZE.y < 82.0, "지도에 배치되는 발전소 이미지는 기존보다 작아야 합니다.")

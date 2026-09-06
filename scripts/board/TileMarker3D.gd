@@ -43,9 +43,9 @@ func setup_tile_3d(idx: int) -> void:
 	border_mesh.mesh = border_box
 	border_mesh.position = Vector3(0, -0.055, 0)
 	var border_material := StandardMaterial3D.new()
-	border_material.albedo_color = Color(0.84, 0.69, 0.24)
-	border_material.metallic = 0.72
-	border_material.roughness = 0.24
+	border_material.albedo_color = Color("657568")
+	border_material.metallic = 0.05
+	border_material.roughness = 0.85
 	border_mesh.material_override = border_material
 	add_child(border_mesh)
 	move_child(border_mesh, 0)
@@ -53,8 +53,8 @@ func setup_tile_3d(idx: int) -> void:
 	# 2. 타입별 3D 머티리얼 세팅. 게임을 새로 시작할 때에는 메시와
 	# 노드를 다시 만들지 않고 이 머티리얼만 갱신합니다.
 	block_material = StandardMaterial3D.new()
-	block_material.roughness = 0.3
-	block_material.metallic = 0.2
+	block_material.roughness = 0.85
+	block_material.metallic = 0.0
 	block_mesh.material_override = block_material
 	_refresh_tile_style()
 	_create_target_ring(tile_size.y)
@@ -65,7 +65,7 @@ func setup_tile_3d(idx: int) -> void:
 	num_label.text = str(idx)
 	num_label.font_size = 58
 	num_label.outline_size = 12
-	num_label.modulate = Color(1.0, 0.95, 0.6)
+	num_label.modulate = Color("f4eddb")
 	num_label.outline_modulate = Color(0, 0, 0, 1)
 	num_label.position = Vector3(0, tile_size.y * 0.5 + 0.025, 0.52)
 	num_label.rotation_degrees = Vector3(-90, 0, 0)
@@ -83,32 +83,14 @@ func _refresh_tile_style() -> void:
 	block_material.emission_energy_multiplier = 1.0
 	var t_type = tile_data.get("type", BoardGrid.TileType.QUIZ_OX)
 	match t_type:
-		BoardGrid.TileType.START:
-			block_material.albedo_color = Color(0.12, 0.58, 0.28) # 출발 에메랄드
-			block_material.emission_enabled = true
-			block_material.emission = Color(0.15, 0.65, 0.32) * 0.4
-		BoardGrid.TileType.FINISH:
-			block_material.albedo_color = Color(0.85, 0.65, 0.12) # 골든 챔피언
-			block_material.emission_enabled = true
-			block_material.emission = Color(1.0, 0.85, 0.2) * 0.5
-		BoardGrid.TileType.LADDER:
-			block_material.albedo_color = Color(0.88, 0.62, 0.10) # 황금 사다리
-			block_material.emission_enabled = true
-			block_material.emission = Color(1.0, 0.75, 0.15) * 0.35
-		BoardGrid.TileType.SLIDE:
-			block_material.albedo_color = Color(0.78, 0.18, 0.20) # 낭비 미끄럼틀
-			block_material.emission_enabled = true
-			block_material.emission = Color(0.9, 0.2, 0.2) * 0.3
-		BoardGrid.TileType.POWERPLANT:
-			block_material.albedo_color = Color(0.15, 0.52, 0.82) # 청정 발전소
-			block_material.emission_enabled = true
-			block_material.emission = Color(0.2, 0.6, 0.9) * 0.35
-		BoardGrid.TileType.CHANCE_CARD:
-			block_material.albedo_color = Color(0.32, 0.45, 0.78)
-		BoardGrid.TileType.REST_TURN:
-			block_material.albedo_color = Color(0.28, 0.48, 0.52)
-		_:
-			block_material.albedo_color = Color(0.18, 0.26, 0.38) # 퀴즈 칸
+		BoardGrid.TileType.START: block_material.albedo_color = Color("51876a")
+		BoardGrid.TileType.FINISH: block_material.albedo_color = Color("b69852")
+		BoardGrid.TileType.LADDER: block_material.albedo_color = Color("b79d64")
+		BoardGrid.TileType.SLIDE: block_material.albedo_color = Color("aa6460")
+		BoardGrid.TileType.POWERPLANT: block_material.albedo_color = Color("508b91")
+		BoardGrid.TileType.CHANCE_CARD: block_material.albedo_color = Color("7b789b")
+		BoardGrid.TileType.REST_TURN: block_material.albedo_color = Color("73877b")
+		_: block_material.albedo_color = Color("4f6a80")
 	base_emission_enabled = block_material.emission_enabled
 	base_emission = block_material.emission
 

@@ -275,8 +275,8 @@ func _build_3d_board_base() -> void:
 	
 	board_base_material = StandardMaterial3D.new()
 	board_base_material.albedo_color = Color("263136")
-	board_base_material.roughness = 0.46
-	board_base_material.metallic = 0.28
+	board_base_material.roughness = 0.9
+	board_base_material.metallic = 0.0
 	base_mesh.material_override = board_base_material
 	world3d.add_child(base_mesh)
 	renewable_landmarks = Node3D.new()
@@ -289,17 +289,17 @@ func _build_3d_board_base() -> void:
 	rim_mesh.mesh = rim_box
 	rim_mesh.position = Vector3(0, -0.28, 0)
 	var rim_mat := StandardMaterial3D.new()
-	rim_mat.albedo_color = Color(0.85, 0.65, 0.18)
-	rim_mat.metallic = 0.8
-	rim_mat.roughness = 0.2
+	rim_mat.albedo_color = Color("738476")
+	rim_mat.metallic = 0.05
+	rim_mat.roughness = 0.85
 	rim_mesh.material_override = rim_mat
 	world3d.add_child(rim_mesh)
 
 
 func _build_3d_path_guides() -> void:
 	var guide_material := StandardMaterial3D.new()
-	guide_material.albedo_color = Color(0.24, 0.84, 0.72, 0.72)
-	guide_material.emission_enabled = true
+	guide_material.albedo_color = Color("689b8c")
+	guide_material.emission_enabled = false
 	guide_material.emission = Color(0.10, 0.58, 0.50) * 0.28
 	for index in range(BoardGrid.TILE_POSITIONS_3D.size() - 1):
 		var from_position := BoardGrid.get_tile_position_3d(index)
