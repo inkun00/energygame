@@ -52,9 +52,22 @@ func _ready() -> void:
 	visible = false
 	if GameManager and not GameManager.quiz_resolved.is_connected(_on_game_quiz_resolved):
 		GameManager.quiz_resolved.connect(_on_game_quiz_resolved)
+	GameManager.open_market_state_changed.connect(func(state: Dictionary):
+		if bool(state.get("active", false)):
+			cancel_quiz())
+	GameManager.village_construction_started.connect(func(_inventories: Array): cancel_quiz())
+	GameManager.game_over.connect(func(_rankings: Array): cancel_quiz())
+
+
+func _exploration_has_ended() -> bool:
+	return GameManager.open_market_active or GameManager.village_construction_active or GameManager.current_state == GameManager.TurnState.GAME_OVER
 
 
 func _process(delta: float) -> void:
+	# Also handle a network state snapshot arriving before its transition event.
+	if visible and _exploration_has_ended():
+		cancel_quiz()
+		return
 	if spectator_mode and visible:
 		spectator_elapsed += delta
 		_update_spectator_progress()
@@ -75,6 +88,10 @@ func _process(delta: float) -> void:
 
 
 func display_quiz(player_idx: int, quiz_data: Dictionary) -> void:
+	# A late quiz event must not cover the market or construction screen again.
+	if _exploration_has_ended():
+		cancel_quiz()
+		return
 	quiz_display_token += 1
 	# 결과 처리 중 원본 데이터가 비워져도 화면 문구가 유지되도록 깊은 복사를 사용합니다.
 	current_quiz = quiz_data.duplicate(true)
@@ -373,7 +390,7 @@ func _show_result(is_correct: bool, prefix: String = "", should_submit_result: b
 	var result_token := quiz_display_token
 	var result_delay := PLAYER_RESULT_SECONDS if should_submit_result else SPECTATOR_RESULT_SECONDS
 	get_tree().create_timer(result_delay).timeout.connect(func():
-		if result_token != quiz_display_token:
+		if result_token != quiz_display_token or _exploration_has_ended():
 			return
 		visible = false
 		if should_submit_result:

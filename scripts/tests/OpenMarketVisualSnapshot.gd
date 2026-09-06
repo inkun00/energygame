@@ -22,7 +22,14 @@ func _capture() -> void:
 	for item_id_variant in game_manager.ITEM_DEFINITIONS.keys():
 		var item_id := str(item_id_variant)
 		game_manager.players[0]["inventory"][item_id] = 1 + (int(item_id.hash()) & 1)
+	var quiz = main.find_child("QuizModal", true, false)
+	quiz.display_quiz(1, root.get_node("QuizDatabase").get_random_quiz())
+	quiz.spectator_guess_submitted = true
 	game_manager._start_open_market_phase()
+	if quiz.visible:
+		push_error("오픈마켓 전환 시 관전 퀴즈가 닫혀야 합니다.")
+		quit(1)
+		return
 	await create_timer(0.4).timeout
 	var image := root.get_texture().get_image()
 	var error := image.save_png("res://.godot/open_market_preview.png")
