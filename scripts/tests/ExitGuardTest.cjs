@@ -1,0 +1,17 @@
+const fs = require('fs');
+const vm = require('vm');
+const assert = require('assert');
+const html = fs.readFileSync('web/loading.html','utf8');
+const code = html.slice(html.indexOf('// Register only'),html.indexOf('window.energyGameReady'));
+const listeners = new Set();
+const window = { addEventListener(type, fn) {assert.equal(type,'beforeunload');listeners.add(fn)}, removeEventListener(type,fn) {listeners.delete(fn)} };
+vm.runInNewContext(code,{window});
+assert.equal(listeners.size,0);
+window.energyGameSetExitGuard(true); window.energyGameSetExitGuard(true);
+assert.equal(listeners.size,1);
+const event = {preventDefault(){this.prevented=true}};
+[...listeners][0](event);
+assert.equal(event.prevented,true);assert.equal(event.returnValue,true);
+window.energyGameSetExitGuard(false);assert.equal(listeners.size,0);
+window.energyGameSetExitGuard(true);assert.equal(listeners.size,1);
+console.log('PASS: active session guards refresh; duplicate registration avoided; lobby clears guard');

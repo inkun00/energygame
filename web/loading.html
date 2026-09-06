@@ -27,6 +27,21 @@ $GODOT_HEAD_INCLUDE
   </div>
 </section>
 <script>
+// Register only while a game session is open, including market/construction.
+// Browser chrome refresh/close uses its own confirmation text for security.
+(() => {
+  let guarded = false;
+  function confirmLeave(event) {
+    event.preventDefault();
+    event.returnValue = true;
+  }
+  window.energyGameSetExitGuard = function (active) {
+    if (guarded === Boolean(active)) return;
+    guarded = Boolean(active);
+    if (guarded) window.addEventListener('beforeunload', confirmLeave);
+    else window.removeEventListener('beforeunload', confirmLeave);
+  };
+})();
 window.energyGameReady = function () {
   const overlay = document.getElementById('loading');
   if (!overlay) return;
