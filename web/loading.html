@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#071e25">
-<title>그린 킹덤 리빌드</title>
+<title>재생 에너지 탐험대</title>
 $GODOT_HEAD_INCLUDE
 <style>
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#071e25;color:#edf9ed;font-family:"Malgun Gothic",Arial,sans-serif}#canvas{display:block;margin:0;outline:0}#loading{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:28px;background:radial-gradient(ellipse at 50% 40%,#174c45 0%,#092d32 42%,#061820 100%)}.content{text-align:center;width:min(540px,100%)}.eyebrow{font-size:12px;letter-spacing:4px;color:#9dd9bf}.emblem{width:110px;height:110px;margin:26px auto;filter:drop-shadow(0 0 30px #74e8aa55);animation:breathe 2.5s ease-in-out infinite}h1{font-size:clamp(28px,6vw,44px);letter-spacing:-2px;color:#ffe08b;margin:20px 0 10px}p{color:#b9d8d0;font-size:15px;line-height:1.8}.track{margin-top:36px}progress{appearance:none;width:100%;height:12px;border:0;border-radius:20px;overflow:hidden;background:#ffffff15}progress::-webkit-progress-bar{background:#ffffff15;border-radius:20px}progress::-webkit-progress-value{background:linear-gradient(90deg,#44cba0,#e7ec89);border-radius:20px}progress::-moz-progress-bar{background:#72dcab;border-radius:20px}.status{display:flex;justify-content:space-between;font-size:13px;color:#b9d8d0;margin-top:12px;gap:12px}.tip{margin-top:42px;font-size:13px;color:#88b5a9}#retry{border:1px solid #ffe08b;background:#ffe08b;color:#102a2c;padding:12px 26px;border-radius:10px;font:inherit;cursor:pointer;margin-top:20px}#error{color:#ffd2c9;white-space:pre-line}#loading.done{opacity:0;pointer-events:none;transition:opacity .3s}@keyframes breathe{50%{transform:translateY(-6px);filter:drop-shadow(0 0 40px #74e8aa88)}}@media(prefers-reduced-motion:reduce){.emblem{animation:none}#loading.done{transition:none}}
@@ -14,9 +14,9 @@ $GODOT_HEAD_INCLUDE
 <canvas id="canvas" tabindex="0">이 브라우저는 게임 화면을 지원하지 않습니다.</canvas>
 <section id="loading" aria-label="게임 로딩">
   <div class="content">
-    <div class="eyebrow">GREEN KINGDOM REBUILD</div>
+    <div class="eyebrow">RENEWABLE ENERGY EXPLORERS</div>
     <svg class="emblem" viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="55" fill="#143f3b" stroke="#78d8a7" stroke-width="1"/><path d="M32 81C19 41 54 23 92 28C96 68 72 98 40 84Z" fill="#85d99a"/><path d="M30 95L78 42M45 77L43 52M58 64L80 63" fill="none" stroke="#174b41" stroke-width="5" stroke-linecap="round"/></svg>
-    <h1>그린 킹덤 리빌드</h1>
+    <h1>재생 에너지 탐험대</h1>
     <p>우리의 에너지로 다시 초록빛 왕국을!</p>
     <div class="track"><progress id="progress" max="100" value="0" aria-label="게임 다운로드 진행률"></progress></div>
     <div class="status" role="status"><span id="stage">모험을 준비하고 있어요</span><span id="percent">0%</span></div>

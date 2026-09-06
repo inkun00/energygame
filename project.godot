@@ -14,7 +14,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
-config/name="그린 킹덤 리빌드"
+config/name="재생 에너지 탐험대"
 config/description="퀴즈와 협동 건설로 재생에너지 왕국을 복원하는 4인 과학 교육 보드게임"
 config/version="1.0.0"
 run/main_scene="res://scenes/Main.tscn"

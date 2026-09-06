@@ -1,4 +1,4 @@
-# 🌿 그린 킹덤 리빌드 (Green Kingdom Rebuild)
+# 🌿 재생 에너지 탐험대 (Renewable Energy Explorers)
 ### 에너지 사다리: 에코 히어로즈 (Eco Heroes: Energy Ladder)
 
 > **퀴즈와 협동 건설로 재생에너지 왕국을 복원하는 4인 과학 교육 보드게임**  

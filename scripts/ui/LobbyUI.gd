@@ -171,7 +171,7 @@ func _apply_commercial_ui() -> void:
 			chip.add_theme_stylebox_override("panel", UI.panel(Color("173b49dc"), Color("397685"), 9, 1, 2))
 	var footer := get_node_or_null("Footer") as Label
 	if footer:
-		footer.text = "그린 킹덤 리빌드  •  에너지요정 나라 복원 프로젝트"
+		footer.text = "재생 에너지 탐험대  •  에너지요정 나라 복원 프로젝트"
 		footer.add_theme_color_override("font_color", UI.TEXT_MUTED)
 
 	var story_caption := get_node_or_null("OpeningStoryOverlay/CaptionPanel") as PanelContainer
