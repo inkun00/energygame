@@ -277,19 +277,6 @@ theme_override_font_sizes/font_size = 65
 text = "재생 에너지 탐험대"
 horizontal_alignment = 1
 
-[node name="SubTitle" type="Label" parent="LogoContainer"]
-layout_mode = 0
-offset_left = 90.0
-offset_top = 104.0
-offset_right = 600.0
-offset_bottom = 140.0
-theme_override_colors/font_color = Color(0.92, 1, 0.88, 1)
-theme_override_colors/font_outline_color = Color(0.01, 0.09, 0.04, 1)
-theme_override_constants/outline_size = 6
-theme_override_font_sizes/font_size = 25
-text = "RENEWABLE ENERGY EXPLORERS  •  재생에너지 왕국 복원 작전"
-horizontal_alignment = 1
-
 [node name="HeroGlow" type="Panel" parent="."]
 visible = false
 layout_mode = 0
@@ -419,7 +406,7 @@ theme_override_colors/font_color = Color(1, 0.96, 0.78, 1)
 theme_override_colors/font_outline_color = Color(0.16, 0.06, 0.02, 1)
 theme_override_constants/outline_size = 6
 theme_override_font_sizes/font_size = 30
-text = "왕국 복원 준비"
+text = "모험 준비"
 horizontal_alignment = 1
 vertical_alignment = 1
 
