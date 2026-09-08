@@ -13,7 +13,8 @@ enum TileType {
 	POWERPLANT,
 	CHANCE_CARD,
 	REST_TURN,
-	FINISH
+	FINISH,
+	MINIGAME
 }
 
 const COLUMN_COUNT := 10
@@ -37,7 +38,7 @@ const SHORTCUT_MOVE_SECONDS := 2.028 * MOVEMENT_DURATION_SCALE
 static var TILE_DATA: Array[Dictionary] = [
 	{"index": 0, "name": "위기의 왕국 관문", "type": TileType.START, "desc": "화석연료 의존으로 위기에 빠진 에너지요정 나라를 복원하세요!"},
 	{"index": 1, "name": "재생에너지 설계소", "type": TileType.CHANCE_CARD, "desc": "발전소 설계 도면과 건설 자재를 확보합니다!"},
-	{"index": 2, "name": "소수력 발전소", "type": TileType.POWERPLANT, "reward_energy": 2, "desc": "흐르는 물의 힘! 에너지 2개 획득"},
+	{"index": 2, "name": "태양광 발전소 안전 코스", "type": TileType.MINIGAME, "minigame_id": "solar_align", "desc": "햇빛 방향을 읽고 발전 설비와 자연 지형물을 피해 달립니다."},
 	{"index": 3, "name": "스마트 플러그 사다리", "type": TileType.LADDER, "target": 16, "desc": "대기전력 차단 성공! 바로 위 16번 칸으로 사다리를 탑니다!"},
 	{"index": 4, "name": "열에너지 퀴즈", "type": TileType.QUIZ_CHOSUNG, "desc": "분자의 무작위 운동 에너지"},
 	{"index": 5, "name": "운동에너지 퀴즈", "type": TileType.QUIZ_OX, "desc": "운동하는 물체가 가진 힘"},
@@ -51,7 +52,7 @@ static var TILE_DATA: Array[Dictionary] = [
 	{"index": 13, "name": "화학에너지 퀴즈", "type": TileType.QUIZ_CHOSUNG, "desc": "화학 결합 속 포텐셜에너지"},
 	{"index": 14, "name": "롤러코스터 환승역", "type": TileType.POWERPLANT, "reward_energy": 2, "desc": "위치 ⇄ 운동 에너지 상호 변환! 에너지 2개 획득"},
 	{"index": 15, "name": "빈 방 전등 미끄럼틀", "type": TileType.SLIDE, "target": 4, "desc": "빈 방에 불을 켜두어 전기가 낭비되었습니다! 바로 아래 4번 칸으로 미끄러집니다!"},
-	{"index": 16, "name": "에코 쉼터", "type": TileType.REST_TURN, "desc": "잠시 쉬어가며 에너지를 재충전합니다. (1턴 휴식)"},
+	{"index": 16, "name": "풍력 터빈 조종소", "type": TileType.MINIGAME, "minigame_id": "wind_rhythm", "desc": "터빈을 풍향에 맞추고 위험 돌풍에서 안전 정지합니다."},
 	{"index": 17, "name": "전자기 퀴즈", "type": TileType.QUIZ_CHOSUNG, "desc": "전자기장과 전하의 흐름"},
 	{"index": 18, "name": "대기전력 낭비 미끄럼틀", "type": TileType.SLIDE, "target": 1, "desc": "대기전력 낭비가 쌓였습니다! 바로 아래 1번 칸으로 미끄러집니다!"},
 	{"index": 19, "name": "태양광 패널 지대", "type": TileType.POWERPLANT, "reward_energy": 3, "desc": "무한한 햇빛 에너지! 에너지 3개 획득"},
@@ -64,7 +65,7 @@ static var TILE_DATA: Array[Dictionary] = [
 	{"index": 26, "name": "태양에너지 객관식", "type": TileType.QUIZ_OX, "desc": "태양에너지의 원리를 확인합니다."},
 	{"index": 27, "name": "해상 풍력 발전소", "type": TileType.POWERPLANT, "reward_energy": 3, "desc": "바다의 강한 바람! 에너지 3개 획득"},
 	{"index": 28, "name": "단열 리모델링 사다리", "type": TileType.LADDER, "target": 31, "desc": "열손실 차단 성공! 바로 위 31번 칸으로 사다리를 탑니다!"},
-	{"index": 29, "name": "숲속 에코 쉼터", "type": TileType.REST_TURN, "desc": "숲을 돌보며 잠시 쉬어갑니다. (1턴 휴식)"},
+	{"index": 29, "name": "스마트그리드 시티 관제실", "type": TileType.MINIGAME, "minigame_id": "grid_balance", "desc": "도시 활동에 따라 달라지는 수요와 공급을 실시간으로 맞춥니다."},
 	{"index": 30, "name": "물 낭비 미끄럼틀", "type": TileType.SLIDE, "target": 29, "desc": "수도꼭을 잠그지 않았습니다! 바로 아래 29번 칸으로 미끄러집니다!"},
 	{"index": 31, "name": "순환 자원 객관식 퀴즈", "type": TileType.QUIZ_CHOICE, "desc": "순환경제와 자원 재활용 문제"},
 	{"index": 32, "name": "지열 에너지 기지", "type": TileType.POWERPLANT, "reward_energy": 4, "desc": "땅속의 열을 활용! 에너지 4개 획득"},
@@ -78,7 +79,7 @@ static var TILE_DATA: Array[Dictionary] = [
 	{"index": 40, "name": "기후행동 객관식", "type": TileType.QUIZ_OX, "desc": "일상의 기후행동을 점검합니다."},
 	{"index": 41, "name": "대기전력 재발 미끄럼틀", "type": TileType.SLIDE, "target": 38, "desc": "대기전력 낭비가 재발했습니다! 바로 아래 38번 칸으로 미끄러집니다!"},
 	{"index": 42, "name": "에너지 저장장치", "type": TileType.POWERPLANT, "reward_energy": 4, "desc": "재생에너지를 저장해 에너지 4개 획득"},
-	{"index": 43, "name": "도시 숲 쉼터", "type": TileType.REST_TURN, "desc": "도시 숲에서 재충전합니다. (1턴 휴식)"},
+	{"index": 43, "name": "대기전력 플러그 레이스", "type": TileType.MINIGAME, "minigame_id": "standby_hunt", "desc": "집 안을 달리며 화면은 꺼졌지만 전력을 쓰는 기기만 차단합니다."},
 	{"index": 44, "name": "넷제로 도시 객관식 퀴즈", "type": TileType.QUIZ_CHOICE, "desc": "미래 도시의 에너지 전략 문제"},
 	{"index": 45, "name": "과소비 미끄럼틀", "type": TileType.SLIDE, "target": 34, "desc": "불필요한 과소비를 했습니다! 바로 아래 34번 칸으로 미끄러집니다!"},
 	{"index": 46, "name": "그린수소 메가 플랜트", "type": TileType.POWERPLANT, "reward_energy": 5, "desc": "청정 수소 생산! 에너지 5개 획득"},
@@ -105,25 +106,25 @@ static func _initialize_tile_data() -> bool:
 static func _make_extended_tile_data(tile_index: int) -> Dictionary:
 	match tile_index:
 		52:
-			return {"index": tile_index, "name": "조력 에너지 연구소", "type": TileType.POWERPLANT, "reward_energy": 4, "desc": "밀물과 썰물의 힘으로 에너지 4개 획득"}
+			return {"index": tile_index, "name": "수력 댐 조절실", "type": TileType.MINIGAME, "minigame_id": "hydro_gate", "desc": "필요한 발전량에 맞춰 수문 유량을 조절합니다."}
 		56:
 			return {"index": tile_index, "name": "바람꽃 쉼터", "type": TileType.REST_TURN, "desc": "바람꽃 정원에서 에너지를 재충전합니다. (1턴 휴식)"}
 		60:
 			return {"index": tile_index, "name": "태양열 마을 온실", "type": TileType.POWERPLANT, "reward_energy": 4, "desc": "태양열로 온실을 데워 에너지 4개 획득"}
 		64:
-			return {"index": tile_index, "name": "자원순환 보너스", "type": TileType.CHANCE_CARD, "desc": "버려진 자원에서 새로운 건설 기회를 발견합니다!"}
+			return {"index": tile_index, "name": "에너지원 분류 센터", "type": TileType.MINIGAME, "minigame_id": "energy_sort", "desc": "에너지원과 절약 기술을 올바른 범주로 분류합니다."}
 		68:
 			return {"index": tile_index, "name": "심부 지열 발전소", "type": TileType.POWERPLANT, "reward_energy": 5, "desc": "깊은 땅속 열을 활용해 에너지 5개 획득"}
 		72:
 			return {"index": tile_index, "name": "푸른 숲 쉼터", "type": TileType.REST_TURN, "desc": "탄소를 흡수하는 숲을 돌보며 쉽니다. (1턴 휴식)"}
 		76:
-			return {"index": tile_index, "name": "부유식 해상 풍력단지", "type": TileType.POWERPLANT, "reward_energy": 5, "desc": "먼바다의 강한 바람으로 에너지 5개 획득"}
+			return {"index": tile_index, "name": "배터리 전력 중계소", "type": TileType.MINIGAME, "minigame_id": "battery_relay", "desc": "잉여 전력은 저장하고 부족할 때 공급합니다."}
 		80:
 			return {"index": tile_index, "name": "스마트그리드 보너스", "type": TileType.CHANCE_CARD, "desc": "전기를 똑똑하게 나누는 친환경 전략 기회를 얻습니다!"}
 		84:
 			return {"index": tile_index, "name": "계곡 소수력 발전소", "type": TileType.POWERPLANT, "reward_energy": 5, "desc": "계곡물의 흐름으로 에너지 5개 획득"}
 		88:
-			return {"index": tile_index, "name": "요정 연못 쉼터", "type": TileType.REST_TURN, "desc": "맑은 연못에서 마지막 도전을 준비합니다. (1턴 휴식)"}
+			return {"index": tile_index, "name": "탄소제로 이동 챌린지", "type": TileType.MINIGAME, "minigame_id": "eco_commute", "desc": "상황에 맞는 저탄소 이동수단을 빠르게 선택합니다."}
 		92:
 			return {"index": tile_index, "name": "그린수소 충전도시", "type": TileType.POWERPLANT, "reward_energy": 6, "desc": "재생에너지로 만든 수소를 공급해 에너지 6개 획득"}
 		96:
@@ -152,16 +153,30 @@ static func assign_random_shortcuts() -> void:
 		_shortcut_free_template = _create_shortcut_free_template()
 	var rng := RandomNumberGenerator.new()
 	# 바로 직전 게임과 같은 배치가 나올 확률까지 피하기 위해 몇 번 다시 뽑습니다.
-	for attempt in range(4):
+	for attempt in range(32):
 		TILE_DATA = _shortcut_free_template.duplicate(true)
 		rng.randomize()
 		var occupied_endpoints: Dictionary = {}
-		_assign_random_shortcut_kind(rng, TileType.LADDER, RANDOM_LADDER_COUNT, occupied_endpoints)
-		_assign_random_shortcut_kind(rng, TileType.SLIDE, RANDOM_SLIDE_COUNT, occupied_endpoints)
+		# 두 종류를 번갈아 고르면 한 종류가 사용 가능한 연결을 먼저 독점하지 않아
+		# 미니게임 타일 8개를 보호한 뒤에도 항상 같은 수를 배치할 수 있습니다.
+		for _shortcut_index in range(maxi(RANDOM_LADDER_COUNT, RANDOM_SLIDE_COUNT)):
+			if _shortcut_index < RANDOM_LADDER_COUNT:
+				_assign_random_shortcut_kind(rng, TileType.LADDER, 1, occupied_endpoints)
+			if _shortcut_index < RANDOM_SLIDE_COUNT:
+				_assign_random_shortcut_kind(rng, TileType.SLIDE, 1, occupied_endpoints)
+		if _count_tiles_of_type(TileType.LADDER) != RANDOM_LADDER_COUNT or _count_tiles_of_type(TileType.SLIDE) != RANDOM_SLIDE_COUNT:
+			continue
 		var signature := get_shortcut_signature()
-		if signature != _previous_shortcut_signature or attempt == 3:
+		if signature != _previous_shortcut_signature or attempt == 31:
 			_previous_shortcut_signature = signature
 			return
+
+static func _count_tiles_of_type(tile_type: int) -> int:
+	var count := 0
+	for tile in TILE_DATA:
+		if int(tile.get("type", -1)) == tile_type:
+			count += 1
+	return count
 
 static func get_shortcut_signature() -> String:
 	var links: Array[String] = []

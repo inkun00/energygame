@@ -71,6 +71,11 @@ func setup_tile(idx: int) -> void:
 			sb.border_color = Color(0.55, 0.85, 0.88)
 			type_icon = "☕"
 			type_tag = "에코 쉼터"
+		BoardGrid.TileType.MINIGAME:
+			sb.bg_color = Color(0.42, 0.16, 0.58, 0.92)
+			sb.border_color = Color(0.86, 0.50, 1.0)
+			type_icon = "🎮"
+			type_tag = "동시 미니게임"
 		_:
 			sb.bg_color = Color(0.14, 0.20, 0.30, 0.85) # 퀴즈 칸
 			sb.border_color = Color(0.42, 0.68, 0.95)

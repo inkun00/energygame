@@ -920,6 +920,10 @@ func request_open_market_take(player_idx: int, item_id: String) -> void:
 	_request_game_action("open_market_take", {"player_idx": player_idx, "item_id": item_id})
 
 
+func request_minigame_score(player_idx: int, score: int, learning_stats: Dictionary = {}) -> void:
+	_request_game_action("minigame_score", {"player_idx": player_idx, "score": score, "stats": learning_stats.duplicate(true)})
+
+
 func request_evaluate_village() -> void:
 	_request_game_action("evaluate_village", {})
 
@@ -1074,6 +1078,9 @@ func _handle_game_action(sender_peer_id: int, action: String, payload: Dictionar
 		"open_market_take":
 			if int(payload.get("player_idx", -1)) == player_idx:
 				GameManager.take_open_market_item(player_idx, str(payload.get("item_id", "")))
+		"minigame_score":
+			if int(payload.get("player_idx", -1)) == player_idx:
+				GameManager.submit_minigame_score(player_idx, int(payload.get("score", 0)), payload.get("stats", {}))
 		"evaluate_village":
 			if sender_peer_id == 1:
 				GameManager.evaluate_village()
@@ -1110,6 +1117,9 @@ func _connect_game_signals() -> void:
 	GameManager.lap_reward_requested.connect(func(idx, rank, reward): _broadcast_game_event("lap_reward_requested", [idx, rank, reward]))
 	GameManager.lap_reward_completed.connect(func(idx, items): _broadcast_game_event("lap_reward_completed", [idx, items]))
 	GameManager.open_market_state_changed.connect(func(state): _broadcast_game_event("open_market_state_changed", [state]))
+	GameManager.minigame_started.connect(func(game_data): _broadcast_game_event("minigame_started", [game_data]))
+	GameManager.minigame_submission_changed.connect(func(state): _broadcast_game_event("minigame_submission_changed", [state]))
+	GameManager.minigame_finished.connect(func(results): _broadcast_game_event("minigame_finished", [results]))
 
 
 func _broadcast_game_event(event_name: String, event_args: Array) -> void:
@@ -1189,6 +1199,7 @@ func _capture_game_state_patch(event_name: String, event_args: Array) -> Diction
 			patch["active_quiz_player_idx"] = GameManager.active_quiz_player_idx
 			patch["active_spectator_quiz_attempts"] = GameManager.active_spectator_quiz_attempts.duplicate(true)
 			patch["pending_lap_reward"] = GameManager.pending_lap_reward.duplicate(true)
+			_add_minigame_state(patch)
 		"player_moved", "player_state_changed", "player_inventory_changed":
 			_add_player_update(patch, int(event_args[0]) if not event_args.is_empty() else -1)
 			patch["pending_lap_reward"] = GameManager.pending_lap_reward.duplicate(true)
@@ -1218,6 +1229,11 @@ func _capture_game_state_patch(event_name: String, event_args: Array) -> Diction
 			patch["pending_lap_reward"] = GameManager.pending_lap_reward.duplicate(true)
 		"open_market_state_changed":
 			_add_open_market_state(patch)
+		"minigame_started", "minigame_submission_changed":
+			_add_minigame_state(patch)
+		"minigame_finished":
+			patch["players"] = GameManager.players.duplicate(true)
+			_add_minigame_state(patch)
 		"village_construction_started", "village_construction_changed":
 			patch["players"] = GameManager.players.duplicate(true)
 			_add_kingdom_state(patch)
@@ -1259,6 +1275,15 @@ func _add_open_market_state(patch: Dictionary) -> void:
 	patch["open_market_taken_counts"] = GameManager.open_market_taken_counts.duplicate(true)
 
 
+func _add_minigame_state(patch: Dictionary) -> void:
+	patch["active_minigame"] = GameManager.active_minigame.duplicate(true)
+	patch["minigame_scores"] = GameManager.minigame_scores.duplicate(true)
+	patch["minigame_time_remaining"] = GameManager.minigame_time_remaining
+	patch["minigame_trigger_player_idx"] = GameManager.minigame_trigger_player_idx
+	patch["minigame_round_count"] = GameManager.minigame_round_count
+	patch["completed_minigame_ids"] = GameManager.completed_minigame_ids.duplicate()
+
+
 func _capture_game_state() -> Dictionary:
 	return {
 		"players": GameManager.players.duplicate(true),
@@ -1291,7 +1316,13 @@ func _capture_game_state() -> Dictionary:
 		"open_market_submitted_players": GameManager.open_market_submitted_players.duplicate(true),
 		"open_market_stock": GameManager.open_market_stock.duplicate(true),
 		"open_market_take_allowances": GameManager.open_market_take_allowances.duplicate(true),
-		"open_market_taken_counts": GameManager.open_market_taken_counts.duplicate(true)
+		"open_market_taken_counts": GameManager.open_market_taken_counts.duplicate(true),
+		"active_minigame": GameManager.active_minigame.duplicate(true),
+		"minigame_scores": GameManager.minigame_scores.duplicate(true),
+		"minigame_time_remaining": GameManager.minigame_time_remaining,
+		"minigame_trigger_player_idx": GameManager.minigame_trigger_player_idx,
+		"minigame_round_count": GameManager.minigame_round_count,
+		"completed_minigame_ids": GameManager.completed_minigame_ids.duplicate()
 	}
 
 

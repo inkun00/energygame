@@ -18,6 +18,7 @@ var skill_targetable := false
 var target_pulse_elapsed := 0.0
 var base_emission_enabled := false
 var base_emission := Color.BLACK
+var minigame_completed := false
 
 func setup_tile_3d(idx: int) -> void:
 	tile_index = idx
@@ -75,6 +76,10 @@ func refresh_tile_data() -> void:
 	tile_data = BoardGrid.get_tile_data(tile_index)
 	_refresh_tile_style()
 
+func set_minigame_completed(is_completed: bool) -> void:
+	minigame_completed = is_completed
+	_refresh_tile_style()
+
 func _refresh_tile_style() -> void:
 	if block_material == null:
 		return
@@ -90,6 +95,11 @@ func _refresh_tile_style() -> void:
 		BoardGrid.TileType.POWERPLANT: block_material.albedo_color = Color("508b91")
 		BoardGrid.TileType.CHANCE_CARD: block_material.albedo_color = Color("7b789b")
 		BoardGrid.TileType.REST_TURN: block_material.albedo_color = Color("73877b")
+		BoardGrid.TileType.MINIGAME:
+			block_material.albedo_color = Color("59676b") if minigame_completed else Color("9b5fc0")
+			block_material.emission_enabled = not minigame_completed
+			block_material.emission = Color("7a35aa") if not minigame_completed else Color.BLACK
+			block_material.emission_energy_multiplier = 0.35
 		_: block_material.albedo_color = Color("4f6a80")
 	base_emission_enabled = block_material.emission_enabled
 	base_emission = block_material.emission

@@ -21,6 +21,7 @@ const EnergyFairyVillage3D = preload("res://scripts/board/EnergyFairyVillage3D.g
 @onready var modals_layer: CanvasLayer = $Modals
 @onready var hud: Control = $UILayer/HUD
 @onready var quiz_modal: QuizUIController = $Modals/QuizModal
+@onready var minigame_modal: MiniGameUI = $Modals/MiniGameModal
 
 var player_pawns: Array[PlayerPawn] = []
 var tile_markers: Array = []
@@ -102,6 +103,7 @@ func _ready() -> void:
 		GameManager.special_skill_activated.connect(_on_special_skill_activated)
 		GameManager.kingdom_progress_changed.connect(_on_kingdom_progress_changed)
 		GameManager.village_construction_started.connect(_on_village_construction_started)
+		GameManager.minigame_finished.connect(_on_minigame_finished)
 
 func _build_energy_fairy_village_backdrop() -> void:
 	if is_instance_valid(energy_fairy_village):
@@ -525,6 +527,7 @@ func _refresh_random_shortcut_visuals() -> void:
 	# 타일 100개의 메시·라벨을 폐기하지 않고 바뀐 종류의 머티리얼만 갱신합니다.
 	for marker in tile_markers:
 		if is_instance_valid(marker):
+			marker.set_minigame_completed(false)
 			marker.refresh_tile_data()
 	for child in rails_container.get_children():
 		rails_container.remove_child(child)
@@ -547,6 +550,8 @@ func stop_board_game() -> void:
 	set_board_active(false)
 	if quiz_modal:
 		quiz_modal.cancel_quiz()
+	if minigame_modal:
+		minigame_modal.cancel_minigame()
 
 func _on_player_moved(player_idx: int, from_tile: int, to_tile: int) -> void:
 	if player_idx < player_pawns.size():
@@ -588,6 +593,16 @@ func _on_special_skill_activated(player_idx: int, target_index: int, skill: Dict
 func _on_quiz_requested(player_idx: int, quiz_data: Dictionary) -> void:
 	if quiz_modal:
 		quiz_modal.display_quiz(player_idx, quiz_data)
+
+func _on_minigame_finished(_results: Array) -> void:
+	for marker in tile_markers:
+		if is_instance_valid(marker):
+			var marker_data: Dictionary = BoardGrid.get_tile_data(marker.tile_index)
+			var minigame_id := str(marker_data.get("minigame_id", ""))
+			marker.set_minigame_completed(
+				not minigame_id.is_empty()
+				and minigame_id in GameManager.completed_minigame_ids
+			)
 
 func _on_village_construction_started(_inventories: Array) -> void:
 	# 건설 결과와 저장 이미지는 말 위치가 아니라 마을 전체가 보이는 시점으로 남깁니다.

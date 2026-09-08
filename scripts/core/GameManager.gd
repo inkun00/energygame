@@ -24,6 +24,9 @@ signal lap_completed(player_idx, lap_number, rank, reward_count)
 signal lap_reward_requested(player_idx, rank, reward_count)
 signal lap_reward_completed(player_idx, selected_items)
 signal open_market_state_changed(state)
+signal minigame_started(game_data)
+signal minigame_submission_changed(state)
+signal minigame_finished(results)
 
 enum TurnState {
 	WAIT_ACTION,
@@ -31,6 +34,7 @@ enum TurnState {
 	PLAYER_MOVING,
 	TILE_EVENT,
 	RESOLVING_QUIZ,
+	RESOLVING_MINIGAME,
 	TURN_END,
 	GAME_OVER
 }
@@ -60,6 +64,61 @@ const REQUIRED_TEAM_QUIZ_CORRECT := 4
 const VILLAGE_RECOVERY_TARGET := 70
 const QUIZ_CORRECT_SCORE := 10
 const SPECTATOR_QUIZ_BONUS_SCORE := QUIZ_CORRECT_SCORE / 2
+const MINIGAME_DURATION_SECONDS := 30.0
+const MINIGAME_SUBMISSION_GRACE_SECONDS := 1.0
+const MINIGAME_RESULTS_SECONDS := 5.0
+const MINIGAME_SCORE_LIMIT := 5000
+const MINIGAME_RANK_REWARDS: Array[int] = [20, 10, 5, 1]
+const MINIGAME_DEFINITIONS := {
+	"solar_align": {
+		"id": "solar_align", "icon": "☀️", "title": "태양광 패널 대시",
+		"objective": "햇빛을 향한 패널 경로로 달리면서 태양광 발전 설비와 자연 지형물을 피하세요.",
+		"lesson": "태양광 패널은 햇빛을 정면으로 받을수록 더 많이 발전하며, 발전소에서는 설비 사이의 안전 통로를 지켜야 합니다.",
+		"input_hint": "A/D 이동 · Space 점프", "accent": "ffd45c"
+	},
+	"wind_rhythm": {
+		"id": "wind_rhythm", "icon": "🌬️", "title": "풍력 터빈 파일럿",
+		"objective": "터빈을 풍향에 맞춰 발전하고 위험 돌풍에서는 브레이크로 장비를 보호하세요.",
+		"lesson": "풍력 터빈은 바람을 정면으로 받을 때 발전량이 커지고, 지나치게 강한 바람에서는 안전을 위해 멈춥니다.",
+		"input_hint": "A/D 회전 · Space 브레이크", "accent": "73d8ff"
+	},
+	"grid_balance": {
+		"id": "grid_balance", "icon": "⚡", "title": "스마트그리드 시티 컨트롤",
+		"objective": "부드럽게 변하는 도시 전력 수요를 따라가며 공급과 수요의 간격을 최대한 작게 유지하세요.",
+		"lesson": "전력망은 매 순간 생산량과 소비량이 균형을 이뤄야 도시가 안정적으로 작동합니다.",
+		"input_hint": "W/S 또는 ↑/↓ 공급 조절", "accent": "78f0bd"
+	},
+	"standby_hunt": {
+		"id": "standby_hunt", "icon": "🔌", "title": "대기전력 플러그 레이스",
+		"objective": "집 안을 좌우로 달리며 화면은 꺼졌지만 전력을 소비하는 기기만 찾아 플러그를 차단하세요.",
+		"lesson": "화면이 꺼져 있어도 소비 전력이 표시되는 기기는 대기전력을 사용합니다. 작동 중인 기기의 전원은 유지해야 합니다.",
+		"input_hint": "A/D 좌우 달리기 · Space 가까운 플러그 차단", "accent": "ff9f68"
+	},
+	"hydro_gate": {
+		"id": "hydro_gate", "icon": "💧", "title": "수력 댐 수문 조절",
+		"objective": "수문을 열고 닫아 요청된 발전 유량과 정확히 맞춘 뒤 확정하세요.",
+		"lesson": "수력 발전은 높은 곳의 물이 내려오는 힘으로 터빈을 돌려 전기를 만듭니다.",
+		"input_hint": "수치 계산 · 정밀 조절", "accent": "58bfff"
+	},
+	"energy_sort": {
+		"id": "energy_sort", "icon": "♻️", "title": "에너지원 분류 레이스",
+		"objective": "나타나는 카드를 재생에너지·비재생에너지·효율 기술로 분류하세요.",
+		"lesson": "재생에너지는 자연에서 다시 얻을 수 있고, 효율 기술은 같은 일을 더 적은 에너지로 합니다.",
+		"input_hint": "지식 · 3지선다", "accent": "9bea72"
+	},
+	"battery_relay": {
+		"id": "battery_relay", "icon": "🔋", "title": "에너지 저장 중계",
+		"objective": "전력이 남으면 충전, 부족하면 방전, 균형이면 대기를 선택하세요.",
+		"lesson": "에너지저장장치는 날씨에 따라 달라지는 재생에너지의 남는 전기를 모아 필요할 때 공급합니다.",
+		"input_hint": "상황 판단 · 3지선다", "accent": "c6ff67"
+	},
+	"eco_commute": {
+		"id": "eco_commute", "icon": "🚲", "title": "탄소제로 이동 챌린지",
+		"objective": "거리와 인원, 짐을 보고 현실적으로 탄소 배출이 가장 적은 이동수단을 고르세요.",
+		"lesson": "가까운 거리는 걷기와 자전거, 먼 거리는 대중교통을 이용하면 이동 배출을 크게 줄일 수 있습니다.",
+		"input_hint": "생활 적용 · 빠른 판단", "accent": "57e3a0"
+	}
+}
 # 게임 종료 시 누적 이동 거리 1~4위가 받는 일반 에너지입니다.
 # 이 에너지는 최종 순위 계산 전에 지급되어 실제 순위에 반영됩니다.
 const MOVEMENT_END_REWARDS: Array[int] = [120, 80, 40, 20]
@@ -148,6 +207,13 @@ var _last_open_market_time_seconds := -1
 var _open_market_ai_action_remaining := 0.0
 var _progress_watch_signature := ""
 var _progress_watch_elapsed := 0.0
+var active_minigame: Dictionary = {}
+var minigame_scores: Dictionary = {}
+var minigame_time_remaining := 0.0
+var minigame_trigger_player_idx := -1
+var minigame_round_count := 0
+var _last_minigame_time_seconds := -1
+var completed_minigame_ids: Array[String] = []
 
 func _ready() -> void:
 	set_process(true)
@@ -158,6 +224,9 @@ func _process(delta: float) -> void:
 	if NetworkManager.is_online and not NetworkManager.is_host:
 		return
 	_update_ai_progress_watchdog(delta)
+	if not active_minigame.is_empty():
+		_update_minigame(delta)
+		return
 	if open_market_active:
 		_update_open_market(delta)
 		return
@@ -199,6 +268,13 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 	_open_market_ai_action_remaining = 0.0
 	_progress_watch_signature = ""
 	_progress_watch_elapsed = 0.0
+	active_minigame.clear()
+	minigame_scores.clear()
+	minigame_time_remaining = 0.0
+	minigame_trigger_player_idx = -1
+	minigame_round_count = 0
+	_last_minigame_time_seconds = -1
+	completed_minigame_ids.clear()
 	built_project_ids.clear()
 	built_project_placements.clear()
 	built_project_owners.clear()
@@ -262,6 +338,9 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 			"skill_energy": 0, # 퀴즈 정답으로만 모으는 특수기술 전용 에너지
 			"quiz_correct": 0,
 			"bonus_quiz_score": 0,
+			"minigame_score_total": 0,
+			"minigame_wins": 0,
+			"minigame_energy_earned": 0,
 			"construction_contribution": 0,
 			"inventory": _create_empty_inventory(),
 			"project_completion_bonus": 0,
@@ -298,6 +377,11 @@ func stop_game() -> void:
 	active_quiz_data.clear()
 	active_quiz_player_idx = -1
 	active_spectator_quiz_attempts.clear()
+	active_minigame.clear()
+	minigame_scores.clear()
+	minigame_time_remaining = 0.0
+	minigame_trigger_player_idx = -1
+	_last_minigame_time_seconds = -1
 	pending_lap_reward.clear()
 	game_time_remaining = 0.0
 	dice_input_time_remaining = 0.0
@@ -406,6 +490,20 @@ func _apply_network_values(values: Dictionary) -> void:
 		dice_input_time_remaining = float(values["dice_input_time_remaining"])
 	if values.has("village_ai_construction_running"):
 		village_ai_construction_running = bool(values["village_ai_construction_running"])
+	if values.has("active_minigame"):
+		active_minigame = (values["active_minigame"] as Dictionary).duplicate(true)
+	if values.has("minigame_scores"):
+		minigame_scores = (values["minigame_scores"] as Dictionary).duplicate(true)
+	if values.has("minigame_time_remaining"):
+		minigame_time_remaining = float(values["minigame_time_remaining"])
+	if values.has("minigame_trigger_player_idx"):
+		minigame_trigger_player_idx = int(values["minigame_trigger_player_idx"])
+	if values.has("minigame_round_count"):
+		minigame_round_count = int(values["minigame_round_count"])
+	if values.has("completed_minigame_ids"):
+		completed_minigame_ids.clear()
+		for game_id_variant in values["completed_minigame_ids"]:
+			completed_minigame_ids.append(str(game_id_variant))
 
 
 func _replay_network_event(event_name: String, event_args: Array) -> void:
@@ -637,6 +735,14 @@ func _resolve_tile_event(player_idx: int, tile_idx: int, shortcut_history: Array
 			player_state_changed.emit(player_idx)
 			status_message_posted.emit("☕ 다음 턴에 1회 쉬어갑니다.")
 			end_turn()
+
+		BoardGrid.TileType.MINIGAME:
+			var minigame_id := str(tile.get("minigame_id", "solar_align"))
+			if minigame_id in completed_minigame_ids:
+				status_message_posted.emit("✅ 이미 완료한 미니게임입니다. 이 칸은 안전한 일반 타일로 바뀌었습니다.")
+				end_turn()
+			else:
+				_start_minigame(player_idx, minigame_id)
 			
 		BoardGrid.TileType.QUIZ_CHOSUNG, BoardGrid.TileType.QUIZ_OX, BoardGrid.TileType.QUIZ_CHOICE:
 			current_state = TurnState.RESOLVING_QUIZ
@@ -663,6 +769,208 @@ func resolve_ai_quiz_if_pending(player_idx: int) -> void:
 	if player_idx < 0 or player_idx >= players.size() or not bool(players[player_idx].get("is_ai", false)):
 		return
 	on_network_quiz_resolved(player_idx, randf() < 0.85)
+
+func _start_minigame(trigger_player_idx: int, minigame_id: String) -> void:
+	if not is_game_active or not MINIGAME_DEFINITIONS.has(minigame_id):
+		end_turn()
+		return
+	current_state = TurnState.RESOLVING_MINIGAME
+	minigame_round_count += 1
+	minigame_trigger_player_idx = trigger_player_idx
+	minigame_scores.clear()
+	minigame_time_remaining = MINIGAME_DURATION_SECONDS + MINIGAME_SUBMISSION_GRACE_SECONDS
+	_last_minigame_time_seconds = ceili(minigame_time_remaining)
+	active_minigame = (MINIGAME_DEFINITIONS[minigame_id] as Dictionary).duplicate(true)
+	active_minigame["round_id"] = minigame_round_count
+	active_minigame["seed"] = randi()
+	active_minigame["duration"] = MINIGAME_DURATION_SECONDS
+	active_minigame["phase"] = "playing"
+	active_minigame["trigger_player_idx"] = trigger_player_idx
+	status_message_posted.emit("🎮 [%s] 동시 미니게임 시작! 전원이 %s에 도전합니다." % [players[trigger_player_idx]["name"], active_minigame["title"]])
+	minigame_started.emit(active_minigame.duplicate(true))
+	minigame_submission_changed.emit(get_minigame_state())
+	for player_idx in range(players.size()):
+		if bool(players[player_idx].get("is_ai", false)):
+			var delay := randf_range(3.0, 7.0)
+			_schedule_game_action(delay, _submit_ai_minigame_score.bind(player_idx, minigame_round_count))
+
+func _update_minigame(delta: float) -> void:
+	if str(active_minigame.get("phase", "")) != "playing":
+		return
+	minigame_time_remaining = maxf(0.0, minigame_time_remaining - delta)
+	var display_seconds := ceili(minigame_time_remaining)
+	if display_seconds != _last_minigame_time_seconds:
+		_last_minigame_time_seconds = display_seconds
+		minigame_submission_changed.emit(get_minigame_state())
+	if minigame_time_remaining <= 0.0:
+		for player_idx in range(players.size()):
+			if not minigame_scores.has(player_idx):
+				var fallback_score := _generate_ai_minigame_score(player_idx) if bool(players[player_idx].get("is_ai", false)) else 0
+				minigame_scores[player_idx] = {"score": fallback_score, "stats": {"timed_out": true}}
+		_finalize_minigame()
+
+func submit_minigame_score(player_idx: int, score: int, learning_stats: Dictionary = {}) -> bool:
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		NetworkManager.request_minigame_score(player_idx, score, learning_stats)
+		return true
+	if active_minigame.is_empty() or str(active_minigame.get("phase", "")) != "playing":
+		return false
+	if player_idx < 0 or player_idx >= players.size() or minigame_scores.has(player_idx):
+		return false
+	var safe_stats := {
+		"correct": clampi(int(learning_stats.get("correct", 0)), 0, 100),
+		"attempts": clampi(int(learning_stats.get("attempts", 0)), 0, 100),
+		"best_streak": clampi(int(learning_stats.get("best_streak", 0)), 0, 100)
+	}
+	minigame_scores[player_idx] = {"score": clampi(score, 0, MINIGAME_SCORE_LIMIT), "stats": safe_stats}
+	minigame_submission_changed.emit(get_minigame_state())
+	if minigame_scores.size() >= players.size():
+		_finalize_minigame()
+	return true
+
+func _submit_ai_minigame_score(player_idx: int, round_id: int) -> void:
+	if active_minigame.is_empty() or int(active_minigame.get("round_id", -1)) != round_id:
+		return
+	if player_idx < 0 or player_idx >= players.size() or not bool(players[player_idx].get("is_ai", false)):
+		return
+	var score := _generate_ai_minigame_score(player_idx)
+	var attempts := randi_range(8, 15)
+	var correct := clampi(int(round(float(score) / 95.0)), 3, attempts)
+	submit_minigame_score(player_idx, score, {"correct": correct, "attempts": attempts, "best_streak": randi_range(2, correct)})
+
+func _generate_ai_minigame_score(player_idx: int) -> int:
+	var round_seed := int(active_minigame.get("seed", 0))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = round_seed + player_idx * 7919 + 101
+	if str(active_minigame.get("id", "")) == "solar_align":
+		# AI도 패널 12개와 구름 장애물을 차례로 판정합니다. 난이도 차이는
+		# 올바른 차선 선택률과 점프 반응률로 만들어 무작위 점수 지급을 피합니다.
+		var simulated_score := 0
+		var panel_accuracy := rng.randf_range(0.58, 0.88)
+		var jump_accuracy := rng.randf_range(0.62, 0.92)
+		for gate_index in range(12):
+			if rng.randf() <= panel_accuracy:
+				simulated_score += 100 + mini(gate_index, 5) * 4
+			else:
+				simulated_score = maxi(0, simulated_score - 25)
+			if gate_index % 2 == 1:
+				simulated_score += 30 if rng.randf() <= jump_accuracy else -20
+		return maxi(0, simulated_score)
+	if str(active_minigame.get("id", "")) == "wind_rhythm":
+		# AI도 여섯 번의 일반 풍향 정렬과 두 번의 위험 돌풍 대응을
+		# 각각 판정합니다. 풍속이 높고 정렬 반응이 정확할수록 점수가 큽니다.
+		var simulated_score := 0
+		var alignment_skill := rng.randf_range(0.58, 0.90)
+		var storm_reaction := rng.randf_range(0.68, 0.95)
+		for phase_index in range(8):
+			if phase_index in [3, 7]:
+				if rng.randf() <= storm_reaction:
+					simulated_score += 75
+				else:
+					simulated_score = maxi(0, simulated_score - 35)
+				continue
+			var simulated_wind_speed := rng.randi_range(7, 22)
+			var aligned_ticks := rng.randi_range(5, 9) if rng.randf() <= alignment_skill else rng.randi_range(1, 4)
+			simulated_score += aligned_ticks * (7 + int(round(float(simulated_wind_speed) * 0.85)))
+		return maxi(0, simulated_score)
+	if str(active_minigame.get("id", "")) == "grid_balance":
+		# AI도 연속적으로 변하는 수요를 따라가며 매 측정 시점의 오차에 따라
+		# 같은 점수식을 적용합니다. 평균 오차가 작은 AI가 더 높은 점수를 얻습니다.
+		var simulated_score := 0
+		var control_skill := rng.randf_range(0.58, 0.91)
+		for measurement_index in range(150):
+			var typical_gap := lerpf(24.0, 4.0, control_skill)
+			var simulated_gap := clampf(rng.randfn(typical_gap, 5.5), 0.0, 60.0)
+			var synchronization := clampf(1.0 - simulated_gap / 60.0, 0.0, 1.0)
+			simulated_score += roundi(32.0 * synchronization * synchronization)
+		return maxi(0, simulated_score)
+	if str(active_minigame.get("id", "")) == "standby_hunt":
+		# AI도 각 웨이브에서 화면이 꺼진 대기전력 기기와 실제 사용 중인
+		# 기기를 구분합니다. 인식률에 따라 차단·통과 결과를 같은 점수로 계산합니다.
+		var simulated_score := 0
+		var recognition_skill := rng.randf_range(0.62, 0.91)
+		for wave_index in range(12):
+			var waste_count := 2 if rng.randf() < 0.34 else 1
+			for waste_index in range(waste_count):
+				var standby_watts := rng.randi_range(2, 5)
+				if rng.randf() <= recognition_skill:
+					simulated_score += 95 + standby_watts * 3
+				else:
+					simulated_score = maxi(0, simulated_score - 24)
+			for active_index in range(3 - waste_count):
+				if rng.randf() <= recognition_skill:
+					simulated_score += 16
+				else:
+					simulated_score = maxi(0, simulated_score - 48)
+		return maxi(0, simulated_score)
+	return rng.randi_range(520, 1120)
+
+func get_minigame_state() -> Dictionary:
+	return {
+		"active": not active_minigame.is_empty(),
+		"game": active_minigame.duplicate(true),
+		"time_remaining": minigame_time_remaining,
+		"submitted_count": minigame_scores.size(),
+		"player_count": players.size(),
+		"submitted_players": minigame_scores.keys()
+	}
+
+func _finalize_minigame() -> void:
+	if active_minigame.is_empty() or str(active_minigame.get("phase", "")) != "playing":
+		return
+	active_minigame["phase"] = "results"
+	minigame_time_remaining = 0.0
+	var order: Array[int] = []
+	for player_idx in range(players.size()):
+		if not minigame_scores.has(player_idx):
+			minigame_scores[player_idx] = {"score": 0, "stats": {}}
+		order.append(player_idx)
+	order.sort_custom(func(a: int, b: int):
+		var score_a := int((minigame_scores[a] as Dictionary).get("score", 0))
+		var score_b := int((minigame_scores[b] as Dictionary).get("score", 0))
+		return score_a > score_b if score_a != score_b else a < b
+	)
+	var results: Array[Dictionary] = []
+	var previous_score := -1
+	var shared_rank := 0
+	for order_index in range(order.size()):
+		var player_idx := order[order_index]
+		var entry: Dictionary = minigame_scores[player_idx]
+		var player_score := int(entry.get("score", 0))
+		if order_index == 0 or player_score != previous_score:
+			shared_rank = order_index + 1
+		previous_score = player_score
+		var reward_index := mini(shared_rank - 1, MINIGAME_RANK_REWARDS.size() - 1)
+		var reward := MINIGAME_RANK_REWARDS[reward_index]
+		players[player_idx]["energy"] = int(players[player_idx].get("energy", 0)) + reward
+		players[player_idx]["minigame_score_total"] = int(players[player_idx].get("minigame_score_total", 0)) + int(entry.get("score", 0))
+		players[player_idx]["minigame_energy_earned"] = int(players[player_idx].get("minigame_energy_earned", 0)) + reward
+		if shared_rank == 1:
+			players[player_idx]["minigame_wins"] = int(players[player_idx].get("minigame_wins", 0)) + 1
+		player_state_changed.emit(player_idx)
+		results.append({
+			"rank": shared_rank,
+			"player_idx": player_idx,
+			"name": players[player_idx]["name"],
+			"score": int(entry.get("score", 0)),
+			"reward": reward,
+			"stats": (entry.get("stats", {}) as Dictionary).duplicate(true)
+		})
+	var completed_id := str(active_minigame.get("id", ""))
+	if not completed_id.is_empty() and completed_id not in completed_minigame_ids:
+		completed_minigame_ids.append(completed_id)
+	status_message_posted.emit("🏆 미니게임 1위 [%s] · %d점 · 에너지 +%d!" % [results[0]["name"], results[0]["score"], results[0]["reward"]])
+	minigame_finished.emit(results)
+	_schedule_game_action(MINIGAME_RESULTS_SECONDS, _complete_minigame_turn.bind(minigame_round_count))
+
+func _complete_minigame_turn(round_id: int) -> void:
+	if active_minigame.is_empty() or int(active_minigame.get("round_id", -1)) != round_id:
+		return
+	active_minigame.clear()
+	minigame_scores.clear()
+	minigame_time_remaining = 0.0
+	minigame_trigger_player_idx = -1
+	end_turn()
 
 func submit_spectator_quiz_guess(observer_idx: int, target_idx: int, choice: String) -> Dictionary:
 	var result := {"accepted": false, "is_correct": false, "bonus_score": 0}

@@ -19,7 +19,11 @@ var move_tween: Tween
 var animation_elapsed := 0.0
 var idle_sprite_texture: Texture2D
 var move_sprite_texture: Texture2D
+var back_run_sprite_texture: Texture2D
+var side_run_sprite_texture: Texture2D
 var is_moving := false
+var use_back_run_sprite := false
+var use_side_run_sprite := false
 var shield_elapsed := 0.0
 
 # 원본 스프라이트 첫 프레임의 투명 여백(약 0.047)을 포함해 실제 발끝이
@@ -56,6 +60,32 @@ const MOVE_SPRITE_BY_ICON := {
 	"res://assets/characters/eco_roster/mushroom_cat_momo.webp": "res://assets/characters/eco_roster/sprites/mushroom_cat_momo_move_alpha.webp"
 }
 
+const BACK_RUN_SPRITE_BY_ICON := {
+	"res://assets/characters/eco_roster/captain_eco.webp": "res://assets/characters/eco_roster/sprites/back_run/captain_eco_back_run.png",
+	"res://assets/characters/eco_roster/fairy_sparky.webp": "res://assets/characters/eco_roster/sprites/back_run/fairy_sparky_back_run.png",
+	"res://assets/characters/eco_roster/water_popo.webp": "res://assets/characters/eco_roster/sprites/back_run/water_popo_back_run.png",
+	"res://assets/characters/eco_roster/bear_pongi.webp": "res://assets/characters/eco_roster/sprites/back_run/bear_pongi_back_run.png",
+	"res://assets/characters/eco_roster/solar_fox_sol.webp": "res://assets/characters/eco_roster/sprites/back_run/solar_fox_sol_back_run.png",
+	"res://assets/characters/eco_roster/wind_rabbit_bori.webp": "res://assets/characters/eco_roster/sprites/back_run/wind_rabbit_bori_back_run.png",
+	"res://assets/characters/eco_roster/recycle_raccoon_ringo.webp": "res://assets/characters/eco_roster/sprites/back_run/recycle_raccoon_ringo_back_run.png",
+	"res://assets/characters/eco_roster/earth_turtle_tori.webp": "res://assets/characters/eco_roster/sprites/back_run/earth_turtle_tori_back_run.png",
+	"res://assets/characters/eco_roster/lightning_bird_pika.webp": "res://assets/characters/eco_roster/sprites/back_run/lightning_bird_pika_back_run.png",
+	"res://assets/characters/eco_roster/mushroom_cat_momo.webp": "res://assets/characters/eco_roster/sprites/back_run/mushroom_cat_momo_back_run.png"
+}
+
+const SIDE_RUN_SPRITE_BY_ICON := {
+	"res://assets/characters/eco_roster/captain_eco.webp": "res://assets/characters/eco_roster/sprites/side_run/captain_eco_side_run.png",
+	"res://assets/characters/eco_roster/fairy_sparky.webp": "res://assets/characters/eco_roster/sprites/side_run/fairy_sparky_side_run.png",
+	"res://assets/characters/eco_roster/water_popo.webp": "res://assets/characters/eco_roster/sprites/side_run/water_popo_side_run.png",
+	"res://assets/characters/eco_roster/bear_pongi.webp": "res://assets/characters/eco_roster/sprites/side_run/bear_pongi_side_run.png",
+	"res://assets/characters/eco_roster/solar_fox_sol.webp": "res://assets/characters/eco_roster/sprites/side_run/solar_fox_sol_side_run.png",
+	"res://assets/characters/eco_roster/wind_rabbit_bori.webp": "res://assets/characters/eco_roster/sprites/side_run/wind_rabbit_bori_side_run.png",
+	"res://assets/characters/eco_roster/recycle_raccoon_ringo.webp": "res://assets/characters/eco_roster/sprites/side_run/recycle_raccoon_ringo_side_run.png",
+	"res://assets/characters/eco_roster/earth_turtle_tori.webp": "res://assets/characters/eco_roster/sprites/side_run/earth_turtle_tori_side_run.png",
+	"res://assets/characters/eco_roster/lightning_bird_pika.webp": "res://assets/characters/eco_roster/sprites/side_run/lightning_bird_pika_side_run.png",
+	"res://assets/characters/eco_roster/mushroom_cat_momo.webp": "res://assets/characters/eco_roster/sprites/side_run/mushroom_cat_momo_side_run.png"
+}
+
 const IDLE_SPRITE_FRAMES := 4
 const MOVE_SPRITE_FRAMES := 4
 const IDLE_SPRITE_FPS := 5.0
@@ -74,6 +104,9 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_update_shield_visual(delta)
 	if avatar_sprite != null and avatar_sprite.hframes > 1:
+		if (use_back_run_sprite or use_side_run_sprite) and not is_moving:
+			avatar_sprite.frame = 0
+			return
 		animation_elapsed += delta
 		var animation_fps := MOVE_SPRITE_FPS if is_moving else IDLE_SPRITE_FPS
 		avatar_sprite.frame = int(animation_elapsed * animation_fps) % avatar_sprite.hframes
@@ -110,12 +143,22 @@ func setup_player(p_data: Dictionary) -> void:
 	var icon_path = p_data.get("char_icon", "res://assets/images/char_captain_eco.webp")
 	var idle_sprite_path := str(IDLE_SPRITE_BY_ICON.get(icon_path, ""))
 	var move_sprite_path := str(MOVE_SPRITE_BY_ICON.get(icon_path, ""))
+	var back_run_sprite_path := str(BACK_RUN_SPRITE_BY_ICON.get(icon_path, ""))
+	var side_run_sprite_path := str(SIDE_RUN_SPRITE_BY_ICON.get(icon_path, ""))
 	if avatar_sprite and not idle_sprite_path.is_empty() and ResourceLoader.exists(idle_sprite_path):
 		idle_sprite_texture = load(idle_sprite_path)
 		if not move_sprite_path.is_empty() and ResourceLoader.exists(move_sprite_path):
 			move_sprite_texture = load(move_sprite_path)
 		else:
 			move_sprite_texture = idle_sprite_texture
+		if not back_run_sprite_path.is_empty() and ResourceLoader.exists(back_run_sprite_path):
+			back_run_sprite_texture = load(back_run_sprite_path)
+		else:
+			back_run_sprite_texture = move_sprite_texture
+		if not side_run_sprite_path.is_empty() and ResourceLoader.exists(side_run_sprite_path):
+			side_run_sprite_texture = load(side_run_sprite_path)
+		else:
+			side_run_sprite_texture = move_sprite_texture
 		avatar_sprite.texture = idle_sprite_texture
 		avatar_sprite.hframes = IDLE_SPRITE_FRAMES
 		avatar_sprite.vframes = 1
@@ -190,12 +233,26 @@ func _set_avatar_animation_state(should_move: bool) -> void:
 	animation_elapsed = 0.0
 	if avatar_sprite == null:
 		return
-	var next_texture := move_sprite_texture if is_moving else idle_sprite_texture
+	var next_texture := side_run_sprite_texture if use_side_run_sprite else (back_run_sprite_texture if use_back_run_sprite else idle_sprite_texture)
+	if is_moving and not use_back_run_sprite and not use_side_run_sprite:
+		next_texture = move_sprite_texture
 	if next_texture != null:
 		avatar_sprite.texture = next_texture
-		avatar_sprite.hframes = MOVE_SPRITE_FRAMES if is_moving else IDLE_SPRITE_FRAMES
+		avatar_sprite.hframes = MOVE_SPRITE_FRAMES if is_moving or use_back_run_sprite else IDLE_SPRITE_FRAMES
 		avatar_sprite.vframes = 1
 		avatar_sprite.frame = 0
+
+func set_back_run_enabled(enabled: bool) -> void:
+	use_back_run_sprite = enabled
+	if enabled:
+		use_side_run_sprite = false
+	_set_avatar_animation_state(is_moving)
+
+func set_side_run_enabled(enabled: bool) -> void:
+	use_side_run_sprite = enabled
+	if enabled:
+		use_back_run_sprite = false
+	_set_avatar_animation_state(is_moving)
 
 func _update_hop_position(progress: float, from_position: Vector3, to_position: Vector3, hop_height: float) -> void:
 	var ground := from_position.lerp(to_position, progress)

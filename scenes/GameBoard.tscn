@@ -1,8 +1,9 @@
-[gd_scene load_steps=7 format=3 uid="uid://bgameboard001"]
+[gd_scene load_steps=8 format=3 uid="uid://bgameboard001"]
 
 [ext_resource type="Script" path="res://scripts/board/GameBoardController.gd" id="1_gbc"]
 [ext_resource type="PackedScene" path="res://scenes/HUD.tscn" id="3_hud"]
 [ext_resource type="PackedScene" path="res://scenes/QuizModal.tscn" id="4_quiz"]
+[ext_resource type="PackedScene" path="res://scenes/MiniGameModal.tscn" id="5_minigame"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_1"]
 sky_top_color = Color(0.055, 0.18, 0.26, 1)
@@ -78,4 +79,7 @@ visible = false
 layer = 10
 
 [node name="QuizModal" parent="Modals" instance=ExtResource("4_quiz")]
+visible = false
+
+[node name="MiniGameModal" parent="Modals" instance=ExtResource("5_minigame")]
 visible = false
