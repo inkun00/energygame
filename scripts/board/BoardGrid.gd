@@ -106,27 +106,29 @@ static func _initialize_tile_data() -> bool:
 static func _make_extended_tile_data(tile_index: int) -> Dictionary:
 	match tile_index:
 		52:
-			return {"index": tile_index, "name": "수력 댐 조절실", "type": TileType.MINIGAME, "minigame_id": "hydro_gate", "desc": "필요한 발전량에 맞춰 수문 유량을 조절합니다."}
+			return {"index": tile_index, "name": "수력 발전 낙차 타이밍", "type": TileType.MINIGAME, "minigame_id": "hydro_gate", "desc": "비 예보를 보고 수문까지 달려가 열고 닫아 낙차를 조절합니다."}
 		56:
 			return {"index": tile_index, "name": "바람꽃 쉼터", "type": TileType.REST_TURN, "desc": "바람꽃 정원에서 에너지를 재충전합니다. (1턴 휴식)"}
 		60:
 			return {"index": tile_index, "name": "태양열 마을 온실", "type": TileType.POWERPLANT, "reward_energy": 4, "desc": "태양열로 온실을 데워 에너지 4개 획득"}
 		64:
-			return {"index": tile_index, "name": "에너지원 분류 센터", "type": TileType.MINIGAME, "minigame_id": "energy_sort", "desc": "에너지원과 절약 기술을 올바른 범주로 분류합니다."}
+			return {"index": tile_index, "name": "에너지 배송 레이스", "type": TileType.MINIGAME, "minigame_id": "energy_sort", "desc": "햇빛·바람·물과 석탄·석유·가스를 두 배송장으로 구분합니다."}
 		68:
 			return {"index": tile_index, "name": "심부 지열 발전소", "type": TileType.POWERPLANT, "reward_energy": 5, "desc": "깊은 땅속 열을 활용해 에너지 5개 획득"}
 		72:
 			return {"index": tile_index, "name": "푸른 숲 쉼터", "type": TileType.REST_TURN, "desc": "탄소를 흡수하는 숲을 돌보며 쉽니다. (1턴 휴식)"}
 		76:
-			return {"index": tile_index, "name": "배터리 전력 중계소", "type": TileType.MINIGAME, "minigame_id": "battery_relay", "desc": "잉여 전력은 저장하고 부족할 때 공급합니다."}
+			return {"index": tile_index, "name": "배터리 에너지 왕복", "type": TileType.MINIGAME, "minigame_id": "battery_relay", "desc": "남는 태양광 전기를 저장하고 흐릴 때 도시로 옮깁니다."}
 		80:
 			return {"index": tile_index, "name": "스마트그리드 보너스", "type": TileType.CHANCE_CARD, "desc": "전기를 똑똑하게 나누는 친환경 전략 기회를 얻습니다!"}
 		84:
 			return {"index": tile_index, "name": "계곡 소수력 발전소", "type": TileType.POWERPLANT, "reward_energy": 5, "desc": "계곡물의 흐름으로 에너지 5개 획득"}
 		88:
-			return {"index": tile_index, "name": "탄소제로 이동 챌린지", "type": TileType.MINIGAME, "minigame_id": "eco_commute", "desc": "상황에 맞는 저탄소 이동수단을 빠르게 선택합니다."}
+			return {"index": tile_index, "name": "함께 타는 통학 버스", "type": TileType.MINIGAME, "minigame_id": "eco_commute", "desc": "직접 버스를 세워 학생을 태우고 학교 하차 구역에 정확히 정차합니다."}
 		92:
 			return {"index": tile_index, "name": "그린수소 충전도시", "type": TileType.POWERPLANT, "reward_energy": 6, "desc": "재생에너지로 만든 수소를 공급해 에너지 6개 획득"}
+		94:
+			return {"index": tile_index, "name": "여름 냉방 창문 대시", "type": TileType.MINIGAME, "minigame_id": "heat_leak", "desc": "에어컨을 켠 교실의 열린 창문을 닫아 냉방 에너지 낭비를 줄입니다."}
 		96:
 			return {"index": tile_index, "name": "왕국 복원 보너스", "type": TileType.CHANCE_CARD, "desc": "완주를 앞두고 마지막 친환경 전략 기회를 얻습니다!"}
 		98:
@@ -142,7 +144,7 @@ static func _make_extended_tile_data(tile_index: int) -> Dictionary:
 # 매 게임 시작 시 사다리와 미끄럼틀을 다시 배치한다. 핵심 발전소·퀴즈·시작/도착 칸은
 # 고정하고, 각 지름길의 양 끝을 모두 점유 처리해 겹침과 무한 순환을 원천적으로 막는다.
 # 대표 퀴즈 칸은 항상 남겨 두어 게임 중 객관식 학습 흐름이 끊기지 않게 합니다.
-const SHORTCUT_PROTECTED_INDICES: Array[int] = [0, 1, 2, 4, 5, 6, 10, 11, 14, 19, 22, 23, 27, 32, 34, 35, 38, 42, 46, 47, 48, 49, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96, 98, 99]
+const SHORTCUT_PROTECTED_INDICES: Array[int] = [0, 1, 2, 4, 5, 6, 10, 11, 14, 19, 22, 23, 27, 32, 34, 35, 38, 42, 46, 47, 48, 49, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 94, 96, 98, 99]
 const RANDOM_LADDER_COUNT := 8
 const RANDOM_SLIDE_COUNT := 8
 static var _shortcut_free_template: Array[Dictionary] = []
@@ -158,7 +160,7 @@ static func assign_random_shortcuts() -> void:
 		rng.randomize()
 		var occupied_endpoints: Dictionary = {}
 		# 두 종류를 번갈아 고르면 한 종류가 사용 가능한 연결을 먼저 독점하지 않아
-		# 미니게임 타일 8개를 보호한 뒤에도 항상 같은 수를 배치할 수 있습니다.
+		# 미니게임 타일 9개를 보호한 뒤에도 항상 같은 수를 배치할 수 있습니다.
 		for _shortcut_index in range(maxi(RANDOM_LADDER_COUNT, RANDOM_SLIDE_COUNT)):
 			if _shortcut_index < RANDOM_LADDER_COUNT:
 				_assign_random_shortcut_kind(rng, TileType.LADDER, 1, occupied_endpoints)

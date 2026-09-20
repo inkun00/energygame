@@ -7,6 +7,6 @@ The house modules, furniture, and electronic devices in this directory come from
 - Original archive: `kenney_furniture-kit.zip`
 - Included license copy: `LICENSE-Furniture-Kit.txt`
 
-Only the GLB models needed by the side-scrolling house course were copied into the project: floor and wall modules, doors/windows, living-room and bedroom furniture, kitchen fixtures, lamps/plants, television, radio, laptop, computer monitor, microwave, coffee machine, refrigerator, washer, and dryer.
+Only the GLB models needed by the side-scrolling house course were copied into the project: floor and wall modules, doors/windows, living-room and bedroom furniture, kitchen fixtures, lamps/plants, television, radio, speaker, toaster, laptop, computer monitor, microwave, coffee machine, refrigerator, washer, and dryer. The coffee table, kitchen cabinet, and side table models also serve as furniture that players must jump over.
 
 The models are tinted and arranged at runtime by `res://scripts/minigames/StandbyPowerHunt3D.gd`; the source geometry remains unchanged.

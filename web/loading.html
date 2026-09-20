@@ -27,6 +27,11 @@ $GODOT_HEAD_INCLUDE
   </div>
 </section>
 <script>
+if (new URLSearchParams(location.search).has('minigames') || new URLSearchParams(location.search).has('minigame')) {
+  document.title = '에코 히어로즈 · 미니게임 체험';
+  document.querySelector('#loading h1').textContent = '에너지 미니게임 체험';
+  document.querySelector('#loading .tip').textContent = '30초 에너지 아케이드 게임을 불러오는 중이에요.';
+}
 // Register only while a game session is open, including market/construction.
 // Browser chrome refresh/close uses its own confirmation text for security.
 (() => {

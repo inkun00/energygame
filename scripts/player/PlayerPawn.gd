@@ -238,7 +238,7 @@ func _set_avatar_animation_state(should_move: bool) -> void:
 		next_texture = move_sprite_texture
 	if next_texture != null:
 		avatar_sprite.texture = next_texture
-		avatar_sprite.hframes = MOVE_SPRITE_FRAMES if is_moving or use_back_run_sprite else IDLE_SPRITE_FRAMES
+		avatar_sprite.hframes = MOVE_SPRITE_FRAMES if is_moving or use_back_run_sprite or use_side_run_sprite else IDLE_SPRITE_FRAMES
 		avatar_sprite.vframes = 1
 		avatar_sprite.frame = 0
 

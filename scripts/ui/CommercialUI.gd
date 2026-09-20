@@ -12,9 +12,17 @@ const TEAL_DARK := Color("209b86")
 const GOLD := Color("ffd166")
 const GOLD_DARK := Color("d99a37")
 const TEXT := Color("f3fbf8")
+const TEXT_BRIGHT := Color("ffffff")
 const TEXT_MUTED := Color("a9c6c6")
 const DANGER := Color("ff6b6b")
 const SUCCESS := Color("75e69b")
+const BORDER_MUTED := Color("315967")
+const BORDER_ACCENT := Color("54e2c0")
+const NAVY_PANEL_ALT := Color("0d222d")
+const NAVY_CARD := Color("132f3c")
+
+static func apply_panel_container(container: PanelContainer, bg: Color = PANEL, border: Color = TEAL_DARK, radius: int = 12) -> void:
+	container.add_theme_stylebox_override("panel", panel(bg, border, radius))
 
 static func panel(bg: Color = PANEL, border: Color = TEAL_DARK, radius: int = 12, border_width: int = 2, shadow_size: int = 8) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()

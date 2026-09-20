@@ -1,26 +1,21 @@
 extends Control
 class_name MiniGameUI
 
-## 8종의 에너지 교육 미니게임을 하나의 동시 플레이 모달에서 운영합니다.
+## 에너지 교육 미니게임을 하나의 동시 플레이 모달에서 운영합니다.
+
+signal standalone_replay_requested
+signal standalone_menu_requested
 
 const UI = preload("res://scripts/ui/CommercialUI.gd")
 const SOLAR_PANEL_DASH = preload("res://scripts/minigames/SolarPanelDash3D.gd")
 const WIND_TURBINE_PILOT = preload("res://scripts/minigames/WindTurbinePilot3D.gd")
 const SMART_GRID_BALANCE = preload("res://scripts/minigames/SmartGridBalance3D.gd")
 const STANDBY_POWER_HUNT = preload("res://scripts/minigames/StandbyPowerHunt3D.gd")
-
-const SORT_CARDS := [
-	{"name": "태양광", "category": 0, "why": "햇빛은 자연에서 계속 얻을 수 있습니다."},
-	{"name": "풍력", "category": 0, "why": "바람은 다시 생기는 재생 자원입니다."},
-	{"name": "수력", "category": 0, "why": "순환하는 물의 흐름을 이용합니다."},
-	{"name": "지열", "category": 0, "why": "땅속 열을 지속적으로 활용합니다."},
-	{"name": "석탄", "category": 1, "why": "한정된 화석연료이며 연소할 때 탄소를 배출합니다."},
-	{"name": "석유", "category": 1, "why": "오랜 시간 만들어져 빠르게 다시 생기지 않습니다."},
-	{"name": "천연가스", "category": 1, "why": "석탄보다 배출이 적어도 화석연료입니다."},
-	{"name": "LED 조명", "category": 2, "why": "같은 밝기를 더 적은 전기로 만듭니다."},
-	{"name": "건물 단열", "category": 2, "why": "냉난방 에너지가 빠져나가는 것을 줄입니다."},
-	{"name": "고효율 모터", "category": 2, "why": "같은 일을 더 적은 전력으로 수행합니다."}
-]
+const HYDRO_GATE_RUN = preload("res://scripts/minigames/HydroGateRun3D.gd")
+const ENERGY_SOURCE_SORT = preload("res://scripts/minigames/EnergySourceSort3D.gd")
+const BATTERY_SHUTTLE = preload("res://scripts/minigames/BatteryShuttle3D.gd")
+const SHARED_SCHOOL_BUS = preload("res://scripts/minigames/SharedSchoolBus3D.gd")
+const HEAT_LEAK_DASH = preload("res://scripts/minigames/HeatLeakDash3D.gd")
 
 const STANDBY_DEVICES := [
 	{"name": "꺼진 TV", "watt": 3, "waste": true},
@@ -37,17 +32,10 @@ const STANDBY_DEVICES := [
 	{"name": "충전 중 전기자전거", "watt": 80, "waste": false}
 ]
 
-const COMMUTE_SCENARIOS := [
-	{"prompt": "맑은 날 · 학교까지 800m · 가벼운 가방", "options": ["걷기", "자가용", "택시"], "answer": 0, "why": "가까운 거리는 걷기가 배출도 없고 건강에도 좋습니다."},
-	{"prompt": "친구 3명 · 박물관까지 12km · 지하철 연결", "options": ["각자 승용차", "지하철", "택시 2대"], "answer": 1, "why": "여럿이 이용하는 대중교통은 1인당 배출량이 작습니다."},
-	{"prompt": "도서관까지 3km · 자전거 도로 있음", "options": ["자전거", "대형 SUV", "택시"], "answer": 0, "why": "안전한 자전거 도로가 있는 가까운 거리는 자전거가 효율적입니다."},
-	{"prompt": "폭우 · 병원까지 7km · 버스 바로 도착", "options": ["버스", "혼자 승용차", "비행기"], "answer": 0, "why": "걷기 어려운 날에는 연결된 대중교통이 현실적인 저탄소 선택입니다."},
-	{"prompt": "서울에서 부산 · 장거리 이동", "options": ["혼자 승용차", "고속철도", "국내선 비행기"], "answer": 1, "why": "전기 철도는 장거리에서 1인당 에너지 사용을 줄일 수 있습니다."},
-	{"prompt": "동네 공원까지 1.5km · 미세먼지 좋음", "options": ["전기자전거", "혼자 승용차", "택시"], "answer": 0, "why": "짧은 거리는 자전거류가 자동차보다 에너지를 훨씬 적게 씁니다."}
-]
-
 var dimmer: ColorRect
 var card: PanelContainer
+var standalone_mode := false
+var standalone_actions: HBoxContainer
 var title_label: Label
 var mode_label: Label
 var objective_label: Label
@@ -58,6 +46,17 @@ var arena: VBoxContainer
 var feedback_label: Label
 var lesson_label: Label
 var submission_label: Label
+
+var guide_panel: PanelContainer
+var guide_open := false
+var guide_title_label: Label
+var guide_badge_label: Label
+var guide_objective_label: Label
+var guide_controls_container: VBoxContainer
+var guide_lesson_label: Label
+var guide_tip_label: Label
+var guide_rewards_label: Label
+var guide_start_button: Button
 
 var active := false
 var submitted := false
@@ -83,15 +82,15 @@ var wind_lane := -1
 var wind_window := 0.0
 var grid_demand := 60
 var grid_supply := 50
-var hydro_target := 60
-var hydro_flow := 30
-var current_card: Dictionary = {}
-var battery_state := 0
-var current_scenario: Dictionary = {}
 var solar_arcade: SubViewportContainer
 var wind_arcade: SubViewportContainer
 var grid_arcade: SubViewportContainer
 var standby_arcade: SubViewportContainer
+var hydro_arcade: SubViewportContainer
+var sort_arcade: SubViewportContainer
+var battery_arcade: SubViewportContainer
+var commute_arcade: SubViewportContainer
+var heat_arcade: SubViewportContainer
 
 func _ready() -> void:
 	_build_ui()
@@ -123,6 +122,7 @@ func _build_ui() -> void:
 	add_child(card)
 
 	var content := VBoxContainer.new()
+	content.name = "ContentBox"
 	content.add_theme_constant_override("separation", 10)
 	card.add_child(content)
 
@@ -203,9 +203,32 @@ func _build_ui() -> void:
 	submission_label.add_theme_font_size_override("font_size", 15)
 	submission_label.add_theme_color_override("font_color", Color("72d9c1"))
 	content.add_child(submission_label)
+	if standalone_mode:
+		standalone_actions = HBoxContainer.new()
+		standalone_actions.alignment = BoxContainer.ALIGNMENT_CENTER
+		standalone_actions.add_theme_constant_override("separation", 16)
+		standalone_actions.visible = false
+		content.add_child(standalone_actions)
+		var replay_button := _make_button("↻ 다시 플레이", Color("2a9b70"))
+		replay_button.custom_minimum_size = Vector2(220, 48)
+		replay_button.pressed.connect(func(): standalone_replay_requested.emit())
+		standalone_actions.add_child(replay_button)
+		var menu_button := _make_button("다른 미니게임", Color("287ca8"))
+		menu_button.custom_minimum_size = Vector2(220, 48)
+		menu_button.pressed.connect(func(): standalone_menu_requested.emit())
+		standalone_actions.add_child(menu_button)
+	_build_guide_ui()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not visible or not is_guide_open():
+		return
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_SPACE or event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
+			get_viewport().set_input_as_handled()
+			dismiss_guide()
 
 func _process(delta: float) -> void:
-	if not active or submitted:
+	if not active or submitted or is_guide_open():
 		return
 	elapsed += delta
 	var remaining := maxf(0.0, duration - elapsed)
@@ -234,18 +257,22 @@ func _on_minigame_started(data: Dictionary) -> void:
 	score_tick = 0.0
 	submitted = false
 	active = true
+	if is_instance_valid(standalone_actions):
+		standalone_actions.visible = false
 	rng.seed = int(game_data.get("seed", 1)) + _local_player_index() * 104729
 	visible = true
-	title_label.text = "%s  %s" % [game_data.get("icon", "🎮"), game_data.get("title", "에너지 미니게임")]
+	title_label.text = str(game_data.get("title", "에너지 미니게임")) if standalone_mode else "%s  %s" % [game_data.get("icon", "🎮"), game_data.get("title", "에너지 미니게임")]
 	mode_label.text = "전원 동시 플레이  ·  %s" % game_data.get("input_hint", "빠른 도전")
 	objective_label.text = "목표  |  " + str(game_data.get("objective", "제한시간 안에 최고 점수에 도전하세요."))
 	lesson_label.text = "에너지 원리  |  " + str(game_data.get("lesson", ""))
 	timer_bar.max_value = duration
 	timer_bar.value = duration
-	feedback_label.text = "준비 완료! 바로 시작하세요."
+	timer_label.text = "%02d초" % ceili(duration)
+	feedback_label.text = "게임 방법을 확인하고 시작 버튼을 누르세요."
 	submission_label.text = "내 점수는 종료 즉시 비공개로 제출됩니다."
 	_refresh_score()
 	_build_mode()
+	_show_guide_popup()
 
 func _on_submission_changed(state: Dictionary) -> void:
 	if not visible or int((state.get("game", {}) as Dictionary).get("round_id", -2)) != round_id:
@@ -255,12 +282,23 @@ func _on_submission_changed(state: Dictionary) -> void:
 func _on_minigame_finished(results: Array) -> void:
 	if not visible:
 		return
+	if is_instance_valid(guide_panel):
+		guide_panel.visible = false
+	var content_node := card.find_child("ContentBox", false, false)
+	if is_instance_valid(content_node):
+		content_node.visible = true
+	guide_open = false
 	active = false
 	submitted = true
 	_build_results(results)
 	timer_label.text = "종료"
 	timer_bar.value = 0
 	feedback_label.text = "순위에 따라 에너지가 즉시 지급되었습니다."
+	if standalone_mode:
+		submission_label.text = "언제든 다시 플레이하거나 다른 게임을 선택할 수 있어요."
+		if is_instance_valid(standalone_actions):
+			standalone_actions.visible = true
+		return
 	submission_label.text = "잠시 후 보드 게임이 이어집니다."
 	var finished_round := round_id
 	get_tree().create_timer(GameManager.MINIGAME_RESULTS_SECONDS - 0.2).timeout.connect(func():
@@ -269,21 +307,263 @@ func _on_minigame_finished(results: Array) -> void:
 	)
 
 func _on_turn_changed(_player_idx: int) -> void:
-	if not active:
+	if not active and not standalone_mode:
 		visible = false
 
 func cancel_minigame() -> void:
-	if is_instance_valid(solar_arcade) and solar_arcade.has_method("set_running"):
-		solar_arcade.call("set_running", false)
-	if is_instance_valid(wind_arcade) and wind_arcade.has_method("set_running"):
-		wind_arcade.call("set_running", false)
-	if is_instance_valid(grid_arcade) and grid_arcade.has_method("set_running"):
-		grid_arcade.call("set_running", false)
-	if is_instance_valid(standby_arcade) and standby_arcade.has_method("set_running"):
-		standby_arcade.call("set_running", false)
+	_set_arcades_running(false)
+	if is_instance_valid(guide_panel):
+		guide_panel.visible = false
+	var content_node := card.find_child("ContentBox", false, false)
+	if is_instance_valid(content_node):
+		content_node.visible = true
+	guide_open = false
 	active = false
 	submitted = false
 	visible = false
+
+func _set_arcades_running(running_state: bool) -> void:
+	var arcades := [
+		solar_arcade, wind_arcade, grid_arcade, standby_arcade,
+		hydro_arcade, sort_arcade, battery_arcade, commute_arcade, heat_arcade
+	]
+	for arc in arcades:
+		if is_instance_valid(arc):
+			if arc.has_method("set_running"):
+				arc.call("set_running", running_state)
+			elif "running" in arc:
+				arc.set("running", running_state)
+
+func _build_guide_ui() -> void:
+	guide_panel = PanelContainer.new()
+	guide_panel.name = "GuidePanel"
+	guide_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	guide_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("071e29fc"), Color("42d6b0"), 24.0, 24))
+	guide_panel.visible = false
+	card.add_child(guide_panel)
+
+	var guide_content := VBoxContainer.new()
+	guide_content.add_theme_constant_override("separation", 10)
+	guide_panel.add_child(guide_content)
+
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 14)
+	guide_content.add_child(header)
+
+	guide_title_label = Label.new()
+	guide_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	guide_title_label.add_theme_font_size_override("font_size", 28)
+	guide_title_label.add_theme_color_override("font_color", Color("fff0a6"))
+	header.add_child(guide_title_label)
+
+	var badge_box := PanelContainer.new()
+	var badge_style := StyleBoxFlat.new()
+	badge_style.bg_color = Color("0d3744")
+	badge_style.border_color = Color("38bca8")
+	badge_style.set_border_width_all(1)
+	badge_style.set_corner_radius_all(12)
+	badge_style.content_margin_left = 14
+	badge_style.content_margin_right = 14
+	badge_style.content_margin_top = 4
+	badge_style.content_margin_bottom = 4
+	badge_box.add_theme_stylebox_override("panel", badge_style)
+	header.add_child(badge_box)
+
+	guide_badge_label = Label.new()
+	guide_badge_label.text = "📖 게임 방법 안내"
+	guide_badge_label.add_theme_font_size_override("font_size", 15)
+	guide_badge_label.add_theme_color_override("font_color", Color("8fffe0"))
+	badge_box.add_child(guide_badge_label)
+
+	var div := ColorRect.new()
+	div.custom_minimum_size = Vector2(0, 2)
+	div.color = Color("1e4a59")
+	guide_content.add_child(div)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	guide_content.add_child(scroll)
+
+	var body := VBoxContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", 10)
+	scroll.add_child(body)
+
+	var obj_box := _make_guide_section("🎯  미션 목표", Color("79efaa"))
+	body.add_child(obj_box)
+	guide_objective_label = Label.new()
+	guide_objective_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	guide_objective_label.add_theme_font_size_override("font_size", 16)
+	guide_objective_label.add_theme_color_override("font_color", Color("e0f6f1"))
+	obj_box.get_child(0).add_child(guide_objective_label)
+
+	var ctrl_box := _make_guide_section("🕹️  조작 방법 & 플레이 규칙", Color("79d7ef"))
+	body.add_child(ctrl_box)
+	guide_controls_container = VBoxContainer.new()
+	guide_controls_container.add_theme_constant_override("separation", 6)
+	ctrl_box.get_child(0).add_child(guide_controls_container)
+
+	var lesson_box := _make_guide_section("💡  알아두면 유익한 에너지 과학 원리", Color("ffd66e"))
+	body.add_child(lesson_box)
+	guide_lesson_label = Label.new()
+	guide_lesson_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	guide_lesson_label.add_theme_font_size_override("font_size", 15)
+	guide_lesson_label.add_theme_color_override("font_color", Color("dbeff0"))
+	lesson_box.get_child(0).add_child(guide_lesson_label)
+
+	var tip_box := _make_guide_section("⚡  고득점 공략 & 순위 보상", Color("ffb86c"))
+	body.add_child(tip_box)
+	guide_tip_label = Label.new()
+	guide_tip_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	guide_tip_label.add_theme_font_size_override("font_size", 15)
+	guide_tip_label.add_theme_color_override("font_color", Color("ffeac2"))
+	tip_box.get_child(0).add_child(guide_tip_label)
+
+	guide_rewards_label = Label.new()
+	guide_rewards_label.text = "🏆 순위별 보상: 1위 +20 ⚡  |  2위 +10 ⚡  |  3위 +5 ⚡  |  4위 +1 ⚡"
+	guide_rewards_label.add_theme_font_size_override("font_size", 15)
+	guide_rewards_label.add_theme_color_override("font_color", Color("95f2d6"))
+	tip_box.get_child(0).add_child(guide_rewards_label)
+
+	var footer := HBoxContainer.new()
+	footer.alignment = BoxContainer.ALIGNMENT_CENTER
+	guide_content.add_child(footer)
+
+	guide_start_button = Button.new()
+	guide_start_button.text = "🎮  게임 시작!  (Space 또는 Enter)"
+	guide_start_button.custom_minimum_size = Vector2(420, 52)
+	guide_start_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	guide_start_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	guide_start_button.add_theme_font_size_override("font_size", 20)
+	guide_start_button.pressed.connect(dismiss_guide)
+	UI.apply_primary_button(guide_start_button)
+	footer.add_child(guide_start_button)
+
+func _make_guide_section(title: String, color: Color) -> PanelContainer:
+	var section_panel := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color("0a2530d9")
+	style.border_color = Color("1f4e5e")
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(10)
+	style.content_margin_left = 16
+	style.content_margin_right = 16
+	style.content_margin_top = 10
+	style.content_margin_bottom = 10
+	section_panel.add_theme_stylebox_override("panel", style)
+
+	var inner := VBoxContainer.new()
+	inner.add_theme_constant_override("separation", 6)
+	section_panel.add_child(inner)
+
+	var title_lbl := Label.new()
+	title_lbl.text = title
+	title_lbl.add_theme_font_size_override("font_size", 16)
+	title_lbl.add_theme_color_override("font_color", color)
+	inner.add_child(title_lbl)
+
+	return section_panel
+
+func _populate_guide_content() -> void:
+	if not is_instance_valid(guide_panel):
+		return
+	var icon := str(game_data.get("icon", "🎮"))
+	var title := str(game_data.get("title", "에너지 미니게임"))
+	var duration_val := int(game_data.get("duration", 30))
+	guide_title_label.text = "%s  %s" % [icon, title]
+	guide_badge_label.text = "📖 게임 방법 안내 · %d초 아케이드" % duration_val
+	guide_objective_label.text = str(game_data.get("objective", "제한시간 안에 최고 점수를 달성하세요."))
+	guide_lesson_label.text = str(game_data.get("lesson", "신재생에너지를 올바르게 활용하여 탄소를 줄입니다."))
+	guide_tip_label.text = str(game_data.get("tip", "신속하고 정확하게 조작하여 콤보 점수를 획득하세요!"))
+
+	for child in guide_controls_container.get_children():
+		guide_controls_container.remove_child(child)
+		child.queue_free()
+
+	var controls: Array = game_data.get("controls", [])
+	if controls.is_empty():
+		var hint := str(game_data.get("input_hint", "키보드로 조작하세요."))
+		var row := _create_control_row("기본 조작", hint)
+		guide_controls_container.add_child(row)
+	else:
+		for item in controls:
+			if item is Dictionary:
+				var key_str := str(item.get("key", ""))
+				var action_str := str(item.get("action", ""))
+				var row := _create_control_row(key_str, action_str)
+				guide_controls_container.add_child(row)
+
+func _create_control_row(key_text: String, action_text: String) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+
+	var key_badge := PanelContainer.new()
+	var key_style := StyleBoxFlat.new()
+	key_style.bg_color = Color("143b47")
+	key_style.border_color = Color("388399")
+	key_style.set_border_width_all(1)
+	key_style.set_corner_radius_all(6)
+	key_style.content_margin_left = 12
+	key_style.content_margin_right = 12
+	key_style.content_margin_top = 4
+	key_style.content_margin_bottom = 4
+	key_badge.add_theme_stylebox_override("panel", key_style)
+	row.add_child(key_badge)
+
+	var key_lbl := Label.new()
+	key_lbl.text = key_text
+	key_lbl.add_theme_font_size_override("font_size", 15)
+	key_lbl.add_theme_color_override("font_color", Color("ffffff"))
+	key_badge.add_child(key_lbl)
+
+	var arrow_lbl := Label.new()
+	arrow_lbl.text = "➔"
+	arrow_lbl.add_theme_font_size_override("font_size", 14)
+	arrow_lbl.add_theme_color_override("font_color", Color("5fb5a6"))
+	row.add_child(arrow_lbl)
+
+	var action_lbl := Label.new()
+	action_lbl.text = action_text
+	action_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	action_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	action_lbl.add_theme_font_size_override("font_size", 15)
+	action_lbl.add_theme_color_override("font_color", Color("d5f1ed"))
+	row.add_child(action_lbl)
+
+	return row
+
+func _show_guide_popup() -> void:
+	guide_open = true
+	elapsed = 0.0
+	_set_arcades_running(false)
+	var content_node := card.find_child("ContentBox", false, false)
+	if is_instance_valid(content_node):
+		content_node.visible = false
+	_populate_guide_content()
+	if is_instance_valid(guide_panel):
+		guide_panel.visible = true
+	if is_instance_valid(guide_start_button):
+		guide_start_button.grab_focus()
+	feedback_label.text = "게임 방법을 확인하고 시작 버튼을 누르세요."
+
+func dismiss_guide() -> void:
+	if not guide_open:
+		return
+	guide_open = false
+	if is_instance_valid(guide_panel):
+		guide_panel.visible = false
+	var content_node := card.find_child("ContentBox", false, false)
+	if is_instance_valid(content_node):
+		content_node.visible = true
+	elapsed = 0.0
+	_set_arcades_running(true)
+	feedback_label.text = "게임 시작! 최고 점수에 도전하세요."
+	if GameManager and GameManager.has_method("start_minigame_action"):
+		GameManager.start_minigame_action()
+
+func is_guide_open() -> bool:
+	return guide_open and is_instance_valid(guide_panel) and guide_panel.visible
 
 func _build_mode() -> void:
 	_clear_arena()
@@ -296,6 +576,7 @@ func _build_mode() -> void:
 		"energy_sort": _build_energy_sort()
 		"battery_relay": _build_battery_relay()
 		"eco_commute": _build_eco_commute()
+		"heat_leak": _build_heat_leak()
 		_: _build_solar_align()
 
 func _clear_arena() -> void:
@@ -307,10 +588,25 @@ func _clear_arena() -> void:
 		grid_arcade.call("set_running", false)
 	if is_instance_valid(standby_arcade) and standby_arcade.has_method("set_running"):
 		standby_arcade.call("set_running", false)
+	if is_instance_valid(hydro_arcade) and hydro_arcade.has_method("set_running"):
+		hydro_arcade.call("set_running", false)
+	if is_instance_valid(sort_arcade) and sort_arcade.has_method("set_running"):
+		sort_arcade.call("set_running", false)
+	if is_instance_valid(battery_arcade) and battery_arcade.has_method("set_running"):
+		battery_arcade.call("set_running", false)
+	if is_instance_valid(commute_arcade) and commute_arcade.has_method("set_running"):
+		commute_arcade.call("set_running", false)
+	if is_instance_valid(heat_arcade) and heat_arcade.has_method("set_running"):
+		heat_arcade.call("set_running", false)
 	solar_arcade = null
 	wind_arcade = null
 	grid_arcade = null
 	standby_arcade = null
+	hydro_arcade = null
+	sort_arcade = null
+	battery_arcade = null
+	commute_arcade = null
+	heat_arcade = null
 	for child in arena.get_children():
 		arena.remove_child(child)
 		child.queue_free()
@@ -465,124 +761,109 @@ func _on_device_pressed(button: Button, device: Dictionary) -> void:
 		_register_miss(35, "사용 중인 기기는 대기전력이 아닙니다.")
 
 func _build_hydro_gate() -> void:
-	hydro_target = rng.randi_range(3, 9) * 10
-	hydro_flow = rng.randi_range(2, 6) * 10
-	primary_label = _arena_label("요청 유량 %d ㎥/s  |  수문 유량 %d ㎥/s" % [hydro_target, hydro_flow], 25, Color("64c7ff"))
-	secondary_label = _arena_label("유량이 너무 크면 하류 생태계에 부담을 줄 수 있어요.", 17)
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 14)
-	arena.add_child(row)
-	for spec in [["−10 닫기", -10], ["＋10 열기", 10], ["✓ 유량 확정", 0]]:
-		var button := _make_button(spec[0], Color("287ca8") if spec[1] != 0 else Color("2a9b70"))
-		button.pressed.connect(_on_hydro_action.bind(int(spec[1])))
-		row.add_child(button)
+	hydro_arcade = HYDRO_GATE_RUN.new()
+	hydro_arcade.arcade_event.connect(_on_hydro_arcade_event)
+	hydro_arcade.game_over.connect(_on_hydro_game_over)
+	arena.add_child(hydro_arcade)
+	var local_idx := _local_player_index()
+	var player_data: Dictionary = GameManager.players[local_idx] if local_idx >= 0 and local_idx < GameManager.players.size() else {}
+	# 네 명이 같은 강우 예보와 시작 수위에서 겨루도록 공통 라운드 시드를 전달합니다.
+	hydro_arcade.call("setup", player_data, int(game_data.get("seed", 1)))
 
-func _on_hydro_action(change: int) -> void:
-	if not _can_play(): return
-	if change != 0:
-		hydro_flow = clampi(hydro_flow + change, 10, 100)
-		primary_label.text = "요청 유량 %d ㎥/s  |  수문 유량 %d ㎥/s" % [hydro_target, hydro_flow]
+func _on_hydro_arcade_event(points: int, success: bool, message: String, count_correct: bool) -> void:
+	if not _can_play():
+		return
+	if points <= 0:
+		feedback_label.text = message
 		return
 	attempts += 1
-	var error := absi(hydro_flow - hydro_target)
-	if error == 0:
-		_register_success(125, "정확한 유량! 물의 힘과 생태 안전을 함께 지켰어요.")
+	if success:
+		_register_success(points, message, count_correct)
 	else:
-		_register_miss(mini(45, error), "요청과 %d만큼 차이 납니다." % error)
-	hydro_target = rng.randi_range(3, 9) * 10
-	primary_label.text = "요청 유량 %d ㎥/s  |  수문 유량 %d ㎥/s" % [hydro_target, hydro_flow]
+		_register_miss(points, message)
+
+func _on_hydro_game_over(generated_kwh: float) -> void:
+	if not _can_play():
+		return
+	feedback_label.text = "댐이 넘쳤어요! %.1f kWh 생산 후 도전 종료" % generated_kwh
+	feedback_label.add_theme_color_override("font_color", Color("ff937e"))
+	var finished_round := round_id
+	get_tree().create_timer(1.3).timeout.connect(func():
+		if round_id == finished_round and _can_play():
+			_submit_score()
+	)
 
 func _build_energy_sort() -> void:
-	primary_label = _arena_label("", 31, Color("b6f58e"))
-	secondary_label = _arena_label("카드가 어느 범주인지 고르세요.", 17)
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 12)
-	arena.add_child(row)
-	for category in range(3):
-		var button := _make_button(["🌱 재생에너지", "🪨 비재생에너지", "💡 효율 기술"][category], [Color("28885d"), Color("80584c"), Color("aa8b2e")][category])
-		button.custom_minimum_size = Vector2(270, 66)
-		button.pressed.connect(_on_sort_pressed.bind(category))
-		row.add_child(button)
-	_next_sort_card()
+	sort_arcade = ENERGY_SOURCE_SORT.new()
+	sort_arcade.arcade_event.connect(_on_sort_arcade_event)
+	arena.add_child(sort_arcade)
+	var local_idx := _local_player_index()
+	var player_data: Dictionary = GameManager.players[local_idx] if local_idx >= 0 and local_idx < GameManager.players.size() else {}
+	sort_arcade.call("setup", player_data, int(game_data.get("seed", 1)))
 
-func _next_sort_card() -> void:
-	current_card = (SORT_CARDS[rng.randi_range(0, SORT_CARDS.size() - 1)] as Dictionary).duplicate(true)
-	if primary_label:
-		primary_label.text = "에너지 카드  |  %s" % current_card["name"]
-
-func _on_sort_pressed(category: int) -> void:
-	if not _can_play(): return
+func _on_sort_arcade_event(points: int, success: bool, message: String, count_correct: bool) -> void:
+	if not _can_play():
+		return
 	attempts += 1
-	if category == int(current_card.get("category", -1)):
-		_register_success(100, "정답! " + str(current_card["why"]))
+	if success:
+		_register_success(points, message, count_correct)
 	else:
-		_register_miss(28, "다시 분류해 볼까요? " + str(current_card["why"]))
-	_next_sort_card()
+		_register_miss(points, message)
 
 func _build_battery_relay() -> void:
-	primary_label = _arena_label("", 28, Color("d4ff76"))
-	secondary_label = _arena_label("계통 상태를 보고 저장장치 행동을 선택하세요.", 17)
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 14)
-	arena.add_child(row)
-	for action in range(3):
-		var button := _make_button(["⬇ 잉여 전력 충전", "⬆ 부족 전력 방전", "⏸ 균형 유지"][action], Color("688a2e"))
-		button.custom_minimum_size = Vector2(275, 62)
-		button.pressed.connect(_on_battery_action.bind(action))
-		row.add_child(button)
-	_spawn_battery_state()
+	battery_arcade = BATTERY_SHUTTLE.new()
+	battery_arcade.arcade_event.connect(_on_battery_arcade_event)
+	arena.add_child(battery_arcade)
+	var local_idx := _local_player_index()
+	var player_data: Dictionary = GameManager.players[local_idx] if local_idx >= 0 and local_idx < GameManager.players.size() else {}
+	battery_arcade.call("setup", player_data, int(game_data.get("seed", 1)))
 
-func _spawn_battery_state() -> void:
-	battery_state = rng.randi_range(0, 2)
-	mode_tick = 0.0
-	if primary_label:
-		primary_label.text = ["☀️ 발전 +35 MW · 전력이 남아요", "🏙️ 수요 +30 MW · 전력이 부족해요", "⚖️ 생산과 소비가 같아요"][battery_state]
-
-func _on_battery_action(action: int) -> void:
-	if not _can_play(): return
+func _on_battery_arcade_event(points: int, success: bool, message: String, count_correct: bool) -> void:
+	if not _can_play():
+		return
 	attempts += 1
-	if action == battery_state:
-		_register_success(95, ["남는 전기를 저장했어요.", "저장 전기를 필요한 곳에 공급했어요.", "불필요한 충·방전을 피했어요."][action])
+	if success:
+		_register_success(points, message, count_correct)
 	else:
-		_register_miss(30, "저장장치는 잉여일 때 충전하고 부족할 때 방전합니다.")
-	_spawn_battery_state()
+		_register_miss(points, message)
 
 func _build_eco_commute() -> void:
-	primary_label = _arena_label("", 24, Color("72ebb0"))
-	secondary_label = _arena_label("무조건 한 수단이 아니라 상황에 맞는 저탄소 선택이 중요해요.", 16)
-	var row := HBoxContainer.new()
-	row.name = "CommuteButtons"
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 12)
-	arena.add_child(row)
-	_next_commute_scenario()
+	commute_arcade = SHARED_SCHOOL_BUS.new()
+	commute_arcade.arcade_event.connect(_on_commute_arcade_event)
+	arena.add_child(commute_arcade)
+	var local_idx := _local_player_index()
+	var player_data: Dictionary = GameManager.players[local_idx] if local_idx >= 0 and local_idx < GameManager.players.size() else {}
+	commute_arcade.call("setup", player_data, int(game_data.get("seed", 1)) + local_idx * 104729)
 
-func _next_commute_scenario() -> void:
-	current_scenario = (COMMUTE_SCENARIOS[rng.randi_range(0, COMMUTE_SCENARIOS.size() - 1)] as Dictionary).duplicate(true)
-	primary_label.text = str(current_scenario["prompt"])
-	var row := arena.get_node_or_null("CommuteButtons") as HBoxContainer
-	if not row: return
-	for child in row.get_children():
-		row.remove_child(child)
-		child.queue_free()
-	var options: Array = current_scenario["options"]
-	for option_idx in range(options.size()):
-		var button := _make_button(str(options[option_idx]), Color("26865f"))
-		button.custom_minimum_size = Vector2(265, 62)
-		button.pressed.connect(_on_commute_pressed.bind(option_idx))
-		row.add_child(button)
-
-func _on_commute_pressed(option_idx: int) -> void:
-	if not _can_play(): return
+func _on_commute_arcade_event(points: int, success: bool, message: String, count_correct: bool) -> void:
+	if not _can_play():
+		return
+	if points <= 0:
+		feedback_label.text = message
+		return
 	attempts += 1
-	if option_idx == int(current_scenario.get("answer", -1)):
-		_register_success(105, "좋은 선택! " + str(current_scenario["why"]))
+	if success:
+		_register_success(points, message, count_correct)
 	else:
-		_register_miss(30, "더 적은 에너지를 쓰는 방법이 있어요. " + str(current_scenario["why"]))
-	_next_commute_scenario()
+		_register_miss(points, message)
+
+func _build_heat_leak() -> void:
+	heat_arcade = HEAT_LEAK_DASH.new()
+	heat_arcade.arcade_event.connect(_on_heat_arcade_event)
+	arena.add_child(heat_arcade)
+	var local_idx := _local_player_index()
+	var player_data: Dictionary = GameManager.players[local_idx] if local_idx >= 0 and local_idx < GameManager.players.size() else {}
+	heat_arcade.call("setup", player_data, int(game_data.get("seed", 1)))
+
+func _on_heat_arcade_event(points: int, success: bool, message: String, count_correct: bool) -> void:
+	if not _can_play():
+		return
+	if success:
+		attempts += 1
+		_register_success(points, message, count_correct)
+	else:
+		attempts += 1
+		_register_miss(points, message)
 
 func _update_mode(delta: float) -> void:
 	match game_id:
@@ -593,11 +874,7 @@ func _update_mode(delta: float) -> void:
 		"grid_balance":
 			pass
 		"battery_relay":
-			mode_tick += delta
-			if mode_tick >= 2.2:
-				mode_tick = 0.0
-				streak = 0
-				_spawn_battery_state()
+			pass
 
 func _register_success(points: int, message: String, count_correct: bool = true) -> void:
 	score = mini(GameManager.MINIGAME_SCORE_LIMIT, score + points)
@@ -605,14 +882,14 @@ func _register_success(points: int, message: String, count_correct: bool = true)
 	best_streak = maxi(best_streak, streak)
 	if count_correct:
 		correct += 1
-	feedback_label.text = "✅ %s  ·  +%d점%s" % [message, points, "  ·  콤보 ×%d" % streak if streak >= 2 else ""]
+	feedback_label.text = "%s%s  ·  +%d점%s" % ["" if standalone_mode else "✅ ", message, points, "  ·  콤보 ×%d" % streak if streak >= 2 else ""]
 	feedback_label.add_theme_color_override("font_color", Color("83f2b6"))
 	_refresh_score()
 
 func _register_miss(penalty: int, message: String) -> void:
 	score = maxi(0, score - penalty)
 	streak = 0
-	feedback_label.text = "💡 %s  ·  -%d점" % [message, penalty]
+	feedback_label.text = "%s%s  ·  -%d점" % ["" if standalone_mode else "💡 ", message, penalty]
 	feedback_label.add_theme_color_override("font_color", Color("ffb28e"))
 	_refresh_score()
 
@@ -623,6 +900,8 @@ func _refresh_score() -> void:
 func _submit_score() -> void:
 	if submitted:
 		return
+	if is_instance_valid(hydro_arcade) and hydro_arcade.has_method("finalize_generation_score"):
+		hydro_arcade.call("finalize_generation_score")
 	submitted = true
 	active = false
 	if is_instance_valid(solar_arcade) and solar_arcade.has_method("set_running"):
@@ -633,7 +912,15 @@ func _submit_score() -> void:
 		grid_arcade.call("set_running", false)
 	if is_instance_valid(standby_arcade) and standby_arcade.has_method("set_running"):
 		standby_arcade.call("set_running", false)
-	feedback_label.text = "⏱️ 도전 종료! 점수를 제출했습니다."
+	if is_instance_valid(hydro_arcade) and hydro_arcade.has_method("set_running"):
+		hydro_arcade.call("set_running", false)
+	if is_instance_valid(sort_arcade) and sort_arcade.has_method("set_running"):
+		sort_arcade.call("set_running", false)
+	if is_instance_valid(battery_arcade) and battery_arcade.has_method("set_running"):
+		battery_arcade.call("set_running", false)
+	if is_instance_valid(commute_arcade) and commute_arcade.has_method("set_running"):
+		commute_arcade.call("set_running", false)
+	feedback_label.text = "도전 종료! 점수를 제출했습니다." if standalone_mode else "⏱️ 도전 종료! 점수를 제출했습니다."
 	feedback_label.add_theme_color_override("font_color", Color("ffe083"))
 	submission_label.text = "다른 플레이어의 도전이 끝나기를 기다리는 중…"
 	GameManager.submit_minigame_score(_local_player_index(), score, {"correct": correct, "attempts": attempts, "best_streak": best_streak})
@@ -655,7 +942,7 @@ func _build_results(results: Array) -> void:
 		row.add_theme_stylebox_override("panel", style)
 		arena.add_child(row)
 		var label := Label.new()
-		label.text = "%d위   %-10s    %4d점                         ⚡ 에너지 +%d" % [int(result["rank"]), str(result["name"]), int(result["score"]), int(result["reward"])]
+		label.text = "%d위   %-10s    %4d점                         %s에너지 +%d" % [int(result["rank"]), str(result["name"]), int(result["score"]), "" if standalone_mode else "⚡ ", int(result["reward"])]
 		label.add_theme_font_size_override("font_size", 20)
 		label.add_theme_color_override("font_color", Color("fff0a6") if int(result["rank"]) == 1 else Color("d7edf0"))
 		row.add_child(label)
@@ -693,7 +980,7 @@ func _make_button(text_value: String, color: Color) -> Button:
 	return button
 
 func _can_play() -> bool:
-	return active and not submitted
+	return active and not submitted and not is_guide_open()
 
 func _local_player_index() -> int:
 	if NetworkManager and NetworkManager.is_online:

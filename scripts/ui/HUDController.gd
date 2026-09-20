@@ -79,6 +79,14 @@ var open_market_item_grid: GridContainer
 var open_market_confirm_button: Button
 var open_market_offer_selection: Dictionary = {}
 var _open_market_last_phase := -1
+var open_market_guide_banner: PanelContainer
+var open_market_guide_label: Label
+var open_market_inspect_box: PanelContainer
+var open_market_inspect_label: Label
+var open_market_recipe_button: Button
+var open_market_recipe_popover: PanelContainer
+var open_market_recipe_grid: GridContainer
+var _open_market_hovered_item_id: String = ""
 
 func _local_player_index() -> int:
 	if NetworkManager and NetworkManager.is_online:
@@ -433,82 +441,430 @@ func _hide_lap_reward_panel() -> void:
 		lap_reward_panel.visible = false
 
 
+func _get_player_buildable_projects(inv: Dictionary) -> Array[Dictionary]:
+	var buildable: Array[Dictionary] = []
+	for project in GameManager.CONSTRUCTION_PROJECTS:
+		var can_build := true
+		for req_id in project["requirements"]:
+			if int(inv.get(req_id, 0)) < int(project["requirements"][req_id]):
+				can_build = false
+				break
+		if can_build:
+			buildable.append(project)
+	return buildable
+
+func _get_projects_requiring_item(item_id: String) -> Array[Dictionary]:
+	var projects: Array[Dictionary] = []
+	for project in GameManager.CONSTRUCTION_PROJECTS:
+		if project["requirements"].has(item_id):
+			projects.append(project)
+	return projects
+
+func _get_item_completion_opportunity(item_id: String, inv: Dictionary) -> Dictionary:
+	var result := {
+		"completes": [] as Array[String],
+		"advances": [] as Array[String]
+	}
+	for project in GameManager.CONSTRUCTION_PROJECTS:
+		if not project["requirements"].has(item_id):
+			continue
+		var needed: int = int(project["requirements"][item_id])
+		var current: int = int(inv.get(item_id, 0))
+		if current >= needed:
+			continue
+		var other_missing := 0
+		for req_id in project["requirements"]:
+			if req_id == item_id:
+				continue
+			other_missing += maxi(0, int(project["requirements"][req_id]) - int(inv.get(req_id, 0)))
+		var my_missing := needed - current
+		if other_missing == 0 and my_missing == 1:
+			result["completes"].append(str(project["name"]))
+		else:
+			result["advances"].append("%s (%d/%d)" % [project["name"], current, needed])
+	return result
+
+
+
 func _create_open_market_panel() -> void:
 	if open_market_panel:
 		return
 	open_market_dimmer = ColorRect.new()
 	open_market_dimmer.name = "OpenMarketDimmer"
-	open_market_dimmer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	open_market_dimmer.color = Color(0.005, 0.025, 0.04, 0.86)
-	open_market_dimmer.mouse_filter = Control.MOUSE_FILTER_STOP
-	open_market_dimmer.z_index = 58
+	open_market_dimmer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	open_market_dimmer.color = Color(0.02, 0.04, 0.08, 0.88)
+	open_market_dimmer.visible = false
 	add_child(open_market_dimmer)
 
 	open_market_panel = PanelContainer.new()
 	open_market_panel.name = "OpenMarketPanel"
+	open_market_panel.custom_minimum_size = Vector2(1140, 660)
 	open_market_panel.set_anchors_preset(Control.PRESET_CENTER)
-	open_market_panel.offset_left = -560.0
-	open_market_panel.offset_top = -305.0
-	open_market_panel.offset_right = 560.0
-	open_market_panel.offset_bottom = 305.0
-	open_market_panel.z_index = 59
-	open_market_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	open_market_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("0b2833fa"), UI.TEAL, 20.0, 22))
-	add_child(open_market_panel)
+	open_market_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	open_market_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	UI.apply_panel_container(open_market_panel, UI.NAVY_PANEL_ALT, UI.BORDER_ACCENT)
+	open_market_dimmer.add_child(open_market_panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 18)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_right", 18)
+	margin.add_theme_constant_override("margin_bottom", 14)
+	open_market_panel.add_child(margin)
 
 	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 9)
-	open_market_panel.add_child(content)
-	var header := HBoxContainer.new()
-	content.add_child(header)
+	content.add_theme_constant_override("separation", 8)
+	margin.add_child(content)
+
+	# 1. 헤더 (타이틀 + 레시피 팝업 버튼 + 타이머)
+	var header_row := HBoxContainer.new()
+	header_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	content.add_child(header_row)
+
 	open_market_title_label = Label.new()
-	open_market_title_label.text = "오픈마켓 · 비공개 선택"
-	open_market_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	open_market_title_label.add_theme_font_size_override("font_size", 28)
+	open_market_title_label.name = "OpenMarketTitle"
+	open_market_title_label.text = "오픈마켓"
+	open_market_title_label.add_theme_font_size_override("font_size", 20)
 	open_market_title_label.add_theme_color_override("font_color", UI.GOLD)
-	header.add_child(open_market_title_label)
+	header_row.add_child(open_market_title_label)
+
+	var title_gap := Control.new()
+	title_gap.custom_minimum_size = Vector2(16, 0)
+	header_row.add_child(title_gap)
+
+	open_market_recipe_button = Button.new()
+	open_market_recipe_button.name = "OpenMarketRecipeButton"
+	open_market_recipe_button.text = "전체 건설 레시피"
+	open_market_recipe_button.custom_minimum_size = Vector2(160, 34)
+	open_market_recipe_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	UI.apply_secondary_button(open_market_recipe_button, UI.TEAL)
+	open_market_recipe_button.pressed.connect(_toggle_open_market_recipe_popover)
+	header_row.add_child(open_market_recipe_button)
+
+	var header_spacer := Control.new()
+	header_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_row.add_child(header_spacer)
+
 	open_market_timer_label = Label.new()
-	open_market_timer_label.custom_minimum_size = Vector2(135, 0)
-	open_market_timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	open_market_timer_label.add_theme_font_size_override("font_size", 24)
+	open_market_timer_label.name = "OpenMarketTimer"
+	open_market_timer_label.text = "20초"
+	open_market_timer_label.add_theme_font_size_override("font_size", 22)
 	open_market_timer_label.add_theme_color_override("font_color", UI.GOLD)
-	header.add_child(open_market_timer_label)
+	header_row.add_child(open_market_timer_label)
+
+	# 2. 서브헤더 (설명 + 할당 현황)
+	var subheader_row := HBoxContainer.new()
+	content.add_child(subheader_row)
 
 	open_market_status_label = Label.new()
-	open_market_status_label.custom_minimum_size = Vector2(0, 48)
-	open_market_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	open_market_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	open_market_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	open_market_status_label.add_theme_font_size_override("font_size", 17)
-	open_market_status_label.add_theme_color_override("font_color", UI.TEXT)
-	content.add_child(open_market_status_label)
+	open_market_status_label.name = "OpenMarketStatus"
+	open_market_status_label.text = "부품을 선택하세요."
+	open_market_status_label.add_theme_font_size_override("font_size", 13)
+	open_market_status_label.add_theme_color_override("font_color", UI.TEXT_MUTED)
+	open_market_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	subheader_row.add_child(open_market_status_label)
 
 	open_market_quota_label = Label.new()
-	open_market_quota_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	open_market_quota_label.add_theme_font_size_override("font_size", 17)
-	open_market_quota_label.add_theme_color_override("font_color", Color("8fffe0"))
-	content.add_child(open_market_quota_label)
+	open_market_quota_label.name = "OpenMarketQuota"
+	open_market_quota_label.text = ""
+	open_market_quota_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	open_market_quota_label.add_theme_font_size_override("font_size", 13)
+	open_market_quota_label.add_theme_color_override("font_color", UI.TEXT_BRIGHT)
+	subheader_row.add_child(open_market_quota_label)
 
+	# 3. 제작 분석 가이드 배너 (상단)
+	open_market_guide_banner = PanelContainer.new()
+	open_market_guide_banner.name = "OpenMarketGuideBanner"
+	open_market_guide_banner.custom_minimum_size = Vector2(0, 42)
+	UI.apply_panel_container(open_market_guide_banner, Color("162438"), UI.BORDER_MUTED)
+	content.add_child(open_market_guide_banner)
+
+	var guide_margin := MarginContainer.new()
+	guide_margin.add_theme_constant_override("margin_left", 12)
+	guide_margin.add_theme_constant_override("margin_right", 12)
+	guide_margin.add_theme_constant_override("margin_top", 6)
+	guide_margin.add_theme_constant_override("margin_bottom", 6)
+	open_market_guide_banner.add_child(guide_margin)
+
+	open_market_guide_label = Label.new()
+	open_market_guide_label.name = "OpenMarketGuideLabel"
+	open_market_guide_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	open_market_guide_label.add_theme_font_size_override("font_size", 13)
+	open_market_guide_label.add_theme_color_override("font_color", UI.TEXT_BRIGHT)
+	guide_margin.add_child(open_market_guide_label)
+
+	# 4. 부품 그리드 (4열 2행)
 	open_market_item_grid = GridContainer.new()
+	open_market_item_grid.name = "OpenMarketItemGrid"
 	open_market_item_grid.columns = 4
-	open_market_item_grid.add_theme_constant_override("h_separation", 8)
+	open_market_item_grid.add_theme_constant_override("h_separation", 10)
 	open_market_item_grid.add_theme_constant_override("v_separation", 8)
+	open_market_item_grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(open_market_item_grid)
 
-	open_market_confirm_button = Button.new()
-	open_market_confirm_button.custom_minimum_size = Vector2(0, 50)
-	open_market_confirm_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	open_market_confirm_button.pressed.connect(_on_open_market_offer_confirmed)
-	UI.apply_primary_button(open_market_confirm_button)
-	content.add_child(open_market_confirm_button)
+	# 5. 하단 부품 실시간 인스펙터 바
+	open_market_inspect_box = PanelContainer.new()
+	open_market_inspect_box.name = "OpenMarketInspectBox"
+	open_market_inspect_box.custom_minimum_size = Vector2(0, 48)
+	UI.apply_panel_container(open_market_inspect_box, Color("142236"), UI.BORDER_ACCENT)
+	content.add_child(open_market_inspect_box)
 
-	var hint := Label.new()
-	hint.text = "판매 선택은 모두가 확정할 때까지 비공개입니다. 공개 후에는 서버에 먼저 도착한 요청부터 처리됩니다."
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 13)
-	hint.add_theme_color_override("font_color", UI.TEXT_MUTED)
-	content.add_child(hint)
+	var inspect_margin := MarginContainer.new()
+	inspect_margin.add_theme_constant_override("margin_left", 12)
+	inspect_margin.add_theme_constant_override("margin_right", 12)
+	inspect_margin.add_theme_constant_override("margin_top", 6)
+	inspect_margin.add_theme_constant_override("margin_bottom", 6)
+	open_market_inspect_box.add_child(inspect_margin)
+
+	open_market_inspect_label = Label.new()
+	open_market_inspect_label.name = "OpenMarketInspectLabel"
+	open_market_inspect_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	open_market_inspect_label.add_theme_font_size_override("font_size", 13)
+	open_market_inspect_label.add_theme_color_override("font_color", UI.GOLD)
+	open_market_inspect_label.text = "부품 위에 마우스를 올리면 사용처와 완공 가능성을 분석해 드립니다."
+	inspect_margin.add_child(open_market_inspect_label)
+
+	# 6. 하단 확인 버튼 Row
+	var footer_row := HBoxContainer.new()
+	footer_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	content.add_child(footer_row)
+
+	open_market_confirm_button = Button.new()
+	open_market_confirm_button.name = "OpenMarketConfirmButton"
+	open_market_confirm_button.custom_minimum_size = Vector2(360, 44)
+	open_market_confirm_button.text = "선택한 부품 올리기"
+	open_market_confirm_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	UI.apply_primary_button(open_market_confirm_button)
+	open_market_confirm_button.pressed.connect(_on_open_market_offer_confirmed)
+	footer_row.add_child(open_market_confirm_button)
+
+	# 7. 레시피 팝오버 생성
+	_create_open_market_recipe_popover()
+
 	_hide_open_market_panel()
+
+
+func _create_open_market_recipe_popover() -> void:
+	if open_market_recipe_popover:
+		return
+	open_market_recipe_popover = PanelContainer.new()
+	open_market_recipe_popover.name = "OpenMarketRecipePopover"
+	open_market_recipe_popover.custom_minimum_size = Vector2(980, 580)
+	open_market_recipe_popover.set_anchors_preset(Control.PRESET_CENTER)
+	open_market_recipe_popover.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	open_market_recipe_popover.grow_vertical = Control.GROW_DIRECTION_BOTH
+	open_market_recipe_popover.z_index = 10
+	open_market_recipe_popover.visible = false
+	UI.apply_panel_container(open_market_recipe_popover, Color("0f1b2c"), UI.GOLD)
+	open_market_panel.add_child(open_market_recipe_popover)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	open_market_recipe_popover.add_child(margin)
+
+	var v_box := VBoxContainer.new()
+	v_box.add_theme_constant_override("separation", 10)
+	margin.add_child(v_box)
+
+	var top_bar := HBoxContainer.new()
+	v_box.add_child(top_bar)
+
+	var title := Label.new()
+	title.text = "10종 에너지 시설 건설 레시피 및 내 부품 충족 현황"
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", UI.GOLD)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_bar.add_child(title)
+
+	var close_btn := Button.new()
+	close_btn.text = "✕ 닫기"
+	close_btn.custom_minimum_size = Vector2(80, 32)
+	close_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	UI.apply_secondary_button(close_btn, UI.DANGER)
+	close_btn.pressed.connect(func(): open_market_recipe_popover.visible = false)
+	top_bar.add_child(close_btn)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	v_box.add_child(scroll)
+
+	open_market_recipe_grid = GridContainer.new()
+	open_market_recipe_grid.columns = 2
+	open_market_recipe_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	open_market_recipe_grid.add_theme_constant_override("h_separation", 12)
+	open_market_recipe_grid.add_theme_constant_override("v_separation", 10)
+	scroll.add_child(open_market_recipe_grid)
+
+
+func _toggle_open_market_recipe_popover() -> void:
+	if not open_market_recipe_popover:
+		return
+	open_market_recipe_popover.visible = not open_market_recipe_popover.visible
+	if open_market_recipe_popover.visible:
+		_refresh_open_market_recipe_popover()
+
+
+func _refresh_open_market_recipe_popover() -> void:
+	if not open_market_recipe_grid:
+		return
+	for child in open_market_recipe_grid.get_children():
+		open_market_recipe_grid.remove_child(child)
+		child.queue_free()
+
+	var local_idx := _local_player_index()
+	var inv: Dictionary = GameManager.players[local_idx].get("inventory", {}) if local_idx >= 0 and local_idx < GameManager.players.size() else {}
+
+	for project in GameManager.CONSTRUCTION_PROJECTS:
+		var card := PanelContainer.new()
+		card.custom_minimum_size = Vector2(450, 86)
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		var reqs: Dictionary = project["requirements"]
+		var can_build := true
+		var missing_count := 0
+		var req_texts: Array[String] = []
+
+		for req_id in reqs:
+			var need := int(reqs[req_id])
+			var have := int(inv.get(req_id, 0))
+			var item_name := str(GameManager.ITEM_DEFINITIONS.get(req_id, {}).get("name", req_id))
+			if have < need:
+				can_build = false
+				missing_count += (need - have)
+				req_texts.append("%s %d/%d" % [item_name, have, need])
+			else:
+				req_texts.append("%s %d/%d(충족)" % [item_name, have, need])
+
+		if can_build:
+			UI.apply_panel_container(card, Color("143528"), Color("2ecc71"))
+		elif missing_count == 1:
+			UI.apply_panel_container(card, Color("2e2714"), Color("f1c40f"))
+		else:
+			UI.apply_panel_container(card, UI.NAVY_CARD, UI.BORDER_MUTED)
+
+		var card_m := MarginContainer.new()
+		card_m.add_theme_constant_override("margin_left", 12)
+		card_m.add_theme_constant_override("margin_right", 12)
+		card_m.add_theme_constant_override("margin_top", 8)
+		card_m.add_theme_constant_override("margin_bottom", 8)
+		card.add_child(card_m)
+
+		var c_vbox := VBoxContainer.new()
+		card_m.add_child(c_vbox)
+
+		var name_row := HBoxContainer.new()
+		c_vbox.add_child(name_row)
+
+		var name_lbl := Label.new()
+		name_lbl.text = str(project["name"])
+		name_lbl.add_theme_font_size_override("font_size", 15)
+		name_lbl.add_theme_color_override("font_color", UI.GOLD if can_build else UI.TEXT_BRIGHT)
+		name_row.add_child(name_lbl)
+
+		var status_badge := Label.new()
+		if can_build:
+			status_badge.text = " [즉시 건설 가능]"
+			status_badge.add_theme_color_override("font_color", Color("2ecc71"))
+		elif missing_count == 1:
+			status_badge.text = " [1개 부족!]"
+			status_badge.add_theme_color_override("font_color", Color("f1c40f"))
+		status_badge.add_theme_font_size_override("font_size", 13)
+		name_row.add_child(status_badge)
+
+		var spacer := Control.new()
+		spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_row.add_child(spacer)
+
+		var stat_lbl := Label.new()
+		stat_lbl.text = "발전량 +%d  친환경 +%d" % [int(project.get("energy", 0)), int(project.get("eco", 0))]
+		stat_lbl.add_theme_font_size_override("font_size", 12)
+		stat_lbl.add_theme_color_override("font_color", UI.TEXT_MUTED)
+		name_row.add_child(stat_lbl)
+
+		var req_lbl := Label.new()
+		req_lbl.text = "필요 재료: " + ", ".join(req_texts)
+		req_lbl.add_theme_font_size_override("font_size", 13)
+		req_lbl.add_theme_color_override("font_color", Color("a8c0d8") if can_build else UI.TEXT_MUTED)
+		c_vbox.add_child(req_lbl)
+
+		open_market_recipe_grid.add_child(card)
+
+
+func _inspect_open_market_item(item_id: String, phase: int, is_hover: bool) -> void:
+	if not open_market_inspect_label:
+		return
+	if not is_hover or item_id.is_empty():
+		_open_market_hovered_item_id = ""
+		if phase == GameManager.OpenMarketPhase.OFFERING:
+			open_market_inspect_label.text = "내놓을 부품 위에 마우스를 올리면 사용처와 건설 완공 영향을 분석해 드립니다."
+			open_market_inspect_label.add_theme_color_override("font_color", UI.TEXT_MUTED)
+		else:
+			open_market_inspect_label.text = "가져올 시장 부품 위에 마우스를 올리면 어떤 시설을 완성할 수 있는지 보여줍니다."
+			open_market_inspect_label.add_theme_color_override("font_color", UI.GOLD)
+		return
+
+	_open_market_hovered_item_id = item_id
+	var item_name := str(GameManager.ITEM_DEFINITIONS.get(item_id, {}).get("name", item_id))
+	var local_idx := _local_player_index()
+	var inv: Dictionary = GameManager.players[local_idx].get("inventory", {}) if local_idx >= 0 and local_idx < GameManager.players.size() else {}
+	var owned := int(inv.get(item_id, 0))
+
+	if phase == GameManager.OpenMarketPhase.OFFERING:
+		var selected := int(open_market_offer_selection.get(item_id, 0))
+		var remaining_after_sale := owned - selected
+		var requiring_projects := _get_projects_requiring_item(item_id)
+		var project_names: Array[String] = []
+		for p in requiring_projects:
+			project_names.append(str(p["name"]))
+
+		var buildable_now := _get_player_buildable_projects(inv)
+		var harms_buildable := false
+		var harmed_projects: Array[String] = []
+		for bp in buildable_now:
+			if bp["requirements"].has(item_id):
+				var need := int(bp["requirements"][item_id])
+				if remaining_after_sale < need:
+					harms_buildable = true
+					harmed_projects.append(str(bp["name"]))
+
+		var text := ""
+		if harms_buildable:
+			text = "[주의] '%s'을(를) 판매하면 즉시 건설 가능한 [%s] 완공이 불가능해집니다! (보유: %d개 / 판매예정: %d개)" % [item_name, ", ".join(harmed_projects), owned, selected]
+			open_market_inspect_label.add_theme_color_override("font_color", Color("ff7979"))
+		elif requiring_projects.is_empty():
+			text = "[안내] '%s': 현재 필요한 시설이 없는 여유 부품입니다. (보유: %d개)" % [item_name, owned]
+			open_market_inspect_label.add_theme_color_override("font_color", UI.TEXT_BRIGHT)
+		else:
+			text = "[분석] '%s': [%s] 등의 건설 재료입니다. (보유: %d개 / 판매예정: %d개 / 사용처: %d곳)" % [item_name, ", ".join(project_names), owned, selected, requiring_projects.size()]
+			open_market_inspect_label.add_theme_color_override("font_color", Color("70d6ff"))
+		open_market_inspect_label.text = text
+	else:
+		var opp := _get_item_completion_opportunity(item_id, inv)
+		var completes: Array = opp["completes"]
+		var advances: Array = opp["advances"]
+
+		var text := ""
+		if not completes.is_empty():
+			text = "[완성 기회] '%s'을(를) 가져오면 [%s]이(가) 즉시 완공됩니다!" % [item_name, ", ".join(completes)]
+			open_market_inspect_label.add_theme_color_override("font_color", Color("ffd166"))
+		elif not advances.is_empty():
+			text = "[필요 부품] '%s' 획득 시 진행 가능한 시설: %s (현재 보유: %d개)" % [item_name, ", ".join(advances), owned]
+			open_market_inspect_label.add_theme_color_override("font_color", Color("06d6a0"))
+		else:
+			var req_projects := _get_projects_requiring_item(item_id)
+			if not req_projects.is_empty():
+				var names: Array[String] = []
+				for p in req_projects:
+					names.append(str(p["name"]))
+				text = "[시설 재료] '%s': [%s]의 필요 재료입니다. (현재 보유: %d개)" % [item_name, ", ".join(names), owned]
+			else:
+				text = "[시설 재료] '%s': 발전소 시설 재료입니다. (현재 보유: %d개)" % [item_name, owned]
+			open_market_inspect_label.add_theme_color_override("font_color", UI.TEXT_MUTED)
+		open_market_inspect_label.text = text
 
 
 func _on_open_market_state_changed(state: Dictionary) -> void:
@@ -545,22 +901,61 @@ func _refresh_open_market_panel(state: Dictionary) -> void:
 	var submitted: Dictionary = state.get("submitted_players", {})
 	var local_submitted := submitted.has(local_idx)
 	var local_is_ai := local_idx >= 0 and local_idx < GameManager.players.size() and bool(GameManager.players[local_idx].get("is_ai", false))
+	var inventory: Dictionary = GameManager.players[local_idx].get("inventory", {}) if local_idx >= 0 and local_idx < GameManager.players.size() else {}
 
 	if phase == GameManager.OpenMarketPhase.OFFERING:
 		open_market_title_label.text = "오픈마켓 · 비공개 판매 선택"
 		open_market_status_label.text = "내놓을 부품 수량을 고르세요. 모두 확정한 순간에만 시장에 동시에 공개됩니다."
 		open_market_quota_label.text = "결정 완료 %d / %d명%s" % [submitted.size(), int(state.get("player_count", GameManager.players.size())), " · 내 선택 확정됨" if local_submitted else ""]
-		var inventory: Dictionary = GameManager.players[local_idx].get("inventory", {}) if local_idx >= 0 and local_idx < GameManager.players.size() else {}
+
+		var buildable_projects := _get_player_buildable_projects(inventory)
+		if not buildable_projects.is_empty():
+			var b_names: Array[String] = []
+			for bp in buildable_projects:
+				b_names.append(str(bp["name"]))
+			open_market_guide_label.text = "[즉시 건설 가능] 현재 보유 부품으로 [%s]을(를) 지을 수 있습니다! 핵심 부품([완성재료])이 판매되지 않도록 주의하세요." % ", ".join(b_names)
+			open_market_guide_label.add_theme_color_override("font_color", Color("ffd166"))
+		else:
+			var almost_ready: Array[String] = []
+			for project in GameManager.CONSTRUCTION_PROJECTS:
+				var missing := 0
+				for req_id in project["requirements"]:
+					missing += maxi(0, int(project["requirements"][req_id]) - int(inventory.get(req_id, 0)))
+				if missing == 1:
+					almost_ready.append(str(project["name"]))
+			if not almost_ready.is_empty():
+				open_market_guide_label.text = "[완공 임박] 1개 부품만 더 모으면 [%s] 완공 가능! 불필요한 부품을 내놓아 시장에서 필요한 부품을 교환해보세요." % ", ".join(almost_ready)
+				open_market_guide_label.add_theme_color_override("font_color", Color("70d6ff"))
+			else:
+				open_market_guide_label.text = "보유 부품 현황을 확인하고 발전소 건설에 필요 없는 부품을 내놓아 다른 플레이어의 부품을 가져오세요."
+				open_market_guide_label.add_theme_color_override("font_color", UI.TEXT_BRIGHT)
+
 		for item_id_variant in GameManager.ITEM_DEFINITIONS.keys():
 			var item_id := str(item_id_variant)
 			var owned := int(inventory.get(item_id, 0))
 			var selected := clampi(int(open_market_offer_selection.get(item_id, 0)), 0, owned)
 			open_market_offer_selection[item_id] = selected
-			var button := _create_open_market_item_button(item_id, "%s\n판매 %d / 보유 %d" % [GameManager.ITEM_DEFINITIONS[item_id]["name"], selected, owned])
+
+			var is_crucial := false
+			for bp in buildable_projects:
+				if bp["requirements"].has(item_id):
+					is_crucial = true
+					break
+
+			var tag := "완성재료" if is_crucial and owned > 0 else ""
+			var button := _create_open_market_item_button(
+				item_id,
+				"%s\n판매 %d / 보유 %d" % [GameManager.ITEM_DEFINITIONS[item_id]["name"], selected, owned],
+				tag,
+				Color("f39c12") if is_crucial else Color("70d6ff"),
+				is_crucial and owned > 0,
+				phase
+			)
 			button.disabled = local_submitted or local_is_ai or owned <= 0
 			button.tooltip_text = "누를 때마다 판매 수량이 1개씩 늘고, 최대 수량 다음에는 0개로 돌아갑니다."
 			button.pressed.connect(_on_open_market_offer_item_pressed.bind(item_id, owned))
 			open_market_item_grid.add_child(button)
+
 		var selected_total := _get_inventory_total(open_market_offer_selection)
 		open_market_confirm_button.visible = true
 		open_market_confirm_button.disabled = local_submitted or local_is_ai
@@ -575,33 +970,89 @@ func _refresh_open_market_panel(state: Dictionary) -> void:
 		open_market_status_label.text = "시장에 공개된 부품을 누르세요. 먼저 도착한 요청이 가져갑니다!"
 		open_market_quota_label.text = "내가 올린 부품 %d개 · 가져갈 수 있는 부품 %d개 남음" % [allowance, quota_remaining]
 		var stock: Dictionary = state.get("stock", {})
+
+		var immediate_wins: Array[String] = []
+		for item_id_variant in stock.keys():
+			var item_id := str(item_id_variant)
+			if int(stock.get(item_id, 0)) <= 0:
+				continue
+			var opp := _get_item_completion_opportunity(item_id, inventory)
+			var completes: Array = opp["completes"]
+			for c in completes:
+				if not immediate_wins.has(str(c)):
+					immediate_wins.append(str(c))
+
+		if not immediate_wins.is_empty():
+			open_market_guide_label.text = "[완성 기회] 시장 부품 중 가져오면 [%s]이(가) 즉시 완성되는 부품이 있습니다! 우선적으로 획득하세요." % ", ".join(immediate_wins)
+			open_market_guide_label.add_theme_color_override("font_color", Color("ffd166"))
+		else:
+			open_market_guide_label.text = "시장 부품을 가져와 시설 레시피에 필요한 부품([필요])을 채우세요. (상단 [전체 건설 레시피] 참고)"
+			open_market_guide_label.add_theme_color_override("font_color", UI.TEXT_BRIGHT)
+
 		for item_id_variant in GameManager.ITEM_DEFINITIONS.keys():
 			var item_id := str(item_id_variant)
 			var amount := int(stock.get(item_id, 0))
-			var button := _create_open_market_item_button(item_id, "%s\n시장 재고 ×%d" % [GameManager.ITEM_DEFINITIONS[item_id]["name"], amount])
+			var opp := _get_item_completion_opportunity(item_id, inventory)
+			var completes: Array = opp["completes"]
+			var advances: Array = opp["advances"]
+
+			var tag := ""
+			var tag_color := Color("70d6ff")
+			var highlight := false
+
+			if not completes.is_empty() and amount > 0:
+				tag = "완성!"
+				tag_color = Color("ffd166")
+				highlight = true
+			elif not advances.is_empty() and amount > 0:
+				tag = "필요"
+				tag_color = Color("06d6a0")
+
+			var button := _create_open_market_item_button(
+				item_id,
+				"%s\n시장 재고 ×%d" % [GameManager.ITEM_DEFINITIONS[item_id]["name"], amount],
+				tag,
+				tag_color,
+				highlight,
+				phase
+			)
 			button.disabled = local_is_ai or quota_remaining <= 0 or amount <= 0
 			button.tooltip_text = "클릭하면 이 부품 1개를 선착순으로 가져옵니다."
 			button.pressed.connect(_on_open_market_take_item_pressed.bind(item_id))
 			open_market_item_grid.add_child(button)
+
 		open_market_confirm_button.visible = false
 
+	_inspect_open_market_item(_open_market_hovered_item_id, phase, not _open_market_hovered_item_id.is_empty())
 
-func _create_open_market_item_button(item_id: String, label_text: String) -> Button:
+
+func _create_open_market_item_button(item_id: String, label_text: String, tag_text: String, tag_color: Color, highlight: bool, phase: int) -> Button:
 	var item_data: Dictionary = GameManager.ITEM_DEFINITIONS[item_id]
 	var button := Button.new()
-	button.custom_minimum_size = Vector2(252, 82)
-	button.text = label_text
+	button.custom_minimum_size = Vector2(265, 74)
+	button.text = ("[%s] " % tag_text if not tag_text.is_empty() else "") + label_text
 	button.icon = load(str(item_data["asset"]))
 	button.expand_icon = true
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	UI.apply_secondary_button(button, UI.TEAL)
+
+	if highlight:
+		UI.apply_primary_button(button)
+		button.add_theme_color_override("font_color", Color("ffffff"))
+	elif not tag_text.is_empty():
+		UI.apply_secondary_button(button, tag_color)
+	else:
+		UI.apply_secondary_button(button, UI.TEAL)
+
+	button.mouse_entered.connect(_inspect_open_market_item.bind(item_id, phase, true))
+	button.mouse_exited.connect(_inspect_open_market_item.bind(item_id, phase, false))
 	return button
 
 
 func _on_open_market_offer_item_pressed(item_id: String, owned: int) -> void:
 	var selected := int(open_market_offer_selection.get(item_id, 0)) + 1
 	open_market_offer_selection[item_id] = 0 if selected > owned else selected
+	_inspect_open_market_item(item_id, GameManager.OpenMarketPhase.OFFERING, true)
 	_refresh_open_market_panel(GameManager.get_open_market_state())
 
 
@@ -626,6 +1077,8 @@ func _hide_open_market_panel() -> void:
 		open_market_dimmer.visible = false
 	if open_market_panel:
 		open_market_panel.visible = false
+	if open_market_recipe_popover:
+		open_market_recipe_popover.visible = false
 	_open_market_last_phase = -1
 	open_market_offer_selection.clear()
 
@@ -899,7 +1352,7 @@ func _on_turn_changed(turn_idx: int) -> void:
 			turn_prompt_label.text = "내 턴  •  오른쪽 주사위 또는 특수기술을 선택하세요"
 			turn_prompt_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.32))
 		else:
-			turn_prompt_label.text = "%s의 턴  ·  다음 건설 목표를 골라보세요" % cur_p["name"]
+			turn_prompt_label.text = "%s의 턴  ·  주사위를 굴리고 있습니다" % cur_p["name"]
 			turn_prompt_label.add_theme_color_override("font_color", Color(0.48, 0.9, 0.86))
 		_animate_turn_prompt()
 	_refresh_primary_action_controls()

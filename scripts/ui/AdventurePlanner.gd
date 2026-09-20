@@ -15,6 +15,7 @@ var goal_materials: Label
 var goal_progress: ProgressBar
 var catalog: Control
 var catalog_open_button: Button
+var catalog_close_button: Button
 var tutorial: PanelContainer
 var tutorial_title: Label
 var tutorial_body: Label
@@ -82,8 +83,8 @@ func _build_summary() -> void:
 	var heading := VBoxContainer.new()
 	heading.custom_minimum_size.x = 250
 	row.add_child(heading)
-	heading.add_child(_label("나의 건설 목표", 13, UI.TEAL))
-	goal_name = _label("첫 시설을 골라보세요", 20)
+	heading.add_child(_label("건설 도감 & 보유 재료", 13, UI.TEAL))
+	goal_name = _label("재료를 모아보세요", 20)
 	heading.add_child(goal_name)
 	var materials := VBoxContainer.new()
 	materials.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -97,7 +98,7 @@ func _build_summary() -> void:
 	goal_progress.add_theme_stylebox_override("background", UI.panel(UI.PANEL_SOFT, UI.PANEL_SOFT, 4, 0, 0))
 	goal_progress.add_theme_stylebox_override("fill", UI.panel(UI.TEAL, UI.TEAL, 4, 0, 0))
 	materials.add_child(goal_progress)
-	catalog_open_button = _button("재료 가방 · 목표 선택", open_catalog)
+	catalog_open_button = _button("재료 가방 & 건설 도감", open_catalog)
 	catalog_open_button.custom_minimum_size = Vector2(220, 48)
 	catalog_open_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(catalog_open_button)
@@ -121,11 +122,12 @@ func _build_catalog() -> void:
 	panel.add_child(content)
 	var header := HBoxContainer.new()
 	content.add_child(header)
-	var title := _label("재료 가방 & 건설 목표", 24, UI.GOLD)
+	var title := _label("재료 가방 & 건설 도감", 24, UI.GOLD)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
-	header.add_child(_button("닫기  ×", close_catalog))
-	content.add_child(_label("모험 시간은 계속 흐릅니다. 목표는 자유롭게 변경하고, 모험과 교환이 끝난 뒤 건설해요.", 14, UI.TEXT_MUTED))
+	catalog_close_button = _button("닫기  ×", close_catalog)
+	header.add_child(catalog_close_button)
+	content.add_child(_label("모험 시간은 계속 흐릅니다. 재료를 자유롭게 모아, 모험과 교환이 끝난 뒤 원하는 시설을 건설해요.", 14, UI.TEXT_MUTED))
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 22)
 	content.add_child(columns)
@@ -173,6 +175,7 @@ func _build_catalog() -> void:
 		var choose := _button("선택", select_goal.bind(index))
 		choose.add_theme_font_size_override("font_size", 12)
 		choose.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		choose.visible = false
 		row.add_child(choose)
 		goal_buttons.append(choose)
 	catalog.hide()
@@ -199,7 +202,11 @@ func open_catalog() -> void:
 	if not exploration_active or quiz_open: return
 	catalog.show()
 	_refresh_visibility()
-	goal_buttons[maxi(selected_goal, 0)].grab_focus()
+	record_step("goal", local_index)
+	if is_instance_valid(catalog_close_button):
+		catalog_close_button.grab_focus()
+	elif not goal_buttons.is_empty() and goal_buttons[0].visible:
+		goal_buttons[maxi(selected_goal, 0)].grab_focus()
 
 func close_catalog() -> void:
 	var was_open := catalog.visible
@@ -240,10 +247,32 @@ func refresh(new_inventory: Dictionary) -> void:
 		status.add_theme_color_override("font_color", UI.SUCCESS if ready else UI.TEXT_MUTED)
 		goal_buttons[index].text = "목표 ✓" if index == selected_goal else "선택"
 	if selected_goal < 0:
-		goal_name.text = "첫 시설을 골라보세요"
-		goal_materials.text = "모험에서 재료를 모아 종료 후 마을을 건설해요"
-		goal_materials.add_theme_color_override("font_color", UI.TEXT)
-		goal_progress.value = 0
+		var ready_count := 0
+		var ready_names: Array[String] = []
+		var total_materials := 0
+		for id in inventory:
+			total_materials += int(inventory[id])
+		for index in range(recipe_cards.size()):
+			if missing_materials(index).is_empty():
+				ready_count += 1
+				ready_names.append(str(GameManager.CONSTRUCTION_PROJECTS[index]["name"]))
+		if ready_count > 0:
+			goal_name.text = "건설 가능 %d종 준비 완료!" % ready_count
+			goal_name.add_theme_color_override("font_color", UI.GOLD)
+			var preview := ", ".join(ready_names.slice(0, 2))
+			if ready_names.size() > 2:
+				preview += " 외 %d종" % (ready_names.size() - 2)
+			goal_materials.text = "즉시 건설 가능: %s · 모험 종료 후 건설해요" % preview
+			goal_materials.add_theme_color_override("font_color", UI.SUCCESS)
+			goal_progress.max_value = maxi(GameManager.CONSTRUCTION_PROJECTS.size(), 1)
+			goal_progress.value = ready_count
+		else:
+			goal_name.text = "보유 재료 총 %d개" % total_materials if total_materials > 0 else "재료를 모아보세요"
+			goal_name.add_theme_color_override("font_color", UI.TEXT)
+			goal_materials.text = "모험에서 재료를 모아 종료 후 마을에 자유롭게 건설해요"
+			goal_materials.add_theme_color_override("font_color", UI.TEXT_MUTED)
+			goal_progress.max_value = 10
+			goal_progress.value = mini(total_materials, 10)
 		return
 	var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[selected_goal]
 	goal_name.text = str(project["name"])
@@ -298,7 +327,7 @@ func dismiss_tutorial() -> void:
 	_refresh_visibility()
 
 func _refresh_tutorial() -> void:
-	var descriptions := ["내 턴에 오른쪽 주사위를 눌러 이동해 보세요.", "도착한 칸의 재료를 모아보세요. 재료는 자동으로 가방에 들어와요.", "하단 ‘목표 선택’을 눌러 만들고 싶은 시설을 선택하세요.", "퀴즈 정답으로 SP를 모으고, 내 턴에 특수기술 버튼을 눌러보세요."]
+	var descriptions := ["내 턴에 오른쪽 주사위를 눌러 이동해 보세요.", "도착한 칸의 재료를 모아보세요. 재료는 자동으로 가방에 들어와요.", "하단 ‘건설 도감’을 눌러 필요한 재료와 시설 목록을 확인해 보세요.", "퀴즈 정답으로 SP를 모으고, 내 턴에 특수기술 버튼을 눌러보세요."]
 	var index := 0
 	for step in tutorial_steps:
 		if not tutorial_steps[step]: break

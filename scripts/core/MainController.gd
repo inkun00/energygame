@@ -8,6 +8,7 @@ class_name MainController
 
 var session_open := false
 var exit_confirmation: ConfirmationDialog
+var standalone_minigames: CanvasLayer
 
 func _create_exit_confirmation() -> void:
 	exit_confirmation = ConfirmationDialog.new()
@@ -49,13 +50,34 @@ func _ready() -> void:
 			NetworkManager.game_started_signal.connect(_on_network_game_started)
 		if not NetworkManager.server_disconnected.is_connected(_on_network_server_disconnected):
 			NetworkManager.server_disconnected.connect(_on_network_server_disconnected)
-	switch_to_lobby()
+	var standalone_request := _web_minigame_request()
+	if standalone_request.is_empty():
+		switch_to_lobby()
+	else:
+		_open_standalone_minigames(standalone_request)
 	if OS.has_feature("web"):
 		_finish_web_loading.call_deferred()
 
+func _web_minigame_request() -> String:
+	if not OS.has_feature("web"):
+		return ""
+	var requested = JavaScriptBridge.eval("(function(){var q=new URLSearchParams(window.location.search);return q.get('minigame') || (q.has('minigames') ? 'hub' : '');})()", true)
+	return str(requested) if requested != null else ""
+
+func _open_standalone_minigames(requested_id: String) -> void:
+	if lobby_ui:
+		lobby_ui.visible = false
+	if game_board:
+		game_board.visible = false
+	standalone_minigames = preload("res://scripts/ui/StandaloneMiniGames.gd").new()
+	add_child(standalone_minigames)
+	standalone_minigames.call("open_request", requested_id)
+
 
 func _finish_web_loading() -> void:
-	if game_board and game_board.has_method("begin_render_warmup"):
+	if is_instance_valid(standalone_minigames):
+		await RenderingServer.frame_post_draw
+	elif game_board and game_board.has_method("begin_render_warmup"):
 		game_board.begin_render_warmup()
 		# 첫 프레임에서 셰이더를 컴파일하고 다음 프레임까지 실제 출력이 끝났는지
 		# 확인한 뒤 로딩 화면을 닫습니다.

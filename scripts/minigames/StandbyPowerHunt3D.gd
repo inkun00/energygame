@@ -23,11 +23,15 @@ const BED = preload(ASSET_ROOT + "bedSingle.glb")
 const SIDE_TABLE = preload(ASSET_ROOT + "sideTable.glb")
 const TABLE_LAMP = preload(ASSET_ROOT + "lampRoundTable.glb")
 const CEILING_FAN = preload(ASSET_ROOT + "ceilingFan.glb")
+const SPEAKER = preload(ASSET_ROOT + "speaker.glb")
+const TOASTER = preload(ASSET_ROOT + "toaster.glb")
 
 const DEVICE_SPECS: Array[Dictionary] = [
+	{"x": 2.2, "room": "거실", "name": "음악 재생 스피커", "scene": SPEAKER, "standby": 0, "active": 12, "can_standby": false, "scale": 1.8, "tint": Color("68849c")},
 	{"x": 5.0, "room": "거실", "name": "TV", "scene": preload(ASSET_ROOT + "televisionModern.glb"), "standby": 3, "active": 55, "can_standby": true, "scale": 1.65, "tint": Color("334b61")},
 	{"x": 9.0, "room": "거실", "name": "오디오", "scene": preload(ASSET_ROOT + "radio.glb"), "standby": 4, "active": 18, "can_standby": true, "scale": 1.55, "tint": Color("6c86a0")},
-	{"x": 15.0, "room": "주방", "name": "냉장고", "scene": preload(ASSET_ROOT + "kitchenFridge.glb"), "standby": 0, "active": 45, "can_standby": false, "scale": 1.45, "tint": Color("a9d8dc")},
+	{"x": 13.2, "room": "주방", "name": "냉장고", "scene": preload(ASSET_ROOT + "kitchenFridge.glb"), "standby": 0, "active": 45, "can_standby": false, "scale": 1.45, "tint": Color("a9d8dc")},
+	{"x": 16.0, "room": "주방", "name": "조리 중 토스터", "scene": TOASTER, "standby": 0, "active": 700, "can_standby": false, "scale": 1.9, "tint": Color("d3a46d")},
 	{"x": 18.5, "room": "주방", "name": "전자레인지", "scene": preload(ASSET_ROOT + "kitchenMicrowave.glb"), "standby": 3, "active": 90, "can_standby": true, "scale": 1.65, "tint": Color("6e7d91")},
 	{"x": 22.0, "room": "주방", "name": "커피머신", "scene": preload(ASSET_ROOT + "kitchenCoffeeMachine.glb"), "standby": 2, "active": 800, "can_standby": true, "scale": 1.75, "tint": Color("b06e45")},
 	{"x": 28.0, "room": "침실", "name": "노트북", "scene": preload(ASSET_ROOT + "laptop.glb"), "standby": 2, "active": 35, "can_standby": true, "scale": 1.85, "tint": Color("547891")},
@@ -41,6 +45,17 @@ const RUN_SPEED := 6.4
 const RUN_ACCELERATION := 18.0
 const INTERACTION_DISTANCE := 1.65
 const PASS_DISTANCE := 1.95
+const GROUND_Y := 0.04
+const JUMP_IMPULSE := 7.4
+const GRAVITY := 17.5
+const JUMP_BARRIERS: Array[Dictionary] = [
+	{"x": 7.0, "name": "거실 탁자", "scene": COFFEE_TABLE, "scale": 2.0},
+	{"x": 20.2, "name": "주방 조리대", "scene": KITCHEN_CABINET, "scale": 2.0},
+	{"x": 40.7, "name": "세탁실 수납장", "scene": SIDE_TABLE, "scale": 2.0},
+]
+
+static func score_for_saved_watts(watts: int) -> int:
+	return maxi(0, watts) * 30
 
 var viewport: SubViewport
 var world: Node3D
@@ -50,10 +65,14 @@ var hero: Node3D
 var rng := RandomNumberGenerator.new()
 var running := false
 var run_velocity := 0.0
+var vertical_velocity := 0.0
 var lap_index := 1
+var saved_watts := 0
 var visual_time := 0.0
 var space_was_down := false
+var jump_was_down := false
 var device_records: Array[Dictionary] = []
+var barrier_records: Array[Dictionary] = []
 
 var neutral_material: StandardMaterial3D
 var active_material: StandardMaterial3D
@@ -63,6 +82,7 @@ var floor_glow_material: StandardMaterial3D
 
 var room_label: Label
 var progress_label: Label
+var saved_label: Label
 var action_label: Label
 var flash: ColorRect
 
@@ -80,6 +100,12 @@ func _ready() -> void:
 
 func setup(player_data: Dictionary, game_seed: int) -> void:
 	rng.seed = game_seed
+	lap_index = 1
+	saved_watts = 0
+	run_velocity = 0.0
+	vertical_velocity = 0.0
+	space_was_down = false
+	jump_was_down = false
 	_spawn_hero(player_data)
 	_build_house_course()
 	running = true
@@ -140,7 +166,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	hero_data["index"] = 0
 	hero.call("setup_player", hero_data)
 	hero.call("set_side_run_enabled", true)
-	hero.position = Vector3(1.0, 0.04, 1.0)
+	hero.position = Vector3(1.0, GROUND_Y, 1.0)
 	hero.scale = Vector3.ONE * 2.8
 	hero.call("_set_avatar_animation_state", false)
 
@@ -148,11 +174,13 @@ func _build_house_course() -> void:
 	if is_instance_valid(course_root):
 		course_root.queue_free()
 	device_records.clear()
+	barrier_records.clear()
 	course_root = Node3D.new()
 	course_root.name = "KenneyHouseLap%d" % lap_index
 	world.add_child(course_root)
 	_build_house_shell()
 	_build_room_decor()
+	_build_jump_barriers()
 	for device_index in range(DEVICE_SPECS.size()):
 		_build_device(device_index, DEVICE_SPECS[device_index])
 
@@ -177,11 +205,10 @@ func _build_house_shell() -> void:
 
 func _build_room_decor() -> void:
 	_place_model(SOFA, Vector3(2.4, 0, -0.45), 1.3, 180, "Sofa")
-	_place_model(COFFEE_TABLE, Vector3(6.8, 0, -0.2), 1.15, 0, "CoffeeTable")
 	_place_model(TV_CABINET, Vector3(4.9, 0, -0.7), 1.2, 0, "TvCabinet")
 	_place_model(FLOOR_LAMP, Vector3(10.6, 0, -0.65), 1.35, 0, "LivingLamp")
 	_place_model(PLANT, Vector3(0.8, 0, -0.65), 1.35, 0, "LivingPlant")
-	for x_pos in [13.0, 16.7, 20.5, 23.0]:
+	for x_pos in [13.0, 16.7, 23.0]:
 		_place_model(KITCHEN_CABINET, Vector3(x_pos, 0, -0.65), 1.2, 0, "KitchenCabinet")
 	_place_model(BED, Vector3(25.8, 0, -0.55), 1.25, 90, "Bed")
 	_place_model(SIDE_TABLE, Vector3(30.0, 0, -0.55), 1.25, 0, "SideTable")
@@ -189,6 +216,35 @@ func _build_room_decor() -> void:
 	_place_model(BOOKCASE, Vector3(34.4, 0, -0.65), 1.3, 0, "Bookcase")
 	_place_model(CEILING_FAN, Vector3(33.0, 5.1, -0.2), 1.35, 0, "CeilingFan")
 	_place_model(DOOR, Vector3(46.2, 0, -0.6), 1.25, 0, "ExitDoor")
+
+func _build_jump_barriers() -> void:
+	for spec in JUMP_BARRIERS:
+		var model := _place_model(spec["scene"], Vector3(float(spec["x"]), 0.0, 1.0), float(spec["scale"]), 0.0, "JumpFurniture")
+		var bounds := _model_bounds(model)
+		model.position.x += float(spec["x"]) - (bounds.position.x + bounds.end.x) * 0.5
+		bounds = _model_bounds(model)
+		var clearance := bounds.end.y + 0.10
+		var half_width := bounds.size.x * 0.5 + 0.13
+		var sign := Label3D.new()
+		sign.text = "W / ↑ 점프"
+		sign.position = Vector3(float(spec["x"]), clearance + 0.75, 1.25)
+		sign.font_size = 48
+		sign.pixel_size = 0.006
+		sign.outline_size = 8
+		sign.modulate = Color("ffe18a")
+		sign.no_depth_test = true
+		course_root.add_child(sign)
+		barrier_records.append({"x": float(spec["x"]), "name": str(spec["name"]), "clearance": clearance, "half_width": half_width, "model": model})
+
+func _model_bounds(model_root: Node3D) -> AABB:
+	var found := false
+	var bounds := AABB()
+	for mesh_node in model_root.find_children("*", "MeshInstance3D", true, false):
+		var mesh := mesh_node as MeshInstance3D
+		var mesh_bounds := mesh.global_transform * mesh.get_aabb()
+		bounds = bounds.merge(mesh_bounds) if found else mesh_bounds
+		found = true
+	return bounds
 
 func _build_device(device_index: int, spec: Dictionary) -> void:
 	var station := Node3D.new()
@@ -201,7 +257,7 @@ func _build_device(device_index: int, spec: Dictionary) -> void:
 	station.add_child(model)
 	_apply_model_tint(model, spec["tint"] as Color)
 	var can_standby := bool(spec["can_standby"])
-	var is_waste := can_standby and (device_index == 0 or rng.randf() < 0.58)
+	var is_waste := can_standby and (str(spec["name"]) == "TV" or rng.randf() < 0.58)
 	var watts := int(spec["standby"] if is_waste else spec["active"])
 	var plug := MeshInstance3D.new()
 	plug.name = "Plug"
@@ -214,7 +270,7 @@ func _build_device(device_index: int, spec: Dictionary) -> void:
 	var status := Label3D.new()
 	status.name = "StatusLabel"
 	status.position = Vector3(0, 2.45, 0.15)
-	status.text = "%s\n%s · %d W" % [str(spec["name"]), "화면 꺼짐" if is_waste else "사용 중", watts]
+	status.text = "%s\n%s · %d W" % [str(spec["name"]), "전원 꺼짐" if is_waste else "사용 중", watts]
 	status.font_size = 46
 	status.pixel_size = 0.006
 	status.outline_size = 10
@@ -243,9 +299,15 @@ func _process(delta: float) -> void:
 	if Input.is_key_pressed(KEY_A): direction -= 1.0
 	if Input.is_key_pressed(KEY_D): direction += 1.0
 	direction = clampf(direction, -1.0, 1.0)
+	var jump_down := Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP)
+	if jump_down and not jump_was_down and hero.position.y <= GROUND_Y + 0.01:
+		vertical_velocity = JUMP_IMPULSE
+	jump_was_down = jump_down
+	_update_jump(delta)
 	run_velocity = move_toward(run_velocity, direction * RUN_SPEED, RUN_ACCELERATION * delta)
-	hero.position.x = clampf(hero.position.x + run_velocity * delta, 0.6, COURSE_END)
-	if hero.has_method("_set_avatar_animation_state"):
+	var desired_x := clampf(hero.position.x + run_velocity * delta, 0.6, COURSE_END)
+	hero.position.x = _constrain_by_furniture(hero.position.x, desired_x)
+	if hero.has_method("_set_avatar_animation_state") and hero.is_moving != (absf(run_velocity) > 0.18):
 		hero.call("_set_avatar_animation_state", absf(run_velocity) > 0.18)
 	if hero.avatar_sprite:
 		hero.avatar_sprite.flip_h = run_velocity < -0.1
@@ -260,6 +322,33 @@ func _process(delta: float) -> void:
 	space_was_down = space_down
 	if hero.position.x >= COURSE_END - 0.1 and run_velocity > 0.0:
 		_start_new_lap()
+
+func _update_jump(delta: float) -> void:
+	if hero.position.y > GROUND_Y or vertical_velocity > 0.0:
+		hero.position.y += vertical_velocity * delta
+		vertical_velocity -= GRAVITY * delta
+		if hero.position.y <= GROUND_Y:
+			hero.position.y = GROUND_Y
+			vertical_velocity = 0.0
+	if hero.has_method("_update_ground_shadow"):
+		hero.call("_update_ground_shadow", GROUND_Y, hero.position.y - GROUND_Y)
+
+func _constrain_by_furniture(from_x: float, desired_x: float) -> float:
+	for barrier in barrier_records:
+		if hero.position.y >= float(barrier["clearance"]):
+			continue
+		var left_edge := float(barrier["x"]) - float(barrier["half_width"])
+		var right_edge := float(barrier["x"]) + float(barrier["half_width"])
+		if from_x <= left_edge and desired_x >= left_edge:
+			run_velocity = 0.0
+			return left_edge
+		if from_x >= right_edge and desired_x <= right_edge:
+			run_velocity = 0.0
+			return right_edge
+		if desired_x > left_edge and desired_x < right_edge:
+			run_velocity = 0.0
+			return left_edge if from_x <= float(barrier["x"]) else right_edge
+	return desired_x
 
 func _animate_scene() -> void:
 	for record in device_records:
@@ -312,10 +401,11 @@ func _resolve_device(record: Dictionary, disconnect: bool) -> void:
 			tween.tween_property(plug, "position:y", plug.position.y + 0.8, 0.32).set_trans(Tween.TRANS_BACK)
 			tween.tween_property(plug, "rotation_degrees:z", 45.0, 0.32)
 		if is_waste:
-			var points := 95 + watts * 3
+			var points := score_for_saved_watts(watts)
+			saved_watts += watts
 			status.text = "%s\n차단 완료 · 0 W" % device_name
 			status.modulate = Color("79efaa")
-			arcade_event.emit(points, true, "%s의 대기전력 %d W를 차단했어요." % [device_name, watts], true)
+			arcade_event.emit(points, true, "%s의 대기전력 %d W를 차단했어요. 누적 %d W" % [device_name, watts, saved_watts], true)
 			_flash(Color("55e79c35"))
 		else:
 			status.text = "%s\n사용 중 전원 차단!" % device_name
@@ -330,20 +420,25 @@ func _resolve_device(record: Dictionary, disconnect: bool) -> void:
 		else:
 			status.text = "%s\n사용 유지 · 안전" % device_name
 			status.modulate = Color("84eab7")
-			arcade_event.emit(14, true, "%s의 작동을 유지했어요." % device_name, false)
 
 func _start_new_lap() -> void:
 	lap_index += 1
 	hero.position.x = 0.8
+	hero.position.y = GROUND_Y
 	run_velocity = 1.0
+	vertical_velocity = 0.0
 	camera.position.x = 4.3
 	_build_house_course()
-	arcade_event.emit(35, true, "집 안 점검 %d회차를 시작합니다." % lap_index, false)
 
 func _update_hud() -> void:
 	var room_index := clampi(int(hero.position.x / 12.0), 0, 3)
 	room_label.text = "현재 위치  %s" % ["거실", "주방", "침실", "세탁실"][room_index]
-	progress_label.text = "집 안 점검 %d회차  ·  %d%%" % [lap_index, int(hero.position.x / COURSE_END * 100.0)]
+	progress_label.text = "집 %d  ·  %d%%" % [lap_index, int(hero.position.x / COURSE_END * 100.0)]
+	saved_label.text = "차단한 대기전력  %d W" % saved_watts
+	for barrier in barrier_records:
+		if hero.position.x < float(barrier["x"]) and float(barrier["x"]) - hero.position.x <= 2.0 and hero.position.y < float(barrier["clearance"]):
+			action_label.text = "[W/↑] %s 넘기" % str(barrier["name"])
+			return
 	var nearest := _nearest_unresolved_device()
 	if nearest.is_empty():
 		action_label.text = "A/D로 집 안을 이동하세요"
@@ -354,14 +449,15 @@ func _update_hud() -> void:
 func _build_overlay() -> void:
 	var help := Label.new()
 	help.position = Vector2(14, 9)
-	help.text = "A/D 좌우 달리기    SPACE 가까운 플러그 차단    화면은 꺼졌는데 W가 표시되면 대기전력!"
+	help.text = "A/D 이동    W/↑ 가구 넘기    SPACE 꺼진 기기 플러그 뽑기    사용 중인 기기는 그대로!"
 	help.add_theme_font_size_override("font_size", 16)
 	help.add_theme_color_override("font_color", Color("fff0b3"))
 	help.add_theme_color_override("font_outline_color", Color("18343d"))
 	help.add_theme_constant_override("outline_size", 5)
 	add_child(help)
 	room_label = _overlay_label(Vector2(14, 39), Vector2(300, 70), "현재 위치  거실", HORIZONTAL_ALIGNMENT_LEFT, Color("8bf2d1"))
-	progress_label = _overlay_label(Vector2(650, 9), Vector2(946, 40), "집 안 점검 1회차", HORIZONTAL_ALIGNMENT_RIGHT, Color("fff0b3"))
+	progress_label = _overlay_label(Vector2(740, 9), Vector2(946, 40), "집 1", HORIZONTAL_ALIGNMENT_RIGHT, Color("fff0b3"))
+	saved_label = _overlay_label(Vector2(14, 210), Vector2(380, 242), "차단한 대기전력  0 W", HORIZONTAL_ALIGNMENT_LEFT, Color("8bf2d1"))
 	action_label = _overlay_label(Vector2(320, 246), Vector2(640, 278), "A/D로 집 안을 이동하세요", HORIZONTAL_ALIGNMENT_CENTER, Color("ffd367"))
 	flash = ColorRect.new()
 	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -398,7 +494,7 @@ func _place_model(scene: PackedScene, position_value: Vector3, scale_value: floa
 		"Floor": tint = Color("c39a6b")
 		"Wall", "RoomDivider": tint = Color("ecd6ad")
 		"Sofa": tint = Color("4d91a5")
-		"CoffeeTable", "TvCabinet", "SideTable", "Bookcase": tint = Color("956a49")
+		"CoffeeTable", "TvCabinet", "SideTable", "Bookcase", "JumpFurniture": tint = Color("956a49")
 		"KitchenCabinet": tint = Color("ddb878")
 		"Bed": tint = Color("89b6c7")
 		"LivingLamp", "BedLamp": tint = Color("f2cf67")

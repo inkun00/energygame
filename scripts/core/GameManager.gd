@@ -69,54 +69,117 @@ const MINIGAME_SUBMISSION_GRACE_SECONDS := 1.0
 const MINIGAME_RESULTS_SECONDS := 5.0
 const MINIGAME_SCORE_LIMIT := 5000
 const MINIGAME_RANK_REWARDS: Array[int] = [20, 10, 5, 1]
+const STANDBY_POWER_HUNT = preload("res://scripts/minigames/StandbyPowerHunt3D.gd")
+const HYDRO_GATE_RUN = preload("res://scripts/minigames/HydroGateRun3D.gd")
+const ENERGY_SOURCE_SORT = preload("res://scripts/minigames/EnergySourceSort3D.gd")
+const BATTERY_SHUTTLE = preload("res://scripts/minigames/BatteryShuttle3D.gd")
+const SHARED_SCHOOL_BUS = preload("res://scripts/minigames/SharedSchoolBus3D.gd")
+const HEAT_LEAK_DASH = preload("res://scripts/minigames/HeatLeakDash3D.gd")
 const MINIGAME_DEFINITIONS := {
 	"solar_align": {
 		"id": "solar_align", "icon": "☀️", "title": "태양광 패널 대시",
 		"objective": "햇빛을 향한 패널 경로로 달리면서 태양광 발전 설비와 자연 지형물을 피하세요.",
 		"lesson": "태양광 패널은 햇빛을 정면으로 받을수록 더 많이 발전하며, 발전소에서는 설비 사이의 안전 통로를 지켜야 합니다.",
-		"input_hint": "A/D 이동 · Space 점프", "accent": "ffd45c"
+		"input_hint": "A/D 이동 · Space 점프", "accent": "ffd45c",
+		"controls": [
+			{"key": "A / D (← / →)", "action": "좌우 레인 이동"},
+			{"key": "Space (W / ↑)", "action": "지형물·바위 뛰어넘기"}
+		],
+		"tip": "태양의 위치(좌/중/우)를 보고 5초마다 변하는 햇빛 각도에 맞춰 올바른 차선으로 미리 이동하세요!"
 	},
 	"wind_rhythm": {
 		"id": "wind_rhythm", "icon": "🌬️", "title": "풍력 터빈 파일럿",
 		"objective": "터빈을 풍향에 맞춰 발전하고 위험 돌풍에서는 브레이크로 장비를 보호하세요.",
 		"lesson": "풍력 터빈은 바람을 정면으로 받을 때 발전량이 커지고, 지나치게 강한 바람에서는 안전을 위해 멈춥니다.",
-		"input_hint": "A/D 회전 · Space 브레이크", "accent": "73d8ff"
+		"input_hint": "A/D 회전 · Space 브레이크", "accent": "73d8ff",
+		"controls": [
+			{"key": "A / D (← / →)", "action": "풍력 터빈 좌우 회전"},
+			{"key": "Space", "action": "돌풍 경보 시 브레이크 작동"}
+		],
+		"tip": "평소에는 바람 방향에 날개를 맞추고, 화면에 돌풍 경보(적색)가 뜨면 즉시 [Space]를 눌러 멈추세요!"
 	},
 	"grid_balance": {
 		"id": "grid_balance", "icon": "⚡", "title": "스마트그리드 시티 컨트롤",
 		"objective": "부드럽게 변하는 도시 전력 수요를 따라가며 공급과 수요의 간격을 최대한 작게 유지하세요.",
 		"lesson": "전력망은 매 순간 생산량과 소비량이 균형을 이뤄야 도시가 안정적으로 작동합니다.",
-		"input_hint": "W/S 또는 ↑/↓ 공급 조절", "accent": "78f0bd"
+		"input_hint": "W/S 또는 ↑/↓ 공급 조절", "accent": "78f0bd",
+		"controls": [
+			{"key": "W / ↑", "action": "발전 공급 증가 (+10 MW)"},
+			{"key": "S / ↓", "action": "발전 공급 감소 (-10 MW)"}
+		],
+		"tip": "수요선이 변할 때 재빨리 키를 연타하여 공급선을 수요선에 정확히 일치시키면 연속 콤보를 얻습니다!"
 	},
 	"standby_hunt": {
 		"id": "standby_hunt", "icon": "🔌", "title": "대기전력 플러그 레이스",
-		"objective": "집 안을 좌우로 달리며 화면은 꺼졌지만 전력을 소비하는 기기만 찾아 플러그를 차단하세요.",
-		"lesson": "화면이 꺼져 있어도 소비 전력이 표시되는 기기는 대기전력을 사용합니다. 작동 중인 기기의 전원은 유지해야 합니다.",
-		"input_hint": "A/D 좌우 달리기 · Space 가까운 플러그 차단", "accent": "ff9f68"
+		"objective": "집 안 가구를 뛰어넘어 이동하며 꺼졌는데도 전력을 쓰는 기기의 플러그만 뽑아 0 W로 만드세요.",
+		"lesson": "꺼진 기기의 플러그를 뽑으면 대기전력이 0 W가 됩니다. 작동 중인 스피커·토스터·냉장고 등의 전원을 끄면 안 됩니다.",
+		"input_hint": "A/D 이동 · W/↑ 점프 · Space 플러그 뽑기", "accent": "ff9f68",
+		"controls": [
+			{"key": "A / D (← / →)", "action": "집 안 달리기"},
+			{"key": "W / ↑", "action": "소파·가구 뛰어넘기"},
+			{"key": "Space", "action": "기기 앞에서 플러그 뽑기"}
+		],
+		"tip": "'전원 꺼짐' 상태인데 W가 표시되는 기기만 뽑으세요! '사용 중'인 기기를 끄면 감점됩니다."
 	},
 	"hydro_gate": {
-		"id": "hydro_gate", "icon": "💧", "title": "수력 댐 수문 조절",
-		"objective": "수문을 열고 닫아 요청된 발전 유량과 정확히 맞춘 뒤 확정하세요.",
-		"lesson": "수력 발전은 높은 곳의 물이 내려오는 힘으로 터빈을 돌려 전기를 만듭니다.",
-		"input_hint": "수치 계산 · 정밀 조절", "accent": "58bfff"
+		"id": "hydro_gate", "icon": "💧", "title": "수력 발전 낙차 타이밍",
+		"objective": "비 예보를 보고 발판을 달리고 점프해 수문에 도착하세요. 연타로 열고 직접 닫아 낙차를 지키며 발전하되, 넘치면 게임 오버!",
+		"lesson": "수면과 터빈 출구의 낙차와 물의 유량이 발전량을 결정합니다. 방류를 오래 하면 물이 줄어 다음 발전의 낙차가 작아지고, 폭우 전에 너무 늦게 열면 넘칩니다.",
+		"input_hint": "A/D 이동 · W 점프 · Space 연타로 개방 · E 닫기", "accent": "58bfff",
+		"controls": [
+			{"key": "A / D (← / →)", "action": "발판 좌우 이동"},
+			{"key": "W / ↑", "action": "상하 발판 점프"},
+			{"key": "Space (연타)", "action": "수문 레버 앞에서 수문 개방"},
+			{"key": "E", "action": "개방된 수문 닫기 (물 모으기)"}
+		],
+		"tip": "물을 충분히 모아 높은 수문에서 방류하면 대량 발전! 단, 수위 100%가 넘으면 댐이 범람해 게임 오버입니다."
 	},
 	"energy_sort": {
-		"id": "energy_sort", "icon": "♻️", "title": "에너지원 분류 레이스",
-		"objective": "나타나는 카드를 재생에너지·비재생에너지·효율 기술로 분류하세요.",
-		"lesson": "재생에너지는 자연에서 다시 얻을 수 있고, 효율 기술은 같은 일을 더 적은 에너지로 합니다.",
-		"input_hint": "지식 · 3지선다", "accent": "9bea72"
+		"id": "energy_sort", "icon": "⚡", "title": "에너지 배송 레이스",
+		"objective": "에코 히어로즈가 에너지 물건을 들고 알맞은 곳으로 달려가세요. 왼쪽은 자연에서 다시 얻는 에너지, 오른쪽은 땅에서 꺼내 쓰는 연료!",
+		"lesson": "햇빛·바람·흐르는 물은 자연에서 다시 얻고, 석탄·석유·천연가스는 땅에서 꺼내 쓰는 연료입니다.",
+		"input_hint": "A/← 왼쪽 배송 · D/→ 오른쪽 배송", "accent": "9bea72",
+		"controls": [
+			{"key": "A / ←", "action": "왼쪽 배송장 (재생에너지: 햇빛·바람·물)"},
+			{"key": "D / →", "action": "오른쪽 배송장 (화석연료: 석탄·석유·가스)"}
+		],
+		"tip": "머리 위 아이콘을 빠르게 판별해 달려가세요. 맞게 배송하면 +90점, 잘못 배송하면 -30점 감점입니다!"
 	},
 	"battery_relay": {
-		"id": "battery_relay", "icon": "🔋", "title": "에너지 저장 중계",
-		"objective": "전력이 남으면 충전, 부족하면 방전, 균형이면 대기를 선택하세요.",
-		"lesson": "에너지저장장치는 날씨에 따라 달라지는 재생에너지의 남는 전기를 모아 필요할 때 공급합니다.",
-		"input_hint": "상황 판단 · 3지선다", "accent": "c6ff67"
+		"id": "battery_relay", "icon": "🔋", "title": "배터리 에너지 왕복",
+		"objective": "햇빛이 강해 전기가 남으면 왼쪽 태양광에서 가운데 배터리로 옮기세요. 흐려서 부족할 때는 배터리 전기를 오른쪽 도시로 보내세요.",
+		"lesson": "배터리는 남는 전기를 저장하고, 태양광 발전이 줄어 필요한 전기가 부족할 때 저장 전기를 공급합니다.",
+		"input_hint": "A/← 왼쪽 이동 · D/→ 오른쪽 이동", "accent": "c6ff67",
+		"controls": [
+			{"key": "A / ←", "action": "왼쪽 태양광 발전소 이동"},
+			{"key": "D / →", "action": "오른쪽 도시 전력망 이동"}
+		],
+		"tip": "햇빛이 강할 때 배터리를 충전(+20점)하고, 흐릴 때 도시로 옮겨 공급(+80점)하면 최고 점수를 얻습니다!"
 	},
 	"eco_commute": {
-		"id": "eco_commute", "icon": "🚲", "title": "탄소제로 이동 챌린지",
-		"objective": "거리와 인원, 짐을 보고 현실적으로 탄소 배출이 가장 적은 이동수단을 고르세요.",
-		"lesson": "가까운 거리는 걷기와 자전거, 먼 거리는 대중교통을 이용하면 이동 배출을 크게 줄일 수 있습니다.",
-		"input_hint": "생활 적용 · 빠른 판단", "accent": "57e3a0"
+		"id": "eco_commute", "icon": "🚌", "title": "함께 타는 통학 버스",
+		"duration": 60.0,
+		"objective": "60초 동안 45인승 버스를 운전하세요. 뛰어오는 학생을 기다려 더 태울지, 다음 정류장으로 출발할지 선택하고 학교에 정확히 정차하세요!",
+		"lesson": "같은 길을 가는 버스에 여러 명이 함께 타면 운행 에너지를 나눠 써 1인당 사용량이 줄어듭니다.",
+		"input_hint": "D 길게 전진 · A 길게 후진 · S 정차 · Space 탑승", "accent": "57e3a0",
+		"controls": [
+			{"key": "D / → (누름)", "action": "버스 전진 가속"},
+			{"key": "A / ← (누름)", "action": "버스 후진 가속"},
+			{"key": "S / ↓", "action": "브레이크 및 정차"},
+			{"key": "Space", "action": "정류장 정차 후 학생 탑승"}
+		],
+		"tip": "정류장에 멈춰 학생을 최대한 태우고, 60초 안에 학교 노란 구역에 정확히 멈춰 승객을 모두 하차시키세요!"
+	},
+	"heat_leak": {
+		"id": "heat_leak", "icon": "❄️", "title": "여름 냉방 창문 대시",
+		"objective": "에어컨을 켠 여름 교실에서 열린 창문을 찾으세요. 달려가 Space로 닫으면 더운 공기가 멈추고 냉방 에너지 낭비가 줄어듭니다!",
+		"lesson": "에어컨을 사용할 때 창문이 열려 있으면 더운 바깥 공기가 계속 들어와 실내 온도를 낮추는 데 전기가 더 듭니다. 창문을 닫으면 냉방 효율이 높아집니다.",
+		"input_hint": "A/D 달리기 · 열린 창문 앞에서 Space", "accent": "5ecff2",
+		"controls": [
+			{"key": "A / D (← / →)", "action": "교실 좌우 이동"},
+			{"key": "Space", "action": "열린 창문 앞에서 창문 닫기"}
+		],
+		"tip": "빨간 더운 공기가 들어오는 창문으로 달려가세요. 바람이 불어 열린 직후 빠르게 닫을수록 고득점(+120점)!"
 	}
 }
 # 게임 종료 시 누적 이동 거리 1~4위가 받는 일반 에너지입니다.
@@ -214,6 +277,8 @@ var minigame_trigger_player_idx := -1
 var minigame_round_count := 0
 var _last_minigame_time_seconds := -1
 var completed_minigame_ids: Array[String] = []
+var minigame_waiting_for_start := false
+var minigame_guide_timeout := 45.0
 
 func _ready() -> void:
 	set_process(true)
@@ -274,6 +339,7 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 	minigame_trigger_player_idx = -1
 	minigame_round_count = 0
 	_last_minigame_time_seconds = -1
+	minigame_waiting_for_start = false
 	completed_minigame_ids.clear()
 	built_project_ids.clear()
 	built_project_placements.clear()
@@ -381,6 +447,7 @@ func stop_game() -> void:
 	minigame_scores.clear()
 	minigame_time_remaining = 0.0
 	minigame_trigger_player_idx = -1
+	minigame_waiting_for_start = false
 	_last_minigame_time_seconds = -1
 	pending_lap_reward.clear()
 	game_time_remaining = 0.0
@@ -778,24 +845,53 @@ func _start_minigame(trigger_player_idx: int, minigame_id: String) -> void:
 	minigame_round_count += 1
 	minigame_trigger_player_idx = trigger_player_idx
 	minigame_scores.clear()
-	minigame_time_remaining = MINIGAME_DURATION_SECONDS + MINIGAME_SUBMISSION_GRACE_SECONDS
+	var round_duration := float((MINIGAME_DEFINITIONS[minigame_id] as Dictionary).get("duration", MINIGAME_DURATION_SECONDS))
+	minigame_time_remaining = round_duration + MINIGAME_SUBMISSION_GRACE_SECONDS
 	_last_minigame_time_seconds = ceili(minigame_time_remaining)
 	active_minigame = (MINIGAME_DEFINITIONS[minigame_id] as Dictionary).duplicate(true)
 	active_minigame["round_id"] = minigame_round_count
 	active_minigame["seed"] = randi()
-	active_minigame["duration"] = MINIGAME_DURATION_SECONDS
+	active_minigame["duration"] = round_duration
 	active_minigame["phase"] = "playing"
 	active_minigame["trigger_player_idx"] = trigger_player_idx
 	status_message_posted.emit("🎮 [%s] 동시 미니게임 시작! 전원이 %s에 도전합니다." % [players[trigger_player_idx]["name"], active_minigame["title"]])
 	minigame_started.emit(active_minigame.duplicate(true))
 	minigame_submission_changed.emit(get_minigame_state())
+	var has_human := false
+	for p in players:
+		if not bool(p.get("is_ai", false)):
+			has_human = true
+			break
+	if has_human:
+		minigame_waiting_for_start = true
+		minigame_guide_timeout = 45.0
+	else:
+		minigame_waiting_for_start = false
+		_schedule_ai_minigame_scores(round_duration, minigame_id)
+
+func start_minigame_action() -> void:
+	if not minigame_waiting_for_start or active_minigame.is_empty():
+		return
+	minigame_waiting_for_start = false
+	var round_duration := float(active_minigame.get("duration", MINIGAME_DURATION_SECONDS))
+	minigame_time_remaining = round_duration + MINIGAME_SUBMISSION_GRACE_SECONDS
+	_last_minigame_time_seconds = ceili(minigame_time_remaining)
+	var minigame_id := str(active_minigame.get("id", ""))
+	_schedule_ai_minigame_scores(round_duration, minigame_id)
+
+func _schedule_ai_minigame_scores(round_duration: float, minigame_id: String) -> void:
 	for player_idx in range(players.size()):
 		if bool(players[player_idx].get("is_ai", false)):
-			var delay := randf_range(3.0, 7.0)
+			var delay := round_duration - randf_range(2.0, 5.0) if minigame_id == "eco_commute" else randf_range(3.0, 7.0)
 			_schedule_game_action(delay, _submit_ai_minigame_score.bind(player_idx, minigame_round_count))
 
 func _update_minigame(delta: float) -> void:
 	if str(active_minigame.get("phase", "")) != "playing":
+		return
+	if minigame_waiting_for_start:
+		minigame_guide_timeout -= delta
+		if minigame_guide_timeout <= 0.0:
+			start_minigame_action()
 		return
 	minigame_time_remaining = maxf(0.0, minigame_time_remaining - delta)
 	var display_seconds := ceili(minigame_time_remaining)
@@ -810,6 +906,8 @@ func _update_minigame(delta: float) -> void:
 		_finalize_minigame()
 
 func submit_minigame_score(player_idx: int, score: int, learning_stats: Dictionary = {}) -> bool:
+	if minigame_waiting_for_start:
+		start_minigame_action()
 	if NetworkManager.is_online and not NetworkManager.is_host:
 		NetworkManager.request_minigame_score(player_idx, score, learning_stats)
 		return true
@@ -885,24 +983,134 @@ func _generate_ai_minigame_score(player_idx: int) -> int:
 			simulated_score += roundi(32.0 * synchronization * synchronization)
 		return maxi(0, simulated_score)
 	if str(active_minigame.get("id", "")) == "standby_hunt":
-		# AI도 각 웨이브에서 화면이 꺼진 대기전력 기기와 실제 사용 중인
-		# 기기를 구분합니다. 인식률에 따라 차단·통과 결과를 같은 점수로 계산합니다.
+		# AI도 꺼진 기기의 플러그를 실제로 뽑은 경우에만 점수를 얻습니다.
+		# 작동 중인 기기를 지나가는 것과 집을 완주하는 것에는 점수가 없습니다.
+		# 가구 점프에 실패한 웨이브에서는 시간을 허비해 기기 점검 기회를 잃습니다.
 		var simulated_score := 0
 		var recognition_skill := rng.randf_range(0.62, 0.91)
+		var jump_skill := rng.randf_range(0.66, 0.93)
 		for wave_index in range(12):
+			if wave_index in [2, 5, 8] and rng.randf() > jump_skill:
+				continue
 			var waste_count := 2 if rng.randf() < 0.34 else 1
 			for waste_index in range(waste_count):
-				var standby_watts := rng.randi_range(2, 5)
+				var standby_watts := rng.randi_range(2, 4)
 				if rng.randf() <= recognition_skill:
-					simulated_score += 95 + standby_watts * 3
+					simulated_score += STANDBY_POWER_HUNT.score_for_saved_watts(standby_watts)
 				else:
 					simulated_score = maxi(0, simulated_score - 24)
 			for active_index in range(3 - waste_count):
-				if rng.randf() <= recognition_skill:
-					simulated_score += 16
-				else:
+				if rng.randf() > recognition_skill:
 					simulated_score = maxi(0, simulated_score - 48)
 		return maxi(0, simulated_score)
+	if str(active_minigame.get("id", "")) == "hydro_gate":
+		# AI도 플레이어와 같은 강우·시작 수위를 겪고, 수문까지 이동한 뒤
+		# 연타로 열고 방류를 멈추는 시점을 판단합니다.
+		var water_level := HYDRO_GATE_RUN.initial_level_for_seed(round_seed)
+		var generated_kwh := 0.0
+		var open_gate := -1
+		var open_start_level := 0.0
+		var open_elapsed := 0.0
+		var charge := 0.0
+		var timing_skill := rng.randf_range(0.58, 0.92)
+		var target_level := lerpf(68.0, 75.0, timing_skill) + rng.randf_range(-2.0, 2.0)
+		var mash_rate := lerpf(6.0, 9.5, timing_skill)
+		var station := 1
+		var target_gate := 1
+		var travel_remaining := lerpf(2.8, 1.8, timing_skill)
+		const STEP := 0.05
+		for tick in range(600):
+			var elapsed := float(tick) * STEP
+			var overflow_eta := HYDRO_GATE_RUN.dry_overflow_seconds(water_level, elapsed, round_seed)
+			if open_gate < 0:
+				if travel_remaining > 0.0:
+					travel_remaining -= STEP
+					if travel_remaining <= 0.0:
+						station = target_gate
+				elif water_level >= target_level or (overflow_eta >= 0.0 and overflow_eta < 2.0):
+					if water_level > HYDRO_GATE_RUN.GATE_LEVELS[station] + 1.0:
+						charge += STEP * mash_rate * HYDRO_GATE_RUN.CHARGE_PER_TAP
+						if charge >= 1.0:
+							open_gate = station
+							open_start_level = water_level
+							open_elapsed = 0.0
+							charge = 0.0
+			var flow := HYDRO_GATE_RUN.flow_for_gate(water_level, open_gate)
+			generated_kwh += HYDRO_GATE_RUN.power_for_gate(water_level, open_gate) * 1000.0 * STEP / 3600.0
+			water_level += (HYDRO_GATE_RUN.inflow_for_time(elapsed + STEP * 0.5, round_seed) - flow * HYDRO_GATE_RUN.DRAIN_PER_FLOW) * STEP
+			if open_gate >= 0:
+				open_elapsed += STEP
+				var can_rebuild_head := HYDRO_GATE_RUN.inflow_for_time(elapsed, round_seed) < 13.0 or water_level < 70.0
+				var ready_to_close := open_elapsed > lerpf(1.5, 2.3, timing_skill) and water_level < open_start_level - lerpf(5.0, 9.0, timing_skill)
+				if water_level <= HYDRO_GATE_RUN.GATE_LEVELS[open_gate] + 1.0 or (can_rebuild_head and ready_to_close):
+					open_gate = -1
+					var predicted_level := water_level + HYDRO_GATE_RUN.inflow_for_time(elapsed + 1.5, round_seed) * 2.0
+					target_gate = 2 if predicted_level >= 85.0 and water_level >= 65.0 else 1
+					travel_remaining = absf(float(target_gate - station)) * lerpf(2.2, 1.5, timing_skill)
+					target_level = (lerpf(81.0, 87.0, timing_skill) if target_gate == 2 else lerpf(67.0, 75.0, timing_skill)) + rng.randf_range(-2.0, 2.0)
+			if water_level >= 100.0:
+				break
+		return clampi(roundi(generated_kwh * HYDRO_GATE_RUN.SCORE_PER_KWH), 0, MINIGAME_SCORE_LIMIT)
+	if str(active_minigame.get("id", "")) == "energy_sort":
+		# AI도 같은 순서의 6종 원천을 30초간 실제 배송 횟수와 구분 정확도로 판정합니다.
+		var knowledge := rng.randf_range(0.67, 0.89)
+		var delivery_seconds := rng.randf_range(1.18, 1.68)
+		var score_total := 0
+		var deliveries := int(30.0 / delivery_seconds)
+		for step in range(deliveries):
+			var source: Dictionary = ENERGY_SOURCE_SORT.source_for_step(round_seed, step)
+			var target_bin := int(source["kind"]) if rng.randf() < knowledge else 1 - int(source["kind"])
+			if target_bin == int(source["kind"]):
+				score_total += ENERGY_SOURCE_SORT.CORRECT_POINTS
+			else:
+				score_total = maxi(0, score_total - ENERGY_SOURCE_SORT.WRONG_PENALTY)
+		return clampi(score_total, 0, MINIGAME_SCORE_LIMIT)
+	if str(active_minigame.get("id", "")) == "battery_relay":
+		# AI도 같은 5초 햇빛/구름 주기에 따라 발전소↔배터리↔도시를 왕복합니다.
+		var battery_units := BATTERY_SHUTTLE.INITIAL_CHARGE
+		var score_total := 0
+		var pace := rng.randf_range(0.58, 0.90)
+		for phase_index in range(6):
+			var possible_trips := clampi(roundi(1.0 + pace * 2.0 + rng.randf_range(-0.55, 0.45)), 1, 3)
+			if phase_index % 2 == 0:
+				var stored := mini(possible_trips, BATTERY_SHUTTLE.BATTERY_CAPACITY - battery_units)
+				battery_units += stored
+				score_total += stored * BATTERY_SHUTTLE.STORE_POINTS
+			else:
+				var supplied := mini(possible_trips, battery_units)
+				battery_units -= supplied
+				score_total += supplied * BATTERY_SHUTTLE.SUPPLY_POINTS
+		return clampi(score_total, 0, MINIGAME_SCORE_LIMIT)
+	if str(active_minigame.get("id", "")) == "eco_commute":
+		# AI도 60초 동안 정차할 정류장과 뛰어오는 학생을 기다릴지를 골라 승객을 모읍니다.
+		var score_total := 0
+		var driving_skill := rng.randf_range(0.58, 0.91)
+		var trips := 2 if driving_skill < 0.82 else 3
+		for trip in range(trips):
+			var riders := 0
+			for stop in range(SHARED_SCHOOL_BUS.STOP_OFFSETS.size()):
+				if rng.randf() < driving_skill:
+					var total_at_stop := rng.randi_range(15, 19)
+					var runners := rng.randi_range(5, 11)
+					var waited := rng.randf() < driving_skill * 0.82
+					var boarded := total_at_stop if waited else total_at_stop - runners
+					riders = mini(SHARED_SCHOOL_BUS.BUS_CAPACITY, riders + boarded)
+			if rng.randf() < driving_skill + 0.08:
+				score_total += SHARED_SCHOOL_BUS.score_for_trip(riders, SHARED_SCHOOL_BUS.SCHOOL_OFFSET)
+		return clampi(score_total, 0, MINIGAME_SCORE_LIMIT)
+	if str(active_minigame.get("id", "")) == "heat_leak":
+		# 같은 다섯 차례의 더운 바람을 겪으며 창문까지 달려가 닫습니다.
+		var score_total := 0
+		var close_skill := rng.randf_range(0.67, 0.89)
+		for wave in range(HEAT_LEAK_DASH.WAVE_COUNT):
+			var planned: Array[int] = HEAT_LEAK_DASH.wave_positions(round_seed, wave)
+			for window_index in range(HEAT_LEAK_DASH.OPEN_PER_WAVE):
+				if rng.randf() > close_skill:
+					continue
+				var window_x := float(HEAT_LEAK_DASH.WINDOW_X[planned[window_index]])
+				var close_delay := absf(window_x) / lerpf(4.8, 6.8, close_skill) + rng.randf_range(0.7, 2.5)
+				score_total += HEAT_LEAK_DASH.score_for_close(close_delay)
+		return clampi(score_total, 0, MINIGAME_SCORE_LIMIT)
 	return rng.randi_range(520, 1120)
 
 func get_minigame_state() -> Dictionary:
