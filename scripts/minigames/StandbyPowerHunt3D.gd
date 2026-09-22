@@ -112,6 +112,7 @@ func setup(player_data: Dictionary, game_seed: int) -> void:
 
 func set_running(value: bool) -> void:
 	running = value
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if value else SubViewport.UPDATE_DISABLED
 	if is_instance_valid(hero) and hero.has_method("_set_avatar_animation_state"):
 		hero.call("_set_avatar_animation_state", value and absf(run_velocity) > 0.1)
 

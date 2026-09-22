@@ -873,6 +873,10 @@ func _on_open_market_state_changed(state: Dictionary) -> void:
 		return
 	_hide_lap_reward_panel()
 	_set_center_dice_visible(false, false)
+	if turn_prompt_label:
+		turn_prompt_label.visible = false
+	if special_skill_button:
+		special_skill_button.visible = false
 	if victory_modal:
 		victory_modal.visible = false
 	if victory_dimmer:
@@ -1038,7 +1042,7 @@ func _create_open_market_item_button(item_id: String, label_text: String, tag_te
 
 	if highlight:
 		UI.apply_primary_button(button)
-		button.add_theme_color_override("font_color", Color("ffffff"))
+		button.add_theme_color_override("icon_normal_color", Color.WHITE)
 	elif not tag_text.is_empty():
 		UI.apply_secondary_button(button, tag_color)
 	else:
@@ -1341,6 +1345,10 @@ func update_all_player_panels() -> void:
 func _on_turn_changed(turn_idx: int) -> void:
 	_cancel_special_skill_targeting()
 	update_all_player_panels()
+	if turn_prompt_label:
+		turn_prompt_label.visible = true
+	if special_skill_button:
+		special_skill_button.visible = true
 	var cur_p = GameManager.players[turn_idx]
 	var local_idx := _local_player_index()
 	if local_idx >= 0 and local_idx < GameManager.players.size():
@@ -1437,6 +1445,10 @@ func _on_status_message_posted(msg: String) -> void:
 func _on_game_over(rankings: Array) -> void:
 	_hide_lap_reward_panel()
 	_set_center_dice_visible(false, false)
+	if turn_prompt_label:
+		turn_prompt_label.visible = false
+	if special_skill_button:
+		special_skill_button.visible = false
 	_set_village_construction_controls(false)
 	if victory_modal:
 		victory_modal.visible = false
@@ -1477,6 +1489,10 @@ func _show_game_over_results(_rankings: Array) -> void:
 	modal_tween.tween_property(victory_modal, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _on_village_construction_started(_inventories: Array) -> void:
+	if turn_prompt_label:
+		turn_prompt_label.visible = false
+	if special_skill_button:
+		special_skill_button.visible = false
 	_hide_lap_reward_panel()
 	if not victory_modal:
 		return

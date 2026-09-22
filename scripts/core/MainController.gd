@@ -9,6 +9,7 @@ class_name MainController
 var session_open := false
 var exit_confirmation: ConfirmationDialog
 var standalone_minigames: CanvasLayer
+var recovery_overlay: CanvasLayer
 
 func _create_exit_confirmation() -> void:
 	exit_confirmation = ConfirmationDialog.new()
@@ -43,6 +44,9 @@ func _input(event: InputEvent) -> void:
 
 func _ready() -> void:
 	_create_exit_confirmation()
+	recovery_overlay = preload("res://scripts/ui/NetworkRecoveryOverlay.gd").new()
+	add_child(recovery_overlay)
+	recovery_overlay.leave_requested.connect(switch_to_lobby)
 	if lobby_ui:
 		lobby_ui.start_game_requested.connect(_on_start_game_requested)
 	if NetworkManager:

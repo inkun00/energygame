@@ -95,6 +95,7 @@ func setup(_player_data: Dictionary, game_seed: int) -> void:
 
 func set_running(value: bool) -> void:
 	running = value
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if value else SubViewport.UPDATE_DISABLED
 
 static func route_energy(distance: float) -> float:
 	# 실제 kWh가 아닌 게임 수치: 운행 고정 비용 + 이동 거리 비용.
@@ -421,9 +422,9 @@ func _unload_at_school(school_x: float) -> void:
 		var per_person := energy_per_person(passengers, route_distance)
 		var earned := score_for_trip(passengers, route_distance)
 		_spawn_dropoff_students(school_x, passengers)
+		delivered_total += passengers
 		arcade_event.emit(earned, true, "학생 %d명 도착 · 1인당 에너지 %.1f" % [passengers, per_person], true)
 		_notice("학교 도착! 함께 탄 %d명의 1인당 에너지 %.1f" % [passengers, per_person])
-		delivered_total += passengers
 		flash.color = Color("ffe77e42")
 		flash_remaining = 0.25
 	else:

@@ -66,6 +66,7 @@ const QUIZ_CORRECT_SCORE := 10
 const SPECTATOR_QUIZ_BONUS_SCORE := QUIZ_CORRECT_SCORE / 2
 const MINIGAME_DURATION_SECONDS := 30.0
 const MINIGAME_SUBMISSION_GRACE_SECONDS := 1.0
+const MINIGAME_READY_COUNTDOWN_SECONDS := 3.0
 const MINIGAME_RESULTS_SECONDS := 5.0
 const MINIGAME_SCORE_LIMIT := 5000
 const MINIGAME_RANK_REWARDS: Array[int] = [20, 10, 5, 1]
@@ -104,10 +105,10 @@ const MINIGAME_DEFINITIONS := {
 		"lesson": "전력망은 매 순간 생산량과 소비량이 균형을 이뤄야 도시가 안정적으로 작동합니다.",
 		"input_hint": "W/S 또는 ↑/↓ 공급 조절", "accent": "78f0bd",
 		"controls": [
-			{"key": "W / ↑", "action": "발전 공급 증가 (+10 MW)"},
-			{"key": "S / ↓", "action": "발전 공급 감소 (-10 MW)"}
+			{"key": "W / ↑ (누름)", "action": "누르는 동안 공급을 연속으로 증가"},
+			{"key": "S / ↓ (누름)", "action": "누르는 동안 공급을 연속으로 감소"}
 		],
-		"tip": "수요선이 변할 때 재빨리 키를 연타하여 공급선을 수요선에 정확히 일치시키면 연속 콤보를 얻습니다!"
+		"tip": "변하는 수요선을 보며 W/S를 길게 누르거나 떼어 공급선을 부드럽게 맞추세요. 두 선의 간격이 작을수록 점수가 높아집니다!"
 	},
 	"standby_hunt": {
 		"id": "standby_hunt", "icon": "🔌", "title": "대기전력 플러그 레이스",
@@ -279,6 +280,9 @@ var _last_minigame_time_seconds := -1
 var completed_minigame_ids: Array[String] = []
 var minigame_waiting_for_start := false
 var minigame_guide_timeout := 45.0
+var _last_minigame_guide_second := -1
+var minigame_ready_players: Dictionary = {}
+var minigame_countdown_remaining := 0.0
 
 func _ready() -> void:
 	set_process(true)
@@ -340,6 +344,8 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 	minigame_round_count = 0
 	_last_minigame_time_seconds = -1
 	minigame_waiting_for_start = false
+	minigame_ready_players.clear()
+	minigame_countdown_remaining = 0.0
 	completed_minigame_ids.clear()
 	built_project_ids.clear()
 	built_project_placements.clear()
@@ -448,6 +454,8 @@ func stop_game() -> void:
 	minigame_time_remaining = 0.0
 	minigame_trigger_player_idx = -1
 	minigame_waiting_for_start = false
+	minigame_ready_players.clear()
+	minigame_countdown_remaining = 0.0
 	_last_minigame_time_seconds = -1
 	pending_lap_reward.clear()
 	game_time_remaining = 0.0
@@ -563,6 +571,14 @@ func _apply_network_values(values: Dictionary) -> void:
 		minigame_scores = (values["minigame_scores"] as Dictionary).duplicate(true)
 	if values.has("minigame_time_remaining"):
 		minigame_time_remaining = float(values["minigame_time_remaining"])
+	if values.has("minigame_waiting_for_start"):
+		minigame_waiting_for_start = bool(values["minigame_waiting_for_start"])
+	if values.has("minigame_guide_timeout"):
+		minigame_guide_timeout = float(values["minigame_guide_timeout"])
+	if values.has("minigame_ready_players"):
+		minigame_ready_players = (values["minigame_ready_players"] as Dictionary).duplicate(true)
+	if values.has("minigame_countdown_remaining"):
+		minigame_countdown_remaining = float(values["minigame_countdown_remaining"])
 	if values.has("minigame_trigger_player_idx"):
 		minigame_trigger_player_idx = int(values["minigame_trigger_player_idx"])
 	if values.has("minigame_round_count"):
@@ -852,31 +868,61 @@ func _start_minigame(trigger_player_idx: int, minigame_id: String) -> void:
 	active_minigame["round_id"] = minigame_round_count
 	active_minigame["seed"] = randi()
 	active_minigame["duration"] = round_duration
-	active_minigame["phase"] = "playing"
+	var has_human := false
+	minigame_ready_players.clear()
+	for player_idx in range(players.size()):
+		if bool(players[player_idx].get("is_ai", false)):
+			minigame_ready_players[player_idx] = true
+		else:
+			has_human = true
+	minigame_waiting_for_start = has_human
+	minigame_guide_timeout = 45.0
+	_last_minigame_guide_second = ceili(minigame_guide_timeout)
+	minigame_countdown_remaining = 0.0
+	active_minigame["phase"] = "ready" if has_human else "playing"
 	active_minigame["trigger_player_idx"] = trigger_player_idx
-	status_message_posted.emit("🎮 [%s] 동시 미니게임 시작! 전원이 %s에 도전합니다." % [players[trigger_player_idx]["name"], active_minigame["title"]])
+	status_message_posted.emit("🎮 [%s] %s 도전! 모두 준비하면 함께 시작합니다." % [players[trigger_player_idx]["name"], active_minigame["title"]])
 	minigame_started.emit(active_minigame.duplicate(true))
 	minigame_submission_changed.emit(get_minigame_state())
-	var has_human := false
-	for p in players:
-		if not bool(p.get("is_ai", false)):
-			has_human = true
-			break
-	if has_human:
-		minigame_waiting_for_start = true
-		minigame_guide_timeout = 45.0
-	else:
-		minigame_waiting_for_start = false
+	if not has_human:
 		_schedule_ai_minigame_scores(round_duration, minigame_id)
 
-func start_minigame_action() -> void:
-	if not minigame_waiting_for_start or active_minigame.is_empty():
+func start_minigame_action(player_idx: int, round_id: int) -> bool:
+	if active_minigame.is_empty() or int(active_minigame.get("round_id", -1)) != round_id:
+		return false
+	if str(active_minigame.get("phase", "")) != "ready" or player_idx < 0 or player_idx >= players.size():
+		return false
+	if bool(players[player_idx].get("is_ai", false)):
+		return false
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		NetworkManager.request_minigame_ready(player_idx, round_id)
+		return true
+	if minigame_ready_players.has(player_idx):
+		return false
+	minigame_ready_players[player_idx] = true
+	minigame_submission_changed.emit(get_minigame_state())
+	if minigame_ready_players.size() >= players.size():
+		_start_minigame_countdown()
+	return true
+
+func _start_minigame_countdown() -> void:
+	if active_minigame.is_empty() or str(active_minigame.get("phase", "")) != "ready":
 		return
 	minigame_waiting_for_start = false
+	minigame_countdown_remaining = MINIGAME_READY_COUNTDOWN_SECONDS
+	active_minigame["phase"] = "countdown"
+	minigame_submission_changed.emit(get_minigame_state())
+
+func _begin_minigame() -> void:
+	if active_minigame.is_empty() or str(active_minigame.get("phase", "")) != "countdown":
+		return
+	active_minigame["phase"] = "playing"
+	minigame_countdown_remaining = 0.0
 	var round_duration := float(active_minigame.get("duration", MINIGAME_DURATION_SECONDS))
 	minigame_time_remaining = round_duration + MINIGAME_SUBMISSION_GRACE_SECONDS
 	_last_minigame_time_seconds = ceili(minigame_time_remaining)
 	var minigame_id := str(active_minigame.get("id", ""))
+	minigame_submission_changed.emit(get_minigame_state())
 	_schedule_ai_minigame_scores(round_duration, minigame_id)
 
 func _schedule_ai_minigame_scores(round_duration: float, minigame_id: String) -> void:
@@ -886,12 +932,31 @@ func _schedule_ai_minigame_scores(round_duration: float, minigame_id: String) ->
 			_schedule_game_action(delay, _submit_ai_minigame_score.bind(player_idx, minigame_round_count))
 
 func _update_minigame(delta: float) -> void:
-	if str(active_minigame.get("phase", "")) != "playing":
-		return
-	if minigame_waiting_for_start:
+	var phase := str(active_minigame.get("phase", ""))
+	if phase == "ready":
+		# 연결이 끊겨 AI로 대체된 참가자는 더 이상 준비 버튼을 누를 수 없습니다.
+		for player_idx in range(players.size()):
+			if bool(players[player_idx].get("is_ai", false)):
+				minigame_ready_players[player_idx] = true
+		if minigame_ready_players.size() >= players.size():
+			_start_minigame_countdown()
+			return
 		minigame_guide_timeout -= delta
 		if minigame_guide_timeout <= 0.0:
-			start_minigame_action()
+			_start_minigame_countdown()
+		elif ceili(minigame_guide_timeout) != _last_minigame_guide_second:
+			_last_minigame_guide_second = ceili(minigame_guide_timeout)
+			minigame_submission_changed.emit(get_minigame_state())
+		return
+	if phase == "countdown":
+		var previous_second := ceili(minigame_countdown_remaining)
+		minigame_countdown_remaining = maxf(0.0, minigame_countdown_remaining - delta)
+		if minigame_countdown_remaining <= 0.0:
+			_begin_minigame()
+		elif ceili(minigame_countdown_remaining) != previous_second:
+			minigame_submission_changed.emit(get_minigame_state())
+		return
+	if phase != "playing":
 		return
 	minigame_time_remaining = maxf(0.0, minigame_time_remaining - delta)
 	var display_seconds := ceili(minigame_time_remaining)
@@ -905,14 +970,14 @@ func _update_minigame(delta: float) -> void:
 				minigame_scores[player_idx] = {"score": fallback_score, "stats": {"timed_out": true}}
 		_finalize_minigame()
 
-func submit_minigame_score(player_idx: int, score: int, learning_stats: Dictionary = {}) -> bool:
-	if minigame_waiting_for_start:
-		start_minigame_action()
-	if NetworkManager.is_online and not NetworkManager.is_host:
-		NetworkManager.request_minigame_score(player_idx, score, learning_stats)
-		return true
+func submit_minigame_score(player_idx: int, score: int, learning_stats: Dictionary = {}, round_id: int = -1) -> bool:
 	if active_minigame.is_empty() or str(active_minigame.get("phase", "")) != "playing":
 		return false
+	if round_id >= 0 and int(active_minigame.get("round_id", -1)) != round_id:
+		return false
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		NetworkManager.request_minigame_score(player_idx, score, learning_stats, int(active_minigame.get("round_id", -1)))
+		return true
 	if player_idx < 0 or player_idx >= players.size() or minigame_scores.has(player_idx):
 		return false
 	var safe_stats := {
@@ -1118,6 +1183,10 @@ func get_minigame_state() -> Dictionary:
 		"active": not active_minigame.is_empty(),
 		"game": active_minigame.duplicate(true),
 		"time_remaining": minigame_time_remaining,
+		"ready_count": minigame_ready_players.size(),
+		"ready_players": minigame_ready_players.keys(),
+		"guide_remaining": maxf(0.0, minigame_guide_timeout) if minigame_waiting_for_start else 0.0,
+		"countdown_remaining": minigame_countdown_remaining,
 		"submitted_count": minigame_scores.size(),
 		"player_count": players.size(),
 		"submitted_players": minigame_scores.keys()
@@ -1168,6 +1237,7 @@ func _finalize_minigame() -> void:
 	if not completed_id.is_empty() and completed_id not in completed_minigame_ids:
 		completed_minigame_ids.append(completed_id)
 	status_message_posted.emit("🏆 미니게임 1위 [%s] · %d점 · 에너지 +%d!" % [results[0]["name"], results[0]["score"], results[0]["reward"]])
+	active_minigame["results"] = results.duplicate(true)
 	minigame_finished.emit(results)
 	_schedule_game_action(MINIGAME_RESULTS_SECONDS, _complete_minigame_turn.bind(minigame_round_count))
 
@@ -1352,9 +1422,32 @@ func _complete_lap_reward(player_idx: int, selected_items: Array) -> void:
 	status_message_posted.emit("🔄 [%s] 님이 출발 칸으로 돌아와 다음 바퀴를 준비합니다." % players[player_idx]["name"])
 	end_turn()
 
+## After the reconnect grace period, finish any action that used to require this human.
+func take_over_disconnected_player(player_idx: int) -> void:
+	if player_idx < 0 or player_idx >= players.size():
+		return
+	players[player_idx]["is_ai"] = true
+	player_state_changed.emit(player_idx)
+	status_message_posted.emit("%s님이 돌아오지 않아 AI가 이어서 플레이합니다." % players[player_idx]["name"])
+	if int(pending_lap_reward.get("player_idx", -1)) == player_idx:
+		var rewards_left := int(pending_lap_reward.get("remaining", 0))
+		for _item in range(rewards_left):
+			claim_lap_reward(player_idx, _choose_ai_lap_reward_item(player_idx))
+	elif not active_minigame.is_empty():
+		if str(active_minigame.get("phase", "")) == "playing":
+			_schedule_game_action(0.2, _submit_ai_minigame_score.bind(player_idx, int(active_minigame.get("round_id", -1))))
+	elif village_construction_active:
+		_schedule_village_ai_construction()
+	elif not open_market_active and current_turn_idx == player_idx:
+		if current_state == TurnState.WAIT_ACTION:
+			_schedule_game_action(0.2, _ai_execute_turn)
+		elif current_state == TurnState.RESOLVING_QUIZ:
+			_schedule_game_action(0.2, resolve_ai_quiz_if_pending.bind(player_idx))
+
+
 func _schedule_game_action(delay_seconds: float, callback: Callable) -> void:
 	var scheduled_session := game_session_id
-	get_tree().create_timer(delay_seconds).timeout.connect(func():
+	get_tree().create_timer(delay_seconds, false).timeout.connect(func():
 		if is_game_active and scheduled_session == game_session_id:
 			callback.call()
 	)
@@ -1934,7 +2027,7 @@ func _schedule_village_ai_construction() -> void:
 
 func _schedule_next_village_ai_construction(delay_seconds: float) -> void:
 	var scheduled_session := game_session_id
-	get_tree().create_timer(delay_seconds).timeout.connect(func():
+	get_tree().create_timer(delay_seconds, false).timeout.connect(func():
 		if scheduled_session != game_session_id or not village_construction_active:
 			village_ai_construction_running = false
 			return

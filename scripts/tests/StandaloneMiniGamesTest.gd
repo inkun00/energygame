@@ -23,6 +23,9 @@ func _run() -> void:
 	_check(is_instance_valid(launcher.modal.commute_arcade), "전용 링크가 버튼 퀴즈가 아닌 3D 통학 버스 게임을 열어야 합니다.")
 	_check(root.get_node("GameManager").players.size() == 4, "사람 한 명과 AI 세 명이 참가해야 합니다.")
 	var manager = root.get_node("GameManager")
+	launcher.modal.dismiss_guide()
+	manager._update_minigame(manager.MINIGAME_READY_COUNTDOWN_SECONDS)
+	_check(launcher.modal.round_started_locally, "단독 데모도 공통 카운트다운 후 시작해야 합니다.")
 	for player_idx in range(4):
 		manager.submit_minigame_score(player_idx, 400 - player_idx * 100)
 	await process_frame

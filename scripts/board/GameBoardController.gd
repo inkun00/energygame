@@ -104,6 +104,30 @@ func _ready() -> void:
 		GameManager.kingdom_progress_changed.connect(_on_kingdom_progress_changed)
 		GameManager.village_construction_started.connect(_on_village_construction_started)
 		GameManager.minigame_finished.connect(_on_minigame_finished)
+	NetworkManager.session_restored.connect(_on_session_restored)
+
+func _on_session_restored() -> void:
+	_cancel_camera_follow()
+	for player_idx in range(mini(player_pawns.size(), GameManager.players.size())):
+		player_pawns[player_idx].snap_to_tile(int(GameManager.players[player_idx]["position"]))
+		_on_player_state_changed(player_idx)
+		GameManager.player_inventory_changed.emit(player_idx, GameManager.players[player_idx]["inventory"].duplicate(true))
+	GameManager.turn_changed.emit(GameManager.current_turn_idx)
+	GameManager.game_time_changed.emit(ceili(GameManager.game_time_remaining), GameManager.game_duration_seconds)
+	GameManager.dice_input_time_changed.emit(GameManager.current_turn_idx, ceili(GameManager.dice_input_time_remaining))
+	GameManager.kingdom_progress_changed.emit(GameManager.projects_built, GameManager.CONSTRUCTION_PROJECTS.size(), GameManager.kingdom_health)
+	for tile_idx in GameManager.collected_item_tiles:
+		_on_tile_item_collected(int(tile_idx), -1, "")
+	quiz_modal.restore_online_quiz()
+	minigame_modal.restore_online_round()
+	if not GameManager.pending_lap_reward.is_empty():
+		var reward: Dictionary = GameManager.pending_lap_reward
+		GameManager.lap_reward_requested.emit(int(reward["player_idx"]), int(reward["rank"]), int(reward["remaining"]))
+	if GameManager.open_market_active:
+		GameManager.open_market_state_changed.emit(GameManager.get_open_market_state())
+	elif GameManager.village_construction_active:
+		GameManager.village_construction_started.emit(GameManager.get_player_inventories())
+	_on_minigame_finished([])
 
 func _build_energy_fairy_village_backdrop() -> void:
 	if is_instance_valid(energy_fairy_village):
@@ -517,7 +541,7 @@ func start_board_game(player_configs: Array[Dictionary], duration_seconds: int =
 	if hud and hud.has_method("initialize_hud"):
 		hud.initialize_hud()
 		
-	get_tree().create_timer(0.1).timeout.connect(func():
+	get_tree().create_timer(0.1, false).timeout.connect(func():
 		# 온라인 참가자는 방장이 전송하는 첫 턴 상태를 기다립니다.
 		if not NetworkManager.is_online or NetworkManager.is_host:
 			GameManager.start_first_turn()

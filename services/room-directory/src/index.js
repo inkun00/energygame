@@ -78,6 +78,9 @@ async function ensureWebRtcSchema(env) {
     max_players INTEGER NOT NULL CHECK (max_players BETWEEN 2 AND 4),
     password_hash TEXT NOT NULL DEFAULT '', password_salt TEXT NOT NULL DEFAULT ''
   )`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS webrtc_started_rooms (
+    code TEXT PRIMARY KEY REFERENCES webrtc_rooms(code) ON DELETE CASCADE
+  )`).run();
   schemaReady.add(env.DB);
 }
 
@@ -93,7 +96,9 @@ async function listWebRtcRooms(env) {
     (s.password_hash != '') AS password_required,
     (SELECT COUNT(*) FROM webrtc_peers p WHERE p.code = r.code AND p.expires_at > ?1) AS player_count
     FROM webrtc_rooms r JOIN webrtc_room_settings s ON s.code = r.code
-    WHERE r.expires_at > ?1 ORDER BY r.code LIMIT 100`).bind(now).all();
+    WHERE r.expires_at > ?1
+    AND NOT EXISTS (SELECT 1 FROM webrtc_started_rooms started WHERE started.code = r.code)
+    ORDER BY r.code LIMIT 100`).bind(now).all();
   return json({rooms: result.results || []});
 }
 
@@ -161,6 +166,7 @@ async function findRoom(env, code) {
     "SELECT code, host_ip, port, expires_at FROM rooms WHERE code = ?1 AND expires_at > ?2"
   ).bind(code, now).first();
   if (!room) return json({ error: "방을 찾을 수 없거나 대기 시간이 끝났습니다." }, 404);
+
   return json({ code: room.code, host: room.host_ip, port: room.port, expires_at: room.expires_at });
 }
 
@@ -259,6 +265,9 @@ async function joinWebRtcRoom(request, env, code) {
   const room = await cleanupExpiredWebRtcRoom(env, code, now);
   if (!room) return json({ error: "방을 찾을 수 없거나 대기 시간이 끝났습니다." }, 404);
 
+  const started = await env.DB.prepare("SELECT code FROM webrtc_started_rooms WHERE code = ?1").bind(code).first();
+  if (started) return json({ error: "이미 진행 중인 게임입니다. 기존 참가자만 재접속할 수 있습니다." }, 409);
+
   const settings = await env.DB.prepare("SELECT * FROM webrtc_room_settings WHERE code = ?1").bind(code).first();
   if (settings?.password_hash) {
     if (typeof payload.password !== "string" || payload.password.length > 64 ||
@@ -292,6 +301,13 @@ async function joinWebRtcRoom(request, env, code) {
   }
   return json({ code, peer_id: peerId, host_peer_id: 1, expires_at: expiresAt,
     title: settings?.title || "에너지 모험", max_players: settings?.max_players || 4 }, 201);
+}
+
+async function startWebRtcRoom(request, env, code) {
+  const peer = await authorizeWebRtcPeer(request, env, code);
+  if (!peer || peer.peerId !== 1) return json({ error: "방장 인증에 실패했습니다." }, 401);
+  await env.DB.prepare("INSERT OR IGNORE INTO webrtc_started_rooms (code) VALUES (?1)").bind(code).run();
+  return json({ started: true });
 }
 
 async function leaveWebRtcRoom(request, env, code) {
@@ -374,6 +390,7 @@ export default {
     if (parts[0] === "webrtc") await ensureWebRtcSchema(env);
     if (parts[0] === "webrtc" && parts[1] === "rooms" && parts.length === 2 && request.method === "GET") return listWebRtcRooms(env);
     if (parts[0] === "webrtc" && parts[1] === "rooms" && parts.length === 4 && parts[3] === "leave" && request.method === "POST") return leaveWebRtcRoom(request, env, parts[2]);
+    if (parts[0] === "webrtc" && parts[1] === "rooms" && parts.length === 4 && parts[3] === "start" && request.method === "POST") return startWebRtcRoom(request, env, parts[2]);
     if (request.method === "POST" && parts.length === 1 && parts[0] === "rooms") {
       return createRoom(request, env);
     }

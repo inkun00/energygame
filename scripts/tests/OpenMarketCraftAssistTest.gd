@@ -73,6 +73,19 @@ func _run() -> void:
 	}
 	hud._on_open_market_state_changed(state_offering)
 	check(hud.open_market_panel.visible, "Open market panel should be visible in offering phase")
+	check(not hud.turn_prompt_label.visible and not hud.special_skill_button.visible,
+		"Market phase should hide the old dice prompt and special skill action")
+	var highlighted_button: Button
+	for child in hud.open_market_item_grid.get_children():
+		if child is Button and child.text.begins_with("[완성재료]"):
+			highlighted_button = child
+			break
+	check(highlighted_button != null, "A protected construction material should be highlighted")
+	if highlighted_button != null:
+		check(highlighted_button.get_theme_color("font_color").get_luminance() < 0.35,
+			"Highlighted yellow material button should use dark readable text")
+		check(highlighted_button.get_theme_color("icon_normal_color").get_luminance() > 0.8,
+			"Highlighted material icon should keep its source colors")
 	check(hud.open_market_guide_label.text.contains("풍력") or hud.open_market_guide_label.text.contains("즉시"),
 		"Guide banner should announce wind farm immediate buildability")
 

@@ -74,3 +74,21 @@ test("public rooms, input validation, expiration and simultaneous last-seat join
   assert.equal((await req("/123456/join", "POST", {peer_token: guest})).status, 404);
   assert.equal((await req("", "POST", {code: "123456", host_token: host, max_players: 3})).status, 201);
 });
+
+test("started rooms stay available for authenticated signaling but reject new arrivals", async () => {
+  const env = { DB: new SqliteD1() }, req = client(env);
+  await req("", "POST", {code: "123456", host_token: host, max_players: 4});
+  await req("/123456/join", "POST", {peer_token: guest});
+  assert.equal((await req("/123456/start", "POST", {}, guest)).status, 401);
+  assert.equal((await req("/123456/start", "POST", {}, host)).status, 200);
+  assert.equal((await req("/123456/start", "POST", {}, host)).status, 200);
+  assert.equal((await (await req("")).json()).rooms.length, 0);
+  assert.equal((await req("/123456/join", "POST", {peer_token: "x".repeat(48)})).status, 409);
+  assert.equal((await req("/123456/signals", "POST", {to_peer: 1, type: "offer", data: {sdp: "resume", attempt: "attempt-2"}}, guest)).status, 202);
+  const polled = await (await req("/123456/signals", "GET", undefined, host)).json();
+  assert.equal(polled.signals[0].from_peer, 2);
+  assert.equal(polled.signals[0].data.attempt, "attempt-2");
+  assert.equal((await req("/123456/signals", "GET", undefined, "x".repeat(48))).status, 401);
+  await req("/123456", "DELETE", undefined, host);
+  assert.equal(env.DB.db.prepare("SELECT COUNT(*) AS count FROM webrtc_started_rooms").get().count, 0);
+});

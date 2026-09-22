@@ -48,3 +48,7 @@ CREATE TABLE IF NOT EXISTS webrtc_room_settings (
   password_hash TEXT NOT NULL DEFAULT '',
   password_salt TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS webrtc_started_rooms (
+  code TEXT PRIMARY KEY REFERENCES webrtc_rooms(code) ON DELETE CASCADE
+);

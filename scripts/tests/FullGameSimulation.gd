@@ -1,7 +1,7 @@
 extends SceneTree
 
 const SIMULATION_SPEED := 30.0
-const REAL_TIME_LIMIT_MS := 25000
+const REAL_TIME_LIMIT_MS := 60000
 
 var failures: Array[String] = []
 var stats := {

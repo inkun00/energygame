@@ -16,7 +16,70 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: Verify game rules before export
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup Godot 4
+        uses: chickensoft-games/setup-godot@v1
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: true
+
+      - name: Import game assets
+        run: godot --headless --editor --path . --import
+
+      - name: Setup Node for room-service tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify room-service authentication and reconnect signaling
+        run: node --test services/room-directory/test/*.test.js
+
+      - name: Verify real peer reconnection and host loss
+        run: |
+          set -euo pipefail
+          run_peers() {
+            local pids=() result=0
+            for role in "$@"; do
+              timeout 60s godot --headless --path . --script scripts/tests/NetworkRecoveryTest.gd -- "--role=$role" > "$role.log" 2>&1 &
+              pids+=("$!")
+            done
+            for pid in "${pids[@]}"; do wait "$pid" || result=1; done
+            for role in "$@"; do cat "$role.log"; done
+            return "$result"
+          }
+          run_peers host client intruder
+          run_peers loss_host loss_client
+
+      - name: Run regression tests
+        run: |
+          set -euo pipefail
+          for test in \
+            CoreRulesSmokeTest \
+            MiniGameSystemTest \
+            StandaloneMiniGamesTest \
+            MiniGameFairnessTest \
+            NetworkPayloadSmokeTest \
+            NetworkRecoveryRulesTest \
+            QuizMultipleChoiceTest \
+            QuizMarketTransitionTest \
+            OpenMarketCraftAssistTest \
+            TimedLapRewardTest \
+            AdventurePresentationTest \
+            FullGameSimulation; do
+            godot --headless --path . --script "scripts/tests/${test}.gd"
+          done
+
   build-and-deploy:
+    needs: validate
     runs-on: ubuntu-latest
     name: Export HTML5 & Deploy to Pages
     steps:

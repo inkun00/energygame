@@ -35,6 +35,21 @@ func _run() -> void:
 	game_manager.minigame_finished.connect(func(results): capture["results"] = results.duplicate(true), CONNECT_ONE_SHOT)
 	game_manager._start_minigame(0, "solar_align")
 	_check(int(game_manager.current_state) == 5, "미니게임 시작 시 턴 상태가 잠겨야 합니다.")
+	_check(str(game_manager.active_minigame.get("phase", "")) == "ready", "사람이 참가하면 모두 준비할 때까지 대기해야 합니다.")
+	_check(not game_manager.submit_minigame_score(0, 100), "공통 시작 전 점수 제출은 거부해야 합니다.")
+	var first_round_id := int(game_manager.active_minigame.get("round_id", -1))
+	_check(not game_manager.start_minigame_action(0, first_round_id - 1), "지난 라운드의 준비 신호를 거부해야 합니다.")
+	for player_idx in range(3):
+		_check(game_manager.start_minigame_action(player_idx, first_round_id), "각 플레이어의 준비 신호를 받아야 합니다.")
+	_check(str(game_manager.active_minigame.get("phase", "")) == "ready", "한 명이라도 준비 전이면 시작하지 않아야 합니다.")
+	_check(game_manager.start_minigame_action(3, first_round_id), "마지막 플레이어의 준비 신호를 받아야 합니다.")
+	_check(str(game_manager.active_minigame.get("phase", "")) == "countdown", "전원 준비 후 공통 카운트다운을 시작해야 합니다.")
+	_check(not game_manager.submit_minigame_score(0, 100), "카운트다운 중 점수 제출은 거부해야 합니다.")
+	game_manager._update_minigame(2.0)
+	_check(str(game_manager.active_minigame.get("phase", "")) == "countdown", "카운트다운 종료 전에는 조작 시간이 흐르지 않아야 합니다.")
+	game_manager._update_minigame(1.1)
+	_check(str(game_manager.active_minigame.get("phase", "")) == "playing", "공통 카운트다운 종료 시 모두 플레이해야 합니다.")
+	_check(not game_manager.submit_minigame_score(0, 100, {}, first_round_id - 1), "지난 라운드 점수가 새 라운드에 섞이면 안 됩니다.")
 	_check(game_manager.submit_minigame_score(0, 100), "첫 점수를 제출할 수 있어야 합니다.")
 	_check(not game_manager.submit_minigame_score(0, 999), "같은 플레이어의 중복 점수는 거부해야 합니다.")
 	game_manager.submit_minigame_score(1, 400)
@@ -52,6 +67,10 @@ func _run() -> void:
 	var tie_capture := {"results": []}
 	game_manager.minigame_finished.connect(func(results): tie_capture["results"] = results.duplicate(true), CONNECT_ONE_SHOT)
 	game_manager._start_minigame(0, "wind_rhythm")
+	var tie_round_id := int(game_manager.active_minigame.get("round_id", -1))
+	for player_idx in range(4):
+		game_manager.start_minigame_action(player_idx, tie_round_id)
+	game_manager._update_minigame(game_manager.MINIGAME_READY_COUNTDOWN_SECONDS)
 	game_manager.submit_minigame_score(0, 400)
 	game_manager.submit_minigame_score(1, 400)
 	game_manager.submit_minigame_score(2, 300)
@@ -60,9 +79,24 @@ func _run() -> void:
 	_check(tie_results.size() == 4, "동점 라운드 결과도 네 명 모두 포함해야 합니다.")
 	if tie_results.size() == 4:
 		_check(int(tie_results[0]["rank"]) == 1 and int(tie_results[1]["rank"]) == 1, "동점자는 공동 1위여야 합니다.")
+		_check(int(tie_results[0]["reward"]) == 20 and int(tie_results[1]["reward"]) == 20, "공동 1위 두 명 모두 에너지 20을 받아야 합니다.")
 		_check(int(tie_results[2]["rank"]) == 3 and int(tie_results[2]["reward"]) == 5, "공동 1위 다음 순위는 3위와 에너지 5여야 합니다.")
+		_check(int(tie_results[3]["rank"]) == 4 and int(tie_results[3]["reward"]) == 1, "공동 1위가 있어도 마지막 참가자는 4위 에너지 1을 받아야 합니다.")
 	game_manager._start_minigame(0, "eco_commute")
 	_check(float(game_manager.active_minigame.get("duration", 0.0)) == 60.0 and is_equal_approx(game_manager.minigame_time_remaining, 60.0 + game_manager.MINIGAME_SUBMISSION_GRACE_SECONDS), "통학 버스만 60초로 진행해야 합니다.")
+	game_manager._update_minigame(45.1)
+	_check(str(game_manager.active_minigame.get("phase", "")) == "countdown", "안내 제한시간이 끝나면 자동으로 공통 카운트다운을 시작해야 합니다.")
+	game_manager._update_minigame(game_manager.MINIGAME_READY_COUNTDOWN_SECONDS)
+	for player_idx in range(4):
+		game_manager.submit_minigame_score(player_idx, 0)
+	game_manager._start_minigame(0, "heat_leak")
+	var disconnect_round_id := int(game_manager.active_minigame.get("round_id", -1))
+	for player_idx in range(3):
+		game_manager.start_minigame_action(player_idx, disconnect_round_id)
+	game_manager.players[3]["is_ai"] = true
+	game_manager._update_minigame(0.05)
+	_check(str(game_manager.active_minigame.get("phase", "")) == "countdown", "준비 전 연결이 끊겨 AI로 바뀐 자리는 대기를 막지 않아야 합니다.")
+	game_manager._update_minigame(game_manager.MINIGAME_READY_COUNTDOWN_SECONDS)
 	for player_idx in range(4):
 		game_manager.submit_minigame_score(player_idx, 0)
 
@@ -81,6 +115,9 @@ func _run() -> void:
 		_check(modal.is_guide_open() and is_instance_valid(modal.guide_panel) and modal.guide_panel.visible, "%s 진입 시 게임방법 안내 팝업이 표시되어야 합니다." % game_id_variant)
 		modal.dismiss_guide()
 		_check(not modal.is_guide_open() and not modal.guide_panel.visible, "%s 게임방법 안내 닫기 후 게임이 진행 상태가 되어야 합니다." % game_id_variant)
+		_check(not modal.round_started_locally, "%s 안내창을 닫아도 공통 시작 전에는 조작이 잠겨야 합니다." % game_id_variant)
+		modal._on_submission_changed({"game": {"round_id": 99, "phase": "playing"}, "time_remaining": 21.0, "player_count": 4, "submitted_count": 0})
+		_check(modal.round_started_locally, "%s 방장 시작 신호를 받은 뒤에만 조작을 시작해야 합니다." % game_id_variant)
 		if str(game_id_variant) == "solar_align" and is_instance_valid(modal.solar_arcade):
 			var first_gate: Dictionary = modal.solar_arcade.panel_gates[0]
 			var gate_panels: Array = first_gate["meshes"]

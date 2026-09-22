@@ -87,6 +87,15 @@ func _process(delta: float) -> void:
 			_on_time_out()
 
 
+func restore_online_quiz() -> void:
+	if GameManager.current_state != GameManager.TurnState.RESOLVING_QUIZ or GameManager.active_quiz_data.is_empty():
+		cancel_quiz()
+	elif current_quiz != GameManager.active_quiz_data or target_player_idx != GameManager.active_quiz_player_idx or not visible:
+		display_quiz(GameManager.active_quiz_player_idx, GameManager.active_quiz_data)
+	elif not submitted_choice.is_empty() and not spectator_mode:
+		NetworkManager.request_quiz_answer(target_player_idx, submitted_choice)
+
+
 func display_quiz(player_idx: int, quiz_data: Dictionary) -> void:
 	# A late quiz event must not cover the market or construction screen again.
 	if _exploration_has_ended():
@@ -389,7 +398,7 @@ func _show_result(is_correct: bool, prefix: String = "", should_submit_result: b
 
 	var result_token := quiz_display_token
 	var result_delay := PLAYER_RESULT_SECONDS if should_submit_result else SPECTATOR_RESULT_SECONDS
-	get_tree().create_timer(result_delay).timeout.connect(func():
+	get_tree().create_timer(result_delay, false).timeout.connect(func():
 		if result_token != quiz_display_token or _exploration_has_ended():
 			return
 		visible = false
