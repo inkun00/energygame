@@ -95,6 +95,7 @@ func _local_player_index() -> int:
 
 func _ready() -> void:
 	_apply_commercial_ui()
+	_create_construction_scroll()
 	_configure_inventory_item_icons()
 	_create_construction_guide()
 	if victory_modal:
@@ -150,6 +151,21 @@ func _ready() -> void:
 		GameManager.lap_reward_requested.connect(_on_lap_reward_requested)
 		GameManager.lap_reward_completed.connect(_on_lap_reward_completed)
 		GameManager.open_market_state_changed.connect(_on_open_market_state_changed)
+
+func _create_construction_scroll() -> void:
+	if not victory_modal or not construction_list:
+		return
+	var scroll := ScrollContainer.new()
+	scroll.name = "ConstructionScroll"
+	scroll.position = Vector2(640, 78)
+	scroll.size = Vector2(326, 502)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	victory_modal.add_child(scroll)
+	construction_list.reparent(scroll)
+	construction_list.position = Vector2.ZERO
+	construction_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	construction_list.custom_minimum_size.x = 300
 
 func initialize_hud() -> void:
 	adventure_planner.begin_exploration(_local_player_index())
@@ -767,7 +783,7 @@ func _refresh_open_market_recipe_popover() -> void:
 
 		var status_badge := Label.new()
 		if can_build:
-			status_badge.text = " [즉시 건설 가능]"
+			status_badge.text = " [내 부품 세트 충족]"
 			status_badge.add_theme_color_override("font_color", Color("2ecc71"))
 		elif missing_count == 1:
 			status_badge.text = " [1개 부족!]"
@@ -833,7 +849,7 @@ func _inspect_open_market_item(item_id: String, phase: int, is_hover: bool) -> v
 
 		var text := ""
 		if harms_buildable:
-			text = "[주의] '%s'을(를) 판매하면 즉시 건설 가능한 [%s] 완공이 불가능해집니다! (보유: %d개 / 판매예정: %d개)" % [item_name, ", ".join(harmed_projects), owned, selected]
+			text = "[내 부품 점검] '%s'을(를) 교환하면 [%s]에 내가 제공할 부품이 줄어요. 이후 건설에는 팀 재료를 합칩니다. (보유 %d / 교환 %d)" % [item_name, ", ".join(harmed_projects), owned, selected]
 			open_market_inspect_label.add_theme_color_override("font_color", Color("ff7979"))
 		elif requiring_projects.is_empty():
 			text = "[안내] '%s': 현재 필요한 시설이 없는 여유 부품입니다. (보유: %d개)" % [item_name, owned]
@@ -849,7 +865,7 @@ func _inspect_open_market_item(item_id: String, phase: int, is_hover: bool) -> v
 
 		var text := ""
 		if not completes.is_empty():
-			text = "[완성 기회] '%s'을(를) 가져오면 [%s]이(가) 즉시 완공됩니다!" % [item_name, ", ".join(completes)]
+			text = "[내 부품 세트] '%s'을(를) 가져오면 [%s] 재료를 내가 모두 제공할 수 있어요. 시설을 놓아야 완공됩니다." % [item_name, ", ".join(completes)]
 			open_market_inspect_label.add_theme_color_override("font_color", Color("ffd166"))
 		elif not advances.is_empty():
 			text = "[필요 부품] '%s' 획득 시 진행 가능한 시설: %s (현재 보유: %d개)" % [item_name, ", ".join(advances), owned]
@@ -909,7 +925,7 @@ func _refresh_open_market_panel(state: Dictionary) -> void:
 
 	if phase == GameManager.OpenMarketPhase.OFFERING:
 		open_market_title_label.text = "오픈마켓 · 비공개 판매 선택"
-		open_market_status_label.text = "내놓을 부품 수량을 고르세요. 모두 확정한 순간에만 시장에 동시에 공개됩니다."
+		open_market_status_label.text = "부품 교환 수량을 골라요. 이후 건설은 팀 재료를 합치며, 실제 제공한 부품 1개당 에너지 +2를 받아요."
 		open_market_quota_label.text = "결정 완료 %d / %d명%s" % [submitted.size(), int(state.get("player_count", GameManager.players.size())), " · 내 선택 확정됨" if local_submitted else ""]
 
 		var buildable_projects := _get_player_buildable_projects(inventory)
@@ -917,7 +933,7 @@ func _refresh_open_market_panel(state: Dictionary) -> void:
 			var b_names: Array[String] = []
 			for bp in buildable_projects:
 				b_names.append(str(bp["name"]))
-			open_market_guide_label.text = "[즉시 건설 가능] 현재 보유 부품으로 [%s]을(를) 지을 수 있습니다! 핵심 부품([완성재료])이 판매되지 않도록 주의하세요." % ", ".join(b_names)
+			open_market_guide_label.text = "[내 부품 세트] [%s] 재료를 내가 모두 제공할 수 있어요. 교환은 선택이며, 다음 단계에서 친구 재료도 합쳐 건설해요." % ", ".join(b_names)
 			open_market_guide_label.add_theme_color_override("font_color", Color("ffd166"))
 		else:
 			var almost_ready: Array[String] = []
@@ -928,10 +944,10 @@ func _refresh_open_market_panel(state: Dictionary) -> void:
 				if missing == 1:
 					almost_ready.append(str(project["name"]))
 			if not almost_ready.is_empty():
-				open_market_guide_label.text = "[완공 임박] 1개 부품만 더 모으면 [%s] 완공 가능! 불필요한 부품을 내놓아 시장에서 필요한 부품을 교환해보세요." % ", ".join(almost_ready)
+				open_market_guide_label.text = "[내 부품 점검] [%s] 재료 세트까지 1개 남았어요. 팀 재료는 이후 합쳐지며, 교환해서 어떤 부품을 제공할지 정할 수 있어요." % ", ".join(almost_ready)
 				open_market_guide_label.add_theme_color_override("font_color", Color("70d6ff"))
 			else:
-				open_market_guide_label.text = "보유 부품 현황을 확인하고 발전소 건설에 필요 없는 부품을 내놓아 다른 플레이어의 부품을 가져오세요."
+				open_market_guide_label.text = "이 가이드는 내 부품을 점검해요. 교환하지 않아도 다음 단계에서 팀 재료를 합쳐 필요한 시설을 지을 수 있어요."
 				open_market_guide_label.add_theme_color_override("font_color", UI.TEXT_BRIGHT)
 
 		for item_id_variant in GameManager.ITEM_DEFINITIONS.keys():
@@ -987,10 +1003,10 @@ func _refresh_open_market_panel(state: Dictionary) -> void:
 					immediate_wins.append(str(c))
 
 		if not immediate_wins.is_empty():
-			open_market_guide_label.text = "[완성 기회] 시장 부품 중 가져오면 [%s]이(가) 즉시 완성되는 부품이 있습니다! 우선적으로 획득하세요." % ", ".join(immediate_wins)
+			open_market_guide_label.text = "[내 부품 세트 기회] [%s] 재료를 내가 모두 제공할 수 있는 부품이 있어요. 이후 팀 재료를 합쳐 시설을 놓으면 완공됩니다." % ", ".join(immediate_wins)
 			open_market_guide_label.add_theme_color_override("font_color", Color("ffd166"))
 		else:
-			open_market_guide_label.text = "시장 부품을 가져와 시설 레시피에 필요한 부품([필요])을 채우세요. (상단 [전체 건설 레시피] 참고)"
+			open_market_guide_label.text = "내가 제공할 부품을 골라요. 다음 건설에서는 팀 재료를 합치고, 실제 제공한 부품 1개당 에너지 +2를 받아요."
 			open_market_guide_label.add_theme_color_override("font_color", UI.TEXT_BRIGHT)
 
 		for item_id_variant in GameManager.ITEM_DEFINITIONS.keys():
@@ -1005,7 +1021,7 @@ func _refresh_open_market_panel(state: Dictionary) -> void:
 			var highlight := false
 
 			if not completes.is_empty() and amount > 0:
-				tag = "완성!"
+				tag = "세트 충족"
 				tag_color = Color("ffd166")
 				highlight = true
 			elif not advances.is_empty() and amount > 0:
@@ -1526,8 +1542,12 @@ func _set_village_construction_controls(is_construction_phase: bool) -> void:
 		construction_list.visible = is_construction_phase
 	if evaluate_button:
 		evaluate_button.visible = is_construction_phase
-		evaluate_button.disabled = is_construction_phase and NetworkManager.is_online and not NetworkManager.is_host
-		evaluate_button.tooltip_text = "방장이 공동 마을의 완성도를 확인합니다." if evaluate_button.disabled else "현재 공동 마을의 완성도를 확인합니다."
+		evaluate_button.disabled = GameManager.village_finished_players.has(_local_player_index())
+		evaluate_button.text = "친구 건설 기다리는 중" if evaluate_button.disabled else "내 건설 마침 · 결과 확인"
+		evaluate_button.tooltip_text = "친구들도 건설을 마치면 AI와 함께 마을 결과를 확인합니다."
+	var scroll := victory_modal.get_node_or_null("ConstructionScroll")
+	if scroll:
+		scroll.visible = is_construction_phase
 	if victory_rankings_label:
 		victory_rankings_label.visible = false
 	if rankings_container:
@@ -1545,14 +1565,14 @@ func _refresh_construction_choices() -> void:
 	for child in construction_list.get_children():
 		construction_list.remove_child(child)
 		child.queue_free()
-	var very_compact_cards := GameManager.CONSTRUCTION_PROJECTS.size() > 7
-	var ultra_compact_cards := GameManager.CONSTRUCTION_PROJECTS.size() > 8
-	construction_list.add_theme_constant_override("separation", 4 if very_compact_cards else 6)
+	var very_compact_cards := false
+	var ultra_compact_cards := false
+	construction_list.add_theme_constant_override("separation", 10)
 	for project_index in range(GameManager.CONSTRUCTION_PROJECTS.size()):
 		var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[project_index]
 		var build_button: Button = VILLAGE_DRAG_CARD.new()
-		var compact_cards := GameManager.CONSTRUCTION_PROJECTS.size() > 4
-		build_button.custom_minimum_size = Vector2(286, 46 if ultra_compact_cards else (58 if very_compact_cards else (66 if compact_cards else 116)))
+		var compact_cards := false
+		build_button.custom_minimum_size = Vector2(300, 120)
 		build_button.text = ""
 		build_button.clip_contents = true
 		var already_built := project_index in GameManager.built_project_ids
@@ -1560,11 +1580,13 @@ func _refresh_construction_choices() -> void:
 		if not already_built:
 			builders = GameManager.get_project_builder_indices(project_index)
 		var builder_idx := builders[0] if not builders.is_empty() else -1
-		# 온라인에서는 각 화면에서 자기 개인 재료로만 건설을 요청할 수 있습니다.
+		# 온라인에서는 자기 이름으로 건설 요청하되 실제 부품은 팀 전체에서 제공합니다.
 		if NetworkManager.is_online:
 			var local_idx := _local_player_index()
 			builder_idx = local_idx if local_idx in builders else -1
-		build_button.tooltip_text = "%s · 공동 친환경 지수 +%d · 적합 지형: %s · 마을 지도 위로 끌어 배치하세요." % [project["name"], int(project["health"]), project.get("terrain_label", "지정 구역")]
+		if GameManager.village_finished_players.has(_local_player_index()):
+			builder_idx = -1
+		build_button.tooltip_text = "%s\n팀 재료를 함께 사용합니다. 지수 +%d · 적합 지형: %s\n건설자 에너지 +5 · 부품 제공자 1개당 +2\n마을 지도 위로 끌어 배치하세요." % [project["name"], int(project["health"]), project.get("terrain_label", "지정 구역")]
 		_apply_secondary_button_style(build_button)
 
 		var margin := MarginContainer.new()
@@ -1600,7 +1622,8 @@ func _refresh_construction_choices() -> void:
 		var project_label := Label.new()
 		var category_prefix := "%s · " % str(project.get("category", "")) if project.has("category") else ""
 		project_label.text = ("완공 · " if already_built else "") + category_prefix + str(project["name"]) + "  +%d%%" % int(project["health"])
-		project_label.add_theme_font_size_override("font_size", 11 if ultra_compact_cards else (13 if compact_cards else 15))
+		project_label.add_theme_font_size_override("font_size", 17)
+		project_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		project_label.add_theme_color_override("font_color", UI.GOLD if builder_idx >= 0 or already_built else UI.TEXT_MUTED)
 		project_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		info.add_child(project_label)
@@ -1616,11 +1639,11 @@ func _refresh_construction_choices() -> void:
 			requirement_box.custom_minimum_size = Vector2(24 if ultra_compact_cards else (30 if compact_cards else 42), 0)
 			requirement_box.tooltip_text = item["name"]
 			requirements_row.add_child(requirement_box)
-			requirement_box.add_child(_create_asset_texture_rect(str(item["asset"]), Vector2(18, 18) if ultra_compact_cards else (Vector2(24, 24) if compact_cards else Vector2(38, 38))))
+			requirement_box.add_child(_create_asset_texture_rect(str(item["asset"]), Vector2(34, 34)))
 			var amount_label := Label.new()
-			amount_label.text = "×%d" % int(project["requirements"][item_id])
+			amount_label.text = "%d/%d" % [int(GameManager.get_team_inventory().get(item_id, 0)), int(project["requirements"][item_id])]
 			amount_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			amount_label.add_theme_font_size_override("font_size", 9 if ultra_compact_cards else (10 if compact_cards else 13))
+			amount_label.add_theme_font_size_override("font_size", 15)
 			amount_label.add_theme_color_override("font_color", UI.TEXT_MUTED)
 			requirement_box.add_child(amount_label)
 
@@ -1631,14 +1654,17 @@ func _refresh_construction_choices() -> void:
 		else:
 			owner_label.text = str(GameManager.players[builder_idx]["name"]) if builder_idx >= 0 else ("완공" if already_built else "재료 부족")
 		owner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		owner_label.add_theme_font_size_override("font_size", 10 if compact_cards else 12)
+		owner_label.add_theme_font_size_override("font_size", 14)
 		owner_label.add_theme_color_override("font_color", UI.SUCCESS if builder_idx >= 0 or already_built else UI.DANGER)
 		owner_label.visible = not ultra_compact_cards
 		info.add_child(owner_label)
 		_set_descendant_mouse_filter_ignore(margin)
 		construction_list.add_child(build_button)
 	if build_instruction_label:
-		build_instruction_label.text = "시설 카드를 마을 지도 위 원하는 곳으로 끌어놓으세요.\n배치할 때 한 플레이어의 개인 재료가 사용됩니다."
+		build_instruction_label.text = "팀 재료로 함께 건설해요. 카드 목록은 아래로 스크롤해요.\n모두 ‘내 건설 마침’을 눌러야 결과로 넘어가요."
+	if evaluate_button:
+		evaluate_button.disabled = GameManager.village_finished_players.has(_local_player_index())
+		evaluate_button.text = "친구 건설 기다리는 중" if evaluate_button.disabled else "내 건설 마침 · 결과 확인"
 
 func _create_asset_texture_rect(asset_path: String, minimum_size: Vector2) -> TextureRect:
 	var texture_rect := TextureRect.new()
@@ -1711,7 +1737,7 @@ func _refresh_ranking_cards(rankings: Array) -> void:
 		score_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		# 재료 획득 공헌과 실제 발전소 완공 수를 분리해, BUILD가 완공 수로 오해되지 않게 합니다.
 		score_label.text = "%s\n⚡ 순위 에너지 %d  •  이동 %d칸 (+%d)\n퀴즈 %d  •  재료 %d  •  완공 %d" % [player.get("name", "플레이어"), player.get("energy", 0), player.get("total_tiles_moved", 0), player.get("movement_reward_energy", 0), player.get("quiz_correct", 0), player.get("construction_contribution", 0), player.get("project_completion_bonus", 0)]
-		score_label.tooltip_text = "이동 보상: 누적 이동 거리 1위부터 순서대로 에너지 120·80·40·20을 받습니다. 최종 순위는 보상까지 포함한 일반 에너지 순서입니다."
+		score_label.tooltip_text = "이동 보상은 20·15·10·5. 건설자 +5, 부품 제공자 1개당 +2. 최종 순위는 일반 에너지 순서이며 관전 퀴즈 점수는 동점 판정에 사용됩니다."
 		score_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		score_label.add_theme_font_size_override("font_size", 14)
 		score_label.add_theme_color_override("font_color", Color("effff9"))
@@ -1731,19 +1757,16 @@ func _on_village_project_dropped(project_index: int, player_idx: int, map_positi
 		return
 	if not GameManager.build_village_project(project_index, player_idx, map_position):
 		village_map.cancel_project_placement(project_index)
-		_show_event_banner("이 시설은 지금 배치할 수 없습니다. 개인 재료를 확인하세요.")
+		_show_event_banner("이 시설은 지금 배치할 수 없습니다. 팀 재료를 확인하세요.")
 
 func _on_village_project_drop_rejected(message: String) -> void:
 	_show_event_banner("이 시설은 %s" % message)
 
 func _on_evaluate_village_pressed() -> void:
 	if NetworkManager.is_online:
-		if NetworkManager.is_host:
-			NetworkManager.request_evaluate_village()
-		else:
-			_show_event_banner("마을 완성도 확인은 방장이 진행합니다.")
+		NetworkManager.request_evaluate_village()
 		return
-	GameManager.evaluate_village()
+	GameManager.finish_village_construction(_local_player_index())
 
 func _on_save_village_pressed() -> void:
 	if not village_map:
@@ -1759,6 +1782,14 @@ func _on_save_village_pressed() -> void:
 	var capture_rect := Rect2i(Vector2i(map_rect.position), Vector2i(map_rect.size))
 	capture_rect = capture_rect.intersection(Rect2i(Vector2i.ZERO, viewport_image.get_size()))
 	var image := viewport_image.get_region(capture_rect)
+	if OS.has_feature("web"):
+		var filename := "eco-heroes-village.png"
+		JavaScriptBridge.download_buffer(image.save_png_to_buffer(), filename, "image/png")
+		if save_status_label:
+			save_status_label.text = "마을 이미지 다운로드를 시작했어요."
+		if save_village_button:
+			save_village_button.disabled = false
+		return
 	var save_path := "user://energy_fairy_village_%d.png" % int(Time.get_unix_time_from_system())
 	var absolute_save_path := ProjectSettings.globalize_path(save_path)
 	var result := image.save_png(absolute_save_path)

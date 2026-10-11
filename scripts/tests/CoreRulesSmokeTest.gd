@@ -420,6 +420,10 @@ func _test_ai_village_construction() -> void:
 	var previous_time_scale := Engine.time_scale
 	Engine.time_scale = 20.0
 	await create_timer(game_manager.AI_VILLAGE_BUILD_DELAY_SECONDS + 0.2).timeout
+	_expect(game_manager.built_project_ids.is_empty() and game_manager.village_construction_active, "모든 사람이 건설을 마치기 전에는 AI가 공동 재료를 사용하거나 결과를 확정하면 안 됩니다.")
+	for player_idx in [0, 2, 3]:
+		game_manager.finish_village_construction(player_idx)
+	await create_timer(game_manager.AI_VILLAGE_BUILD_DELAY_SECONDS + 0.2).timeout
 	Engine.time_scale = previous_time_scale
 	_expect(0 in game_manager.built_project_ids, "사람과 함께 플레이한 AI도 자기 재료로 건설 가능한 발전소를 선택해야 합니다.")
 	_expect(int(game_manager.built_project_owners.get(0, -1)) == 1, "AI가 선택한 발전소는 해당 AI의 건설 결과로 기록되어야 합니다.")
@@ -437,12 +441,15 @@ func _test_kingdom_recovery_ending() -> void:
 	game_manager.players[0]["inventory"] = {"solar_panel": 2, "wind_blade": 0, "battery": 1, "insulation": 0, "smart_grid": 0}
 	game_manager.players[1]["inventory"] = {"solar_panel": 0, "wind_blade": 2, "battery": 0, "insulation": 0, "smart_grid": 1}
 	_expect(game_manager.can_build_village_project(0, 0) and game_manager.can_build_village_project(1, 1), "각자 필요한 재료를 보유한 플레이어는 건물을 지을 수 있어야 합니다.")
-	_expect(not game_manager.can_build_village_project(1, 0), "다른 플레이어의 재료를 합쳐서 건설할 수 없어야 합니다.")
+	_expect(game_manager.can_build_village_project(1, 0), "팀원들의 재료를 합쳐 누구든 필요한 공동 시설을 건설할 수 있어야 합니다.")
 	_expect(game_manager.build_village_project(0, 0), "플레이어 0의 개인 재료로 태양광 발전소가 건설되어야 합니다.")
 	_expect(game_manager.build_village_project(1, 1), "플레이어 1의 개인 재료로 풍력 발전단지가 건설되어야 합니다.")
 	_expect(game_manager.kingdom_health == game_manager.VILLAGE_RECOVERY_TARGET, "건물 효과의 합으로 복원 목표 건강도에 도달해야 합니다.")
-	_expect(game_manager.kingdom_recovered, "목표 건강도 이상인 마을은 즉시 왕국 복원 성공으로 판정되어야 합니다.")
-	_expect(ending["received"], "엔딩 조건 달성 시 최종 순위용 game_over 시그널을 즉시 발생시켜야 합니다.")
+	_expect(game_manager.village_construction_active and not ending["received"], "목표를 먼저 달성해도 다른 사람이 건설할 기회를 빼앗으면 안 됩니다.")
+	for player_idx in range(game_manager.players.size()):
+		game_manager.finish_village_construction(player_idx)
+	_expect(game_manager.kingdom_recovered, "모두 건설을 마친 뒤 목표 건강도 이상인 마을은 복원 성공으로 판정되어야 합니다.")
+	_expect(ending["received"], "모두 건설을 마치면 최종 순위용 game_over 시그널을 발생시켜야 합니다.")
 	game_manager.game_over.disconnect(capture_game_over)
 
 func _test_energy_ranking() -> void:
@@ -493,9 +500,9 @@ func _test_movement_end_rewards() -> void:
 	game_manager.game_over.connect(func(rankings: Array): result["rankings"] = rankings)
 	game_manager._start_village_construction_phase()
 	game_manager.evaluate_village()
-	_expect(game_manager.players[0]["movement_reward_energy"] == 120, "가장 많이 이동한 플레이어는 에너지 120을 받아야 합니다.")
-	_expect(game_manager.players[1]["movement_reward_energy"] == 80 and game_manager.players[2]["movement_reward_energy"] == 40 and game_manager.players[3]["movement_reward_energy"] == 20, "이동 순위가 낮아질수록 종료 보상이 줄어야 합니다.")
-	_expect(game_manager.players[0]["energy"] == 125 and game_manager.players[3]["energy"] == 25, "이동 종료 보상이 일반 에너지에 합산되어야 합니다.")
+	_expect(game_manager.players[0]["movement_reward_energy"] == 20, "가장 많이 이동한 플레이어는 학습 활동을 압도하지 않는 보너스 에너지 20을 받아야 합니다.")
+	_expect(game_manager.players[1]["movement_reward_energy"] == 15 and game_manager.players[2]["movement_reward_energy"] == 10 and game_manager.players[3]["movement_reward_energy"] == 5, "이동 순위가 낮아질수록 20/15/10/5 보너스가 지급되어야 합니다.")
+	_expect(game_manager.players[0]["energy"] == 25 and game_manager.players[3]["energy"] == 10, "이동 종료 보너스가 일반 에너지에 합산되어야 합니다.")
 	var rankings: Array = result["rankings"]
 	_expect(rankings.size() == 4 and int(rankings[0]["index"]) == 0, "이동 보상 에너지가 최종 플레이어 순위에 반영되어야 합니다.")
 
@@ -654,6 +661,7 @@ func _test_other_player_quiz_observation() -> void:
 	game_manager.current_state = game_manager.TurnState.RESOLVING_QUIZ
 	game_manager.active_quiz_player_idx = 1
 	game_manager.active_quiz_data = quiz
+	game_manager.active_quiz_time_remaining = 30.0
 	quiz_modal.display_quiz(1, quiz)
 	_expect(quiz_modal.visible and quiz_modal.spectator_mode, "다른 플레이어의 퀴즈는 관전 모드로 표시되어야 합니다.")
 	_expect("문제 풀이" in quiz_modal.title_label.text, "관전 퀴즈에 풀이 중인 플레이어가 표시되어야 합니다.")

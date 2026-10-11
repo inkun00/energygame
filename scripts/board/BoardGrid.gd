@@ -58,7 +58,7 @@ static var TILE_DATA: Array[Dictionary] = [
 	{"index": 19, "name": "태양광 패널 지대", "type": TileType.POWERPLANT, "reward_energy": 3, "desc": "무한한 햇빛 에너지! 에너지 3개 획득"},
 	{"index": 20, "name": "과도한 냉방 미끄럼틀", "type": TileType.SLIDE, "target": 19, "desc": "에어컨을 과도하게 사용했습니다! 바로 아래 19번 칸으로 미끄러집니다!"},
 	{"index": 21, "name": "신재생에너지 퀴즈", "type": TileType.QUIZ_CHOICE, "desc": "그린수소와 지속 가능한 미래"},
-	{"index": 22, "name": "수소연료전지 기지", "type": TileType.POWERPLANT, "reward_energy": 4, "desc": "물만 배출하는 궁극의 청정에너지! 에너지 4개 획득"},
+	{"index": 22, "name": "수소연료전지 기지", "type": TileType.POWERPLANT, "reward_energy": 4, "desc": "연료전지는 수소로 전기를 만듭니다. 수소를 만드는 방법도 중요해요. 에너지 4개 획득"},
 	{"index": 23, "name": "그린수소 연구 퀴즈", "type": TileType.QUIZ_CHOICE, "desc": "탄소를 배출하지 않는 청정 수소 생산 방법을 확인합니다."},
 	{"index": 24, "name": "그린 시티 관문", "type": TileType.CHANCE_CARD, "desc": "후반 모험을 위한 보너스 건설재료를 1개 획득!"},
 	{"index": 25, "name": "고효율 조명 사다리", "type": TileType.LADDER, "target": 34, "desc": "LED 조명으로 교체 성공! 바로 위 34번 칸으로 사다리를 탑니다!"},

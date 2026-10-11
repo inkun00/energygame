@@ -60,6 +60,8 @@ static func apply_primary_button(button: Button) -> void:
 	button.add_theme_color_override("font_color", INK)
 	button.add_theme_color_override("font_hover_color", INK)
 	button.add_theme_color_override("font_pressed_color", INK)
+	button.add_theme_color_override("font_focus_color", INK)
+	button.add_theme_stylebox_override("focus", button_style(Color(0, 0, 0, 0), TEAL, 10, 0.0, 0.0))
 	button.add_theme_color_override("font_disabled_color", Color("b6c1c3"))
 	button.add_theme_color_override("icon_normal_color", INK)
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -72,6 +74,8 @@ static func apply_secondary_button(button: Button, accent: Color = TEAL) -> void
 	button.add_theme_color_override("font_color", TEXT)
 	button.add_theme_color_override("font_hover_color", Color.WHITE)
 	button.add_theme_color_override("font_pressed_color", TEXT)
+	button.add_theme_color_override("font_focus_color", TEXT_BRIGHT)
+	button.add_theme_stylebox_override("focus", button_style(Color(0, 0, 0, 0), GOLD, 10, 0.0, 0.0))
 	button.add_theme_color_override("font_disabled_color", Color("71858a"))
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 

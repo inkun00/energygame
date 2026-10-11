@@ -5,7 +5,9 @@ class_name WindTurbinePilot3D
 
 signal arcade_event(points: int, success: bool, message: String, count_correct: bool)
 
+const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
+const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 const WIND_PHASE_SECONDS := 4.0
 const YAW_LIMIT := 65.0
 const YAW_SPEED := 72.0
@@ -26,6 +28,7 @@ var main_blades: Array[Node3D] = []
 var background_rotors: Array[Node3D] = []
 
 var rng := RandomNumberGenerator.new()
+var visual_rng := RandomNumberGenerator.new()
 var running := false
 var turbine_yaw := 0.0
 var wind_angle := 0.0
@@ -72,7 +75,10 @@ func _ready() -> void:
 	set_process(true)
 
 func setup(player_data: Dictionary, game_seed: int) -> void:
+	brake_was_down = false
+	yaw_choice_made = false
 	rng.seed = game_seed
+	visual_rng.seed = game_seed ^ 0x71AD
 	_spawn_hero(player_data)
 	_start_next_wind_phase()
 	running = true
@@ -97,23 +103,8 @@ func _build_viewport() -> void:
 	viewport.add_child(world)
 
 func _build_world() -> void:
-	var environment_node := WorldEnvironment.new()
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color("76bfd1")
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("e5fbff")
-	environment.ambient_light_energy = 0.82
-	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	environment_node.environment = environment
-	world.add_child(environment_node)
-
-	var light := DirectionalLight3D.new()
-	light.rotation_degrees = Vector3(-48, -28, 0)
-	light.light_color = Color("f6fff1")
-	light.light_energy = 1.1
-	light.shadow_enabled = false
-	world.add_child(light)
+	VISUAL_STYLE.add_environment(world)
+	VISUAL_STYLE.add_key_light(world, Vector3(-48, -28, 0))
 
 	camera = Camera3D.new()
 	camera.position = Vector3(0.0, 4.45, 10.8)
@@ -131,16 +122,16 @@ func _build_world() -> void:
 func _create_materials() -> void:
 	normal_head_material = _material(Color("d9eef0"), false)
 	aligned_head_material = _material(Color("52e6ad"), true)
-	aligned_head_material.emission_energy_multiplier = 1.25
+	aligned_head_material.emission_energy_multiplier = 0.62
 	storm_head_material = _material(Color("ed5b53"), true)
-	storm_head_material.emission_energy_multiplier = 1.25
+	storm_head_material.emission_energy_multiplier = 0.62
 	blade_material = _material(Color("edf7f2"), false)
 	wind_material = _material(Color("a9f1ff"), true)
 	wind_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	wind_material.albedo_color.a = 0.66
-	wind_material.emission_energy_multiplier = 1.25
+	wind_material.emission_energy_multiplier = 0.55
 	safe_material = _material(Color("72f3b1"), true)
-	safe_material.emission_energy_multiplier = 1.8
+	safe_material.emission_energy_multiplier = 0.62
 
 func _build_landscape() -> void:
 	var ground := MeshInstance3D.new()
@@ -148,7 +139,7 @@ func _build_landscape() -> void:
 	ground_box.size = Vector3(24.0, 0.18, 20.0)
 	ground.mesh = ground_box
 	ground.position = Vector3(0.0, -0.12, -2.0)
-	ground.material_override = _material(Color("5c9959"), false)
+	ground.material_override = _material(VISUAL_STYLE.FIELD, false)
 	world.add_child(ground)
 
 	var service_pad := MeshInstance3D.new()
@@ -159,7 +150,7 @@ func _build_landscape() -> void:
 	pad_cylinder.radial_segments = 32
 	service_pad.mesh = pad_cylinder
 	service_pad.position = Vector3(0.0, 0.03, 0.0)
-	service_pad.material_override = _material(Color("365e62"), false)
+	service_pad.material_override = _material(VISUAL_STYLE.ROAD, false)
 	world.add_child(service_pad)
 
 	for side in [-1, 1]:
@@ -280,9 +271,9 @@ func _build_wind_streaks() -> void:
 	for streak_index in range(14):
 		var streak := MeshInstance3D.new()
 		var streak_box := BoxMesh.new()
-		streak_box.size = Vector3(0.045, 0.045, rng.randf_range(0.75, 1.65))
+		streak_box.size = Vector3(0.045, 0.045, visual_rng.randf_range(0.75, 1.65))
 		streak.mesh = streak_box
-		streak.position = Vector3(rng.randf_range(-5.8, 5.8), rng.randf_range(0.7, 5.8), rng.randf_range(-5.0, 5.0))
+		streak.position = Vector3(visual_rng.randf_range(-5.8, 5.8), visual_rng.randf_range(0.7, 5.8), visual_rng.randf_range(-5.0, 5.0))
 		streak.material_override = wind_material
 		world.add_child(streak)
 		wind_streaks.append(streak)
@@ -400,6 +391,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	hero.scale = Vector3.ONE * 1.75
 	hero_adjusting = false
 	hero.call("_set_avatar_animation_state", false)
+	VISUAL_STYLE.style_hero(hero)
 
 func _process(delta: float) -> void:
 	if not running or not is_instance_valid(turbine_head):
@@ -412,11 +404,11 @@ func _process(delta: float) -> void:
 			rotor_broken = false
 			_build_rotor_blades()
 	var input_direction := 0.0
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+	if MINIGAME_INPUT.is_pressed(KEY_A) or MINIGAME_INPUT.is_pressed(KEY_LEFT):
 		input_direction -= 1.0
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+	if MINIGAME_INPUT.is_pressed(KEY_D) or MINIGAME_INPUT.is_pressed(KEY_RIGHT):
 		input_direction += 1.0
-	turbine_yaw = clampf(turbine_yaw + input_direction * YAW_SPEED * delta, -YAW_LIMIT, YAW_LIMIT)
+	_apply_yaw_input(input_direction, delta)
 	turbine_head.rotation.y = deg_to_rad(turbine_yaw)
 	wind_vane.rotation.y = deg_to_rad(wind_angle)
 	if is_instance_valid(hero):
@@ -428,17 +420,21 @@ func _process(delta: float) -> void:
 
 	var alignment := _alignment_efficiency()
 	var generated_power := _generated_power_percent(alignment)
+	_update_brake_input(MINIGAME_INPUT.is_pressed(KEY_SPACE))
 	if storm_phase:
 		generated_power = 0.0
-		if Input.is_key_pressed(KEY_SPACE) and not phase_scored:
-			_engage_storm_brake()
 	else:
-		_score_aligned_generation(delta, alignment)
+		if brake_active or rotor_broken:
+			generated_power = 0.0
+		else:
+			_score_aligned_generation(delta, alignment)
 	_update_rotor(delta, generated_power)
 	_update_wind_streaks(delta)
 	_update_hud(alignment, generated_power)
 	if phase_elapsed >= WIND_PHASE_SECONDS:
+		var remainder := phase_elapsed - WIND_PHASE_SECONDS
 		_finish_wind_phase()
+		phase_elapsed = remainder
 
 func _alignment_efficiency() -> float:
 	var angular_error := absf(wrapf(turbine_yaw - wind_angle, -180.0, 180.0))
@@ -450,27 +446,51 @@ func _generated_power_percent(alignment: float) -> float:
 	return alignment * alignment * speed_factor * 100.0
 
 func _score_aligned_generation(delta: float, alignment: float) -> void:
+	if brake_active or rotor_broken or not yaw_choice_made:
+		score_tick = 0.0
+		return
 	if absf(wrapf(turbine_yaw - wind_angle, -180.0, 180.0)) > ALIGNMENT_FULL_SCORE_DEGREES:
 		score_tick = 0.0
 		return
 	score_tick += delta
-	if score_tick < 0.34:
-		return
-	score_tick = 0.0
-	var points := 7 + int(round(float(wind_speed) * 0.85))
-	var first_capture := not phase_scored
-	phase_scored = true
-	_show_score_popup(points, true, "%d m/s 발전" % wind_speed)
-	arcade_event.emit(points, true, "풍향 정렬! %d m/s 바람으로 발전 중" % wind_speed, first_capture)
+	# Keep every complete generation interval and its remainder. Resetting the
+	# clock on each award unfairly loses more electricity at a lower frame rate.
+	while score_tick + 0.000001 >= 0.34:
+		score_tick = maxf(0.0, score_tick - 0.34)
+		var points := 7 + int(round(float(wind_speed) * 0.85))
+		var first_capture := not phase_scored
+		phase_scored = true
+		if first_capture:
+			_show_score_popup(points, true, "풍향 정렬 · 발전 시작")
+		arcade_event.emit(points, true, "풍향 정렬! %d m/s 바람으로 발전 중" % wind_speed, first_capture)
 
-func _engage_storm_brake() -> void:
+var brake_was_down := false
+var yaw_choice_made := false
+
+func _apply_yaw_input(direction: float, delta: float) -> void:
+	var previous := turbine_yaw
+	turbine_yaw = clampf(turbine_yaw + direction * YAW_SPEED * delta, -YAW_LIMIT, YAW_LIMIT)
+	yaw_choice_made = yaw_choice_made or not is_equal_approx(previous, turbine_yaw)
+
+func _update_brake_input(down: bool) -> void:
+	var new_press := down and not brake_was_down
+	brake_was_down = down
+	if storm_phase:
+		if down and not brake_active:
+			_engage_storm_brake(new_press)
+	else:
+		brake_active = down
+		if down and is_instance_valid(instruction_label):
+			instruction_label.text = "보통 바람에서는 브레이크를 놓아야 발전해요."
+
+func _engage_storm_brake(award: bool = true) -> void:
 	phase_scored = true
 	brake_active = true
 	if is_instance_valid(nacelle):
 		nacelle.material_override = safe_material
 	_set_storm_overlay(true, true)
-	_show_score_popup(75, true, "위험 돌풍 안전 정지!")
-	arcade_event.emit(75, true, "강풍에서는 터빈을 멈춰 장비를 보호합니다.", true)
+	# The storm banner already shows the success; a second popup covers it.
+	arcade_event.emit(75 if award else 0, true, "돌풍을 보고 멈추면 장비를 지켜요." if award else "계속 멈추면 발전도 멈춰요. 보통 바람에는 브레이크를 놓아 보세요.", award)
 
 func _finish_wind_phase() -> void:
 	if storm_phase and not phase_scored:
@@ -532,7 +552,7 @@ func _update_wind_streaks(delta: float) -> void:
 		streak.rotation.y = radians
 		streak.scale.z = lerpf(0.75, 2.2, wind_factor)
 		if absf(streak.position.x) > 6.5 or absf(streak.position.z) > 6.5:
-			streak.position = Vector3(rng.randf_range(-5.5, 5.5), rng.randf_range(0.7, 5.8), rng.randf_range(-5.5, -3.5))
+			streak.position = Vector3(visual_rng.randf_range(-5.5, 5.5), visual_rng.randf_range(0.7, 5.8), visual_rng.randf_range(-5.5, -3.5))
 
 func _break_turbine_blades() -> void:
 	if rotor_broken or main_blades.is_empty():
@@ -548,8 +568,8 @@ func _break_turbine_blades() -> void:
 		world.add_child(blade)
 		blade.global_transform = preserved_transform
 		var side := -1.0 if blade_index == 0 else (1.0 if blade_index == 1 else 0.35)
-		var target := blade.position + Vector3(side * rng.randf_range(3.6, 5.4), rng.randf_range(2.0, 4.2), rng.randf_range(1.2, 3.8))
-		var target_rotation := blade.rotation + Vector3(rng.randf_range(2.5, 5.0), rng.randf_range(2.0, 4.5), side * rng.randf_range(5.5, 9.0))
+		var target := blade.position + Vector3(side * visual_rng.randf_range(3.6, 5.4), visual_rng.randf_range(2.0, 4.2), visual_rng.randf_range(1.2, 3.8))
+		var target_rotation := blade.rotation + Vector3(visual_rng.randf_range(2.5, 5.0), visual_rng.randf_range(2.0, 4.5), side * visual_rng.randf_range(5.5, 9.0))
 		var tween := create_tween().set_parallel(true)
 		tween.tween_property(blade, "position", target, 1.05).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		tween.tween_property(blade, "rotation", target_rotation, 1.05).set_trans(Tween.TRANS_QUAD)
@@ -573,7 +593,7 @@ func _update_hud(alignment: float, power_percent: float) -> void:
 	elif wind_angle > 8.0:
 		direction_text = "오른쪽 →"
 	if is_instance_valid(wind_label):
-		wind_label.text = "%s  풍향 %s · %d m/s" % ["⚠ 위험" if storm_phase else "🌬", direction_text, wind_speed]
+		wind_label.text = "%s풍향 %s · %d m/s" % ["주의! " if storm_phase else "", direction_text, wind_speed]
 		wind_label.add_theme_color_override("font_color", Color("ff756d") if storm_phase else Color("9deeff"))
 	if is_instance_valid(alignment_label):
 		if storm_phase:
@@ -582,13 +602,13 @@ func _update_hud(alignment: float, power_percent: float) -> void:
 			alignment_label.text = "정렬도 %d%%  ·  발전 %d%%" % [roundi(alignment * 100.0), roundi(power_percent)]
 	if storm_phase and is_instance_valid(storm_warning_label):
 		if brake_active:
-			storm_warning_label.text = "✅ 브레이크 성공 · 터빈 안전 정지"
+			storm_warning_label.text = "안전! 브레이크 성공 · 터빈 정지"
 			storm_border.modulate.a = 1.0
 			storm_banner.modulate.a = 1.0
 			storm_tint.modulate.a = 0.45
 		else:
 			var remaining := maxf(0.0, WIND_PHASE_SECONDS - phase_elapsed)
-			storm_warning_label.text = "⚠ 위험 돌풍  %d m/s\nSPACE 브레이크!  %.1f초" % [wind_speed, remaining]
+			storm_warning_label.text = "주의! 위험 돌풍  %d m/s\nSPACE 브레이크!  %.1f초" % [wind_speed, remaining]
 			var pulse := 0.72 + sin(phase_elapsed * 12.0) * 0.28
 			storm_border.modulate.a = pulse
 			storm_banner.modulate.a = 0.86 + pulse * 0.14
@@ -624,21 +644,14 @@ func _show_score_popup(points: int, success: bool, message: String) -> void:
 	popup.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	popup.text = "%s%d점  %s" % ["+" if success else "−", points, message]
 	popup.add_theme_font_size_override("font_size", 25)
-	popup.add_theme_color_override("font_color", Color("70ffb5") if success else Color("ff766d"))
-	popup.add_theme_color_override("font_outline_color", Color("08202a"))
-	popup.add_theme_constant_override("outline_size", 7)
+	popup.add_theme_color_override("font_color", Color("c2ffdd") if success else Color("ffe0d7"))
+	popup.add_theme_color_override("font_outline_color", Color("041019"))
+	popup.add_theme_constant_override("outline_size", 9)
 	add_child(popup)
 	var tween := create_tween().set_parallel(true)
 	tween.tween_property(popup, "position:y", popup.position.y - 30.0, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(popup, "modulate:a", 0.0, 1.0).set_delay(0.35)
+	tween.tween_property(popup, "modulate:a", 0.0, 0.65).set_delay(0.7)
 	tween.chain().tween_callback(popup.queue_free)
 
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.75
-	if glowing:
-		material.emission_enabled = true
-		material.emission = color
-		material.emission_energy_multiplier = 0.72
-	return material
+	return VISUAL_STYLE.material(color, glowing)

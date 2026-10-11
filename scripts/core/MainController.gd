@@ -39,7 +39,10 @@ func request_game_exit() -> void:
 
 func _input(event: InputEvent) -> void:
 	if session_open and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		request_game_exit()
+		if is_instance_valid(game_board) and is_instance_valid(game_board.minigame_modal) and game_board.minigame_modal.practice_active:
+			game_board.minigame_modal._finish_hydro_practice()
+		else:
+			request_game_exit()
 		get_viewport().set_input_as_handled()
 
 func _ready() -> void:
@@ -72,7 +75,8 @@ func _open_standalone_minigames(requested_id: String) -> void:
 	if lobby_ui:
 		lobby_ui.visible = false
 	if game_board:
-		game_board.visible = false
+		# The inactive board must not build a second modal or consume arcade keys.
+		game_board.set_board_active(false)
 	standalone_minigames = preload("res://scripts/ui/StandaloneMiniGames.gd").new()
 	add_child(standalone_minigames)
 	standalone_minigames.call("open_request", requested_id)

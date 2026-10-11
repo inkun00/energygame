@@ -26,6 +26,10 @@ const requested = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const selectedGames = requested.length ? games.filter(id => requested.includes(id)) : games;
 const verifyFlow = process.argv.includes('--flow');
 const verifyFullResults = process.argv.includes('--full-results');
+const verifyPractice = process.argv.includes('--practice');
+const remoteArgument = process.argv.slice(2).find(arg => arg.startsWith('--url='));
+const remoteUrl = remoteArgument ? new URL(remoteArgument.slice(6)) : null;
+if (remoteUrl && !['http:', 'https:'].includes(remoteUrl.protocol)) throw new Error('Use an HTTP(S) deployment URL');
 const sizeArgument = process.argv.slice(2).find(arg => arg.startsWith('--size='));
 const sizeMatch = sizeArgument ? /^--size=(\d+)x(\d+)$/.exec(sizeArgument) : null;
 if (sizeArgument && !sizeMatch) throw new Error('Use --size=WIDTHxHEIGHT');
@@ -57,10 +61,10 @@ async function differentPixels(firstPng, secondPng) {
 
 async function main() {
   if (selectedGames.length !== (requested.length || games.length)) throw new Error('Unknown or duplicate minigame ID');
-  if (verifyFlow && (selectedGames.length !== 1 || selectedGames[0] !== 'solar_align')) {
-    throw new Error('--flow requires solar_align as the only game');
+  if (verifyFlow && !selectedGames.includes('solar_align')) {
+    throw new Error('--flow requires solar_align among the selected games');
   }
-  if (!fs.existsSync(path.join(webRoot, 'index.html'))) throw new Error('Export Web to .godot/qa-web first');
+  if (!remoteUrl && !fs.existsSync(path.join(webRoot, 'index.html'))) throw new Error('Export Web to .godot/qa-web first');
   fs.mkdirSync(screenshotRoot, {recursive: true});
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
@@ -74,7 +78,7 @@ async function main() {
       'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp'});
     fs.createReadStream(file).pipe(res);
   });
-  await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
+  if (!remoteUrl) await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
   let browser;
   try {
     browser = await chromium.launch({headless: true, executablePath: chromiumExecutable(),
@@ -85,11 +89,36 @@ async function main() {
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-      await page.goto(`http://127.0.0.1:${port}/?minigame=${id}`, {waitUntil: 'domcontentloaded'});
+      const gameUrl = new URL(remoteUrl ? remoteUrl.href : `http://127.0.0.1:${port}/`);
+      gameUrl.searchParams.set('minigame', id);
+      await page.goto(gameUrl.href, {waitUntil: 'domcontentloaded'});
       await page.waitForFunction(() => !document.getElementById('loading'), null, {timeout: 90000});
       await page.waitForTimeout(350);
       const guide = await page.screenshot({path: path.join(screenshotRoot, `${id}-guide.png`)});
       await page.locator('#canvas').click({position: {x: Math.floor(viewportSize.width / 2), y: Math.floor(viewportSize.height / 2)}});
+      if (verifyPractice && id === 'hydro_gate') {
+        await page.keyboard.press('KeyP');
+        await page.waitForTimeout(700);
+        const practice = await page.screenshot({path: path.join(screenshotRoot, `${id}-practice.png`)});
+        if (await differentPixels(guide, practice) < 0.08) throw new Error('Hydro practice did not open');
+        await page.keyboard.down('KeyA');
+        await page.waitForTimeout(750);
+        await page.keyboard.up('KeyA');
+        for (let tap = 0; tap < 3; tap++) {
+          await page.keyboard.down('Space');
+          await page.waitForTimeout(100);
+          await page.keyboard.up('Space');
+          await page.waitForTimeout(100);
+        }
+        await page.waitForTimeout(750);
+        await page.keyboard.press('KeyE');
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(350);
+        const afterPractice = await page.screenshot({path: path.join(screenshotRoot, `${id}-after-practice.png`)});
+        if (await differentPixels(practice, afterPractice) < 0.08) throw new Error('Hydro practice did not return to its guide');
+        if (await differentPixels(guide, afterPractice) > 0.08) throw new Error('Hydro guide did not reset after practice');
+        console.log('[BrowserSmoke] Hydro practice, real keyboard actions, and guide return passed');
+      }
       await page.keyboard.press('Enter');
       await page.waitForTimeout(4800);
       const playing = await page.screenshot({path: path.join(screenshotRoot, `${id}-playing.png`)});
@@ -98,13 +127,13 @@ async function main() {
       await page.keyboard.down('KeyD');
       await page.waitForTimeout(450);
       await page.keyboard.up('KeyD');
-      if (id === 'solar_align' || verifyFullResults) {
+      if (id === 'solar_align' || verifyFullResults || (verifyPractice && id === 'hydro_gate')) {
         await page.waitForTimeout(id === 'eco_commute' ? 65000 : 32000);
         const result = await page.screenshot({path: path.join(screenshotRoot, `${id}-result.png`)});
         const resultChanged = await differentPixels(playing, result);
         if (resultChanged < 0.15) throw new Error(`${id}: result screen did not appear (${(resultChanged * 100).toFixed(1)}% pixels changed)`);
-        if (verifyFlow) {
-          const bottomButtonY = viewportSize.height - 78;
+        if (verifyFlow && id === 'solar_align') {
+          const bottomButtonY = Math.floor(viewportSize.height * 0.935);
           await page.locator('#canvas').click({position: {x: Math.floor(viewportSize.width / 2) - 120, y: bottomButtonY}});
           await page.waitForTimeout(650);
           const replayGuide = await page.screenshot({path: path.join(screenshotRoot, `${id}-replay-guide.png`)});
@@ -131,7 +160,7 @@ async function main() {
     console.log(`[BrowserSmoke] PASS · ${selectedGames.length} direct links at ${viewportSize.width}×${viewportSize.height}`);
   } finally {
     if (browser) await browser.close();
-    await new Promise(resolve => server.close(resolve));
+    if (server.listening) await new Promise(resolve => server.close(resolve));
   }
 }
 

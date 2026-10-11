@@ -24,13 +24,15 @@ func _initialize() -> void:
 func _run() -> void:
 	network_manager = root.get_node("NetworkManager")
 	game_manager = root.get_node("GameManager")
+	ProjectSettings.set_setting("network/room_directory_url", "")
+	OS.set_environment("ENERGYGAME_ROOM_DIRECTORY_URL", "")
 	network_manager.game_started_signal.connect(_on_game_started)
 	game_manager.minigame_started.connect(_on_minigame_started)
 	game_manager.minigame_submission_changed.connect(_on_minigame_state)
 	game_manager.minigame_finished.connect(_on_minigame_finished)
 	modal = load("res://scenes/MiniGameModal.tscn").instantiate()
 	root.add_child(modal)
-	create_timer(22.0).timeout.connect(_fail.bind("온라인 미니게임 동기화 제한시간 초과"))
+	create_timer(45.0).timeout.connect(_fail.bind("온라인 미니게임 동기화 제한시간 초과"))
 	var info := {
 		"name": "동기화 호스트" if role == "host" else "동기화 참가자",
 		"char_icon": "res://assets/characters/eco_roster/captain_eco.webp",
@@ -98,8 +100,13 @@ func _on_minigame_state(state: Dictionary) -> void:
 		var local_idx: int = network_manager.get_local_player_index()
 		if role == "client":
 			network_manager.request_minigame_score(local_idx, 999, {}, round_id - 1)
+			network_manager.request_minigame_score(local_idx, 5000, {"correct":0,"attempts":0,"best_streak":0}, round_id)
+		# Preserve the real duration and submit only when the shared round ends.
+		modal._set_arcades_running(false)
+		modal.set_process(false)
+		await create_timer(game_manager.MINIGAME_DURATION_SECONDS).timeout
 		var player_score := 500 if role == "host" else 700
-		if not game_manager.submit_minigame_score(local_idx, player_score, {}, round_id):
+		if not game_manager.submit_minigame_score(local_idx, player_score, {"correct":7,"attempts":10,"concept_attempts":7,"best_streak":7}, round_id):
 			_fail("플레이 시작 후 점수 제출 실패")
 
 func _on_minigame_finished(results: Array) -> void:
@@ -110,6 +117,10 @@ func _on_minigame_finished(results: Array) -> void:
 	for result_variant in results:
 		var result: Dictionary = result_variant
 		scores[int(result.get("player_idx", -1))] = int(result.get("score", -1))
+		if int(result.get("player_idx", -1)) in [0,1]:
+			if not bool(result.get("goal_checked", false)) or int(result.get("stats", {}).get("concept_attempts", -1)) != 7:
+				_fail("호스트와 참가자의 목표 행동 기록이 일치하지 않음")
+				return
 	if not saw_countdown or not saw_playing or int(scores.get(0, -1)) != 500 or int(scores.get(1, -1)) != 700:
 		_fail("공통 시작 또는 호스트/참가자 점수 불일치: %s" % str(scores))
 		return

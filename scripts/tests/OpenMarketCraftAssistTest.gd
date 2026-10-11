@@ -64,6 +64,7 @@ func _run() -> void:
 	# 3. 출품(OFFERING) 단계 분석 브리핑 테스트
 	print("  3. Testing offering phase craft analysis...")
 	gm.players[0]["inventory"] = { "wind_blade": 2, "smart_grid": 1, "battery": 1 }
+	gm.players[1]["inventory"] = {"wind_blade": 1, "smart_grid": 1}
 	var state_offering := {
 		"active": true,
 		"phase": gm.OpenMarketPhase.OFFERING,
@@ -86,14 +87,14 @@ func _run() -> void:
 			"Highlighted yellow material button should use dark readable text")
 		check(highlighted_button.get_theme_color("icon_normal_color").get_luminance() > 0.8,
 			"Highlighted material icon should keep its source colors")
-	check(hud.open_market_guide_label.text.contains("풍력") or hud.open_market_guide_label.text.contains("즉시"),
-		"Guide banner should announce wind farm immediate buildability")
+	check(hud.open_market_guide_label.text.contains("풍력") and hud.open_market_guide_label.text.contains("내 부품") and hud.open_market_guide_label.text.contains("친구 재료"),
+		"Guide banner should distinguish my complete wind recipe from pooled team construction")
 
-	# 풍력 블레이드 판매 예정으로 지정 시 완공 불능 경고 인스펙션 확인
+	# 내 부품 제공량의 감소와 팀 공동 건설을 구분합니다.
 	hud.open_market_offer_selection["wind_blade"] = 1
 	hud._inspect_open_market_item("wind_blade", gm.OpenMarketPhase.OFFERING, true)
-	check(hud.open_market_inspect_label.text.contains("주의") or hud.open_market_inspect_label.text.contains("완공이 불가능"),
-		"Inspector should warn that selling crucial component prevents wind farm construction")
+	check(hud.open_market_inspect_label.text.contains("내가 제공할 부품이 줄") and hud.open_market_inspect_label.text.contains("팀 재료") and not hud.open_market_inspect_label.text.contains("불가능"),
+		"Inspector should explain personal contribution, not falsely forbid pooled team construction")
 
 	# 4. 획득(TAKING) 단계 완공 기회 분석 브리핑 테스트
 	print("  4. Testing taking phase completion opportunity highlights...")
@@ -110,10 +111,10 @@ func _run() -> void:
 	check(hud.open_market_guide_label.text.contains("완성") or hud.open_market_guide_label.text.contains("기회"),
 		"Taking guide banner should highlight completion opportunity")
 
-	# 인스펙터 호버 테스트: smart_grid 호버 시 즉시 완공 브리핑
+	# 획득은 내 레시피를 채우는 행위이며 시설 배치 전에는 자동 완공이 아닙니다.
 	hud._inspect_open_market_item("smart_grid", gm.OpenMarketPhase.TAKING, true)
-	check(hud.open_market_inspect_label.text.contains("즉시 완공") or hud.open_market_inspect_label.text.contains("완성"),
-		"Inspector should highlight immediate completion when inspecting smart_grid")
+	check(hud.open_market_inspect_label.text.contains("내가 모두 제공") and hud.open_market_inspect_label.text.contains("시설을 놓아야") and not hud.open_market_inspect_label.text.contains("즉시 완공"),
+		"Inspector should explain a complete personal recipe and the required later placement action")
 
 	# 5. 10종 레시피 팝오버 토글 테스트
 	print("  5. Testing 10-project recipe popover...")
@@ -124,6 +125,11 @@ func _run() -> void:
 		"Popover must contain all 10 construction projects")
 	hud._toggle_open_market_recipe_popover()
 	check(not hud.open_market_recipe_popover.visible, "Popover should hide on toggle again")
+	gm._start_village_construction_phase()
+	check(gm.can_build_village_project(4, 0), "Friends' grid and my hydro turbines should enable actual pooled construction")
+	gm.stop_game()
+	main.queue_free()
+	await process_frame
 
 	if failures.is_empty():
 		print("[PASS] OpenMarketCraftAssistTest: All craft analysis and recipe checks passed!")

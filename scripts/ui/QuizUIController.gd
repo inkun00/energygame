@@ -72,7 +72,8 @@ func _process(delta: float) -> void:
 		spectator_elapsed += delta
 		_update_spectator_progress()
 		var expected_duration := _get_ai_think_seconds()
-		if not spectator_failsafe_requested and spectator_elapsed >= expected_duration + SPECTATOR_FAILSAFE_GRACE_SECONDS:
+		var observing_ai := target_player_idx >= 0 and target_player_idx < GameManager.players.size() and bool(GameManager.players[target_player_idx].get("is_ai", false))
+		if observing_ai and not spectator_failsafe_requested and spectator_elapsed >= expected_duration + SPECTATOR_FAILSAFE_GRACE_SECONDS:
 			spectator_failsafe_requested = true
 			if GameManager and GameManager.has_method("resolve_ai_quiz_if_pending"):
 				GameManager.resolve_ai_quiz_if_pending(target_player_idx)
@@ -107,7 +108,9 @@ func display_quiz(player_idx: int, quiz_data: Dictionary) -> void:
 	if current_quiz.is_empty():
 		current_quiz = QuizDatabase.get_random_quiz().duplicate(true)
 	target_player_idx = player_idx
-	timer_seconds = PLAYER_QUIZ_SECONDS
+	timer_seconds = float(current_quiz.get("time_limit", PLAYER_QUIZ_SECONDS))
+	if NetworkManager.is_online and GameManager.active_quiz_time_remaining > 0.0:
+		timer_seconds = minf(timer_seconds, maxf(0.0, GameManager.active_quiz_time_remaining - PLAYER_RESULT_SECONDS - 1.0))
 	spectator_elapsed = 0.0
 	spectator_stage = -1
 	spectator_failsafe_requested = false
@@ -128,13 +131,13 @@ func display_quiz(player_idx: int, quiz_data: Dictionary) -> void:
 	question_label.text = str(current_quiz.get("question", "문제를 불러오지 못했습니다. 다시 시도해 주세요."))
 	if question_label.text.strip_edges().is_empty():
 		question_label.text = "문제를 불러오지 못했습니다. 다시 시도해 주세요."
-	hint_label.text = ("먼저 정답을 맞히면 내 턴 점수의 절반인 %d점을 얻습니다. 한 번만 선택할 수 있어요!" % GameManager.SPECTATOR_QUIZ_BONUS_SCORE) if _can_submit_spectator_guess() else "정답이라고 생각하는 보기를 하나 선택하세요."
+	hint_label.text = ("선행 정답 +%d점은 에너지가 같을 때 순위를 결정해요. 한 번만 선택하세요!" % GameManager.SPECTATOR_QUIZ_BONUS_SCORE) if _can_submit_spectator_guess() else "정답이라고 생각하는 보기를 하나 선택하세요."
 	explanation_label.text = ("👀 %s님이 문제를 읽고 있습니다..." % player_name) if spectator_mode else ""
 	explanation_label.remove_theme_color_override("font_color")
-	timer_label.text = "AI 답변까지 약 %d초" % ceili(_get_ai_think_seconds()) if spectator_mode else "남은 시간  %d초" % int(PLAYER_QUIZ_SECONDS)
+	timer_label.text = "AI 답변까지 약 %d초" % ceili(_get_ai_think_seconds()) if player_is_ai else "답변 남은 시간  %d초" % ceili(timer_seconds)
 	timer_label.visible = true
 	if timer_bar:
-		timer_bar.max_value = _get_ai_think_seconds() if spectator_mode else PLAYER_QUIZ_SECONDS
+		timer_bar.max_value = _get_ai_think_seconds() if player_is_ai else float(current_quiz.get("time_limit", PLAYER_QUIZ_SECONDS))
 		timer_bar.value = timer_bar.max_value
 		timer_bar.visible = true
 
@@ -226,16 +229,22 @@ func cancel_quiz() -> void:
 
 
 func _update_spectator_progress() -> void:
-	if not spectator_mode:
+	if not spectator_mode or target_player_idx < 0 or target_player_idx >= GameManager.players.size():
 		return
-	var expected_duration := _get_ai_think_seconds()
+	var observing_ai := bool(GameManager.players[target_player_idx].get("is_ai", false))
+	var expected_duration := _get_ai_think_seconds() if observing_ai else float(current_quiz.get("time_limit", PLAYER_QUIZ_SECONDS))
 	var remaining := maxf(0.0, expected_duration - spectator_elapsed)
+	if not observing_ai and GameManager.active_quiz_time_remaining > 0.0:
+		remaining = maxf(0.0, GameManager.active_quiz_time_remaining - PLAYER_RESULT_SECONDS - 1.0)
 	if timer_label:
-		timer_label.text = "AI 답변까지 약 %d초" % ceili(remaining)
+		timer_label.text = ("AI 답변까지 약 %d초" if observing_ai else "답변 남은 시간  %d초") % ceili(remaining)
 	if timer_bar:
 		timer_bar.max_value = expected_duration
 		timer_bar.value = remaining
 	if spectator_guess_submitted:
+		return
+	if not observing_ai:
+		explanation_label.text = "👀 %s님이 답을 고르는 동안, 나도 보기에서 답을 찾아보세요.\n선행 정답 +5점은 최종 에너지가 같을 때 사용해요." % str(GameManager.players[target_player_idx].get("name", "친구"))
 		return
 	var next_stage := 0
 	if spectator_elapsed >= SPECTATOR_CHOOSE_SECONDS:
@@ -261,6 +270,8 @@ func _update_spectator_progress() -> void:
 			explanation_label.text = "✅ 가장 가능성 높은 답을 검토하는 중...  (%d초 남음)" % ceili(remaining)
 
 func _get_ai_think_seconds() -> float:
+	if current_quiz.has("ai_think_seconds"):
+		return float(current_quiz["ai_think_seconds"])
 	if GameManager:
 		return float(GameManager.AI_QUIZ_THINK_SECONDS)
 	return 8.9
@@ -280,13 +291,12 @@ func _on_game_quiz_resolved(player_idx: int, is_correct: bool) -> void:
 
 
 func _get_observed_answer(is_correct: bool) -> String:
+	if not GameManager.last_quiz_choice.is_empty():
+		return GameManager.last_quiz_choice
 	var correct_answer := str(current_quiz.get("answer", ""))
 	if is_correct:
 		return correct_answer
-	for option in current_quiz.get("options", []):
-		if str(option) != correct_answer:
-			return str(option)
-	return "선택한 보기"
+	return "답변 없음 (시간 초과)"
 
 
 func _reveal_selected_answer(selected_answer: String) -> void:
@@ -407,7 +417,7 @@ func _show_result(is_correct: bool, prefix: String = "", should_submit_result: b
 			if NetworkManager.is_online:
 				NetworkManager.request_quiz_answer(target_player_idx, submitted_choice)
 			elif GameManager:
-				GameManager.on_network_quiz_resolved(target_player_idx, is_correct)
+				GameManager.on_network_quiz_resolved(target_player_idx, is_correct, submitted_choice)
 	)
 
 func _apply_commercial_ui() -> void:

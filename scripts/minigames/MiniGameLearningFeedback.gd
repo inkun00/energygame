@@ -3,6 +3,19 @@ class_name MiniGameLearningFeedback
 
 ## 플레이어가 실제로 한 행동과 게임에서 측정한 값만 교육 피드백으로 보여 줍니다.
 
+static func goal_requirement(game_id: String) -> String:
+	match game_id:
+		"solar_align": return "패널을 3번 이상 맞게 골라요. 패널 선택의 60% 이상을 맞혀요."
+		"wind_rhythm": return "풍향 맞추기와 돌풍을 보고 멈추기를 각각 1번 해요."
+		"grid_balance": return "수요에 맞춰 조절하고 작은 차이를 1초씩, 2번 지켜요."
+		"standby_hunt": return "대기 기기만 2번 이상 골라요. 선택의 60% 이상을 맞혀요."
+		"hydro_gate": return "수위 70% 이상에서 열어 발전하고, 다시 닫아 물을 모아요."
+		"energy_sort": return "처음 선택을 2번 이상 맞혀요. 선택의 60% 이상을 맞혀요."
+		"battery_relay": return "먼저 저장한 전기를 흐릴 때 도시로 1번 보내요."
+		"eco_commute": return "2명 이상 함께 태워 학교에 1번 내려줘요."
+		"heat_leak": return "열린 창문을 2번 이상 골라요. 선택의 60% 이상을 맞혀요."
+	return "조건을 보고 알맞은 행동을 해요."
+
 static func live_line(game_id: String, success: bool, points: int, count_correct: bool, metrics: Dictionary = {}) -> String:
 	match game_id:
 		"solar_align":
@@ -61,30 +74,36 @@ static func result_lines(game_id: String, metrics: Dictionary) -> Dictionary:
 			next_action = "태양이 이동하면 빛을 받는 패널을 다시 찾으세요."
 		"wind_rhythm":
 			evidence = "풍향 정렬 %d회 · 돌풍 안전 정지 %d회 · 파손 %d회" % [int(metrics.get("wind_aligned", 0)), int(metrics.get("storm_braked", 0)), int(metrics.get("storm_broken", 0))]
-			next_action = "보통 바람엔 풍향을 맞추고 위험 돌풍엔 멈추세요."
+			next_action = "보통 바람엔 브레이크를 놓고, 돌풍을 본 뒤 눌러요."
 		"grid_balance":
 			if float(metrics.get("measurement_time", 0.0)) > 0.0:
 				evidence = "평균 수요·공급 차이 %.1f MW" % float(metrics.get("average_gap", 0.0))
 			else:
 				evidence = "전력망 조절 기록 없음"
-			next_action = "수요 막대를 따라 공급을 움직여 차이를 줄이세요."
+			next_action = "공급이 적으면 올리고 많으면 내려요. 작은 차이를 1초 지켜요."
 		"standby_hunt":
 			evidence = "대기전력 %d W 차단 · 사용 중 기기 차단 %d회" % [int(metrics.get("saved_watts", 0)), int(metrics.get("active_unplugged", 0))]
 			next_action = "사용 중인 기기는 두고 대기 중인 플러그를 찾으세요."
 		"hydro_gate":
 			evidence = "터빈 전기 %.1f kWh · %s" % [float(metrics.get("generated_kwh", 0.0)), "댐 범람" if bool(metrics.get("overflowed", false)) else "범람 없음"]
-			next_action = "물 높이가 커질 때 열되 넘치기 전엔 수문을 여세요."
+			next_action = "수위와 비 예보를 봐요. 물이 높을 때 열고, 줄면 닫아 모아요."
 		"energy_sort":
-			evidence = "에너지원 %d/%d개 올바르게 분류" % [int(metrics.get("correct", 0)), int(metrics.get("attempts", 0))]
-			next_action = "발전에 쓰는 원료가 다시 생기는지 살펴보세요."
+			evidence = "처음 선택 정답 %d회 · 첫 선택 %d회" % [int(metrics.get("correct", 0)), int(metrics.get("first_sort_attempts", metrics.get("attempts", 0)))]
+			next_action = "틀린 물건은 이유를 읽고 다시 골라요. 다시 고친 답은 연습이에요."
 		"battery_relay":
 			evidence = "남는 전기 %d칸 저장 · 도시 공급 %d회" % [int(metrics.get("battery_stored", 0)), int(metrics.get("battery_supplied", 0))]
+			if metrics.has("battery_units"):
+				evidence += " · 배터리에 %d칸 남음" % int(metrics["battery_units"])
 			next_action = "남는 전기를 먼저 저장하고 필요할 때 보내세요."
 		"eco_commute":
 			evidence = "학교 도착 %d명 · 버스에 남은 학생 %d명" % [int(metrics.get("delivered_total", 0)), int(metrics.get("passengers", 0))]
+			if float(metrics.get("trip_solo_energy", 0.0)) > 0.0:
+				evidence += " · 같은 길: 혼자 %.1f / 함께 1인당 %.1f" % [float(metrics["trip_solo_energy"]), float(metrics["trip_per_person"])]
 			next_action = "정류장에서 태운 뒤 학교 앞에 정확히 멈추세요."
 		"heat_leak":
 			evidence = "열린 창문 %d개 닫음 · 닫힌 창문 선택 %d회" % [int(metrics.get("correct", 0)), int(metrics.get("closed_window_misses", 0))]
+			if metrics.has("cooling_used"):
+				evidence += " · 냉방 사용량 %.1f (게임 속 비교 값)" % float(metrics["cooling_used"])
 			next_action = "에어컨이 켜진 공간에서는 열린 창문을 찾아 닫으세요."
 		_:
 			evidence = "도전 기록을 확인했어요."

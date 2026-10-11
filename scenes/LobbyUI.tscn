@@ -302,9 +302,9 @@ mouse_filter = 2
 [node name="HeroBadge" type="PanelContainer" parent="."]
 layout_mode = 0
 offset_left = 80.0
-offset_top = 520.0
+offset_top = 496.0
 offset_right = 650.0
-offset_bottom = 700.0
+offset_bottom = 708.0
 theme_override_styles/panel = SubResource("StyleHeroTag")
 mouse_filter = 2
 
@@ -324,7 +324,7 @@ mouse_filter = 2
 [node name="CharacterName" type="Label" parent="HeroBadge/Margin/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.88, 0.32, 1)
-theme_override_font_sizes/font_size = 31
+theme_override_font_sizes/font_size = 27
 text = "캡틴 에코"
 
 [node name="CharacterRole" type="Label" parent="HeroBadge/Margin/VBox"]
@@ -342,12 +342,13 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.33, 0.95, 0.82, 1)
 theme_override_font_sizes/font_size = 16
 text = "특수기술 · 자연의 돌진  |  필요 SP 3  |  타일 지정"
+autowrap_mode = 2
 
 [node name="SkillDescription" type="Label" parent="HeroBadge/Margin/VBox"]
 custom_minimum_size = Vector2(0, 38)
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.88, 0.88, 1)
-theme_override_font_sizes/font_size = 13
+theme_override_font_sizes/font_size = 15
 text = "자연의 길을 열어 앞쪽 1~5칸 타일로 즉시 이동합니다. 사용 후에도 주사위를 굴릴 수 있습니다."
 vertical_alignment = 1
 autowrap_mode = 2

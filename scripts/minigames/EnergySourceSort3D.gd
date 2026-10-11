@@ -6,14 +6,16 @@ class_name EnergySourceSort3D
 
 signal arcade_event(points: int, success: bool, message: String, count_correct: bool)
 
+const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
+const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 const SOURCES := [
 	{"name": "햇빛", "kind": 0, "shape": "sun", "reason": "햇빛은 다음 날에도 다시 비춰요."},
 	{"name": "바람", "kind": 0, "shape": "wind", "reason": "바람은 자연에서 다시 불어요."},
 	{"name": "흐르는 물", "kind": 0, "shape": "water", "reason": "물은 자연에서 순환하며 다시 흘러요."},
-	{"name": "석탄", "kind": 1, "shape": "coal", "reason": "석탄은 땅에서 캐서 쓰는 연료예요."},
-	{"name": "석유", "kind": 1, "shape": "oil", "reason": "석유는 땅에서 꺼내 쓰는 연료예요."},
-	{"name": "천연가스", "kind": 1, "shape": "gas", "reason": "천연가스도 땅에서 꺼내 쓰는 연료예요."},
+	{"name": "석탄", "kind": 1, "shape": "coal", "reason": "석탄은 생기는 데 아주 오래 걸려요. 쓰는 만큼 곧 다시 생기지 않아요."},
+	{"name": "석유", "kind": 1, "shape": "oil", "reason": "석유는 생기는 데 아주 오래 걸려요. 쓰는 만큼 곧 다시 생기지 않아요."},
+	{"name": "천연가스", "kind": 1, "shape": "gas", "reason": "천연가스는 생기는 데 아주 오래 걸려요. 쓰는 만큼 곧 다시 생기지 않아요."},
 ]
 const RUN_SPEED := 7.0
 const DELIVERY_X := 4.25
@@ -37,6 +39,9 @@ var hero_x := 0.0
 var visual_time := 0.0
 var cooldown := 0.0
 var waiting_for_release := false
+var returning_to_center := false
+var answer_labels: Array[Label] = []
+var retrying_item := false
 var running := false
 var flash_remaining := 0.0
 var left_material: StandardMaterial3D
@@ -60,7 +65,10 @@ func setup(player_data: Dictionary, game_seed: int) -> void:
 	visual_time = 0.0
 	cooldown = 0.0
 	waiting_for_release = false
+	returning_to_center = false
+	retrying_item = false
 	flash_remaining = 0.0
+	icon_anchor.visible = true
 	_spawn_hero(player_data)
 	_next_item()
 	running = true
@@ -94,20 +102,8 @@ func _build_world() -> void:
 	add_child(viewport)
 	world = Node3D.new()
 	viewport.add_child(world)
-	var sky := WorldEnvironment.new()
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color("a5d7e3")
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("e9f8ee")
-	environment.ambient_light_energy = 0.85
-	sky.environment = environment
-	world.add_child(sky)
-	var light := DirectionalLight3D.new()
-	light.rotation_degrees = Vector3(-48, -24, 0)
-	light.light_energy = 1.2
-	light.shadow_enabled = false
-	world.add_child(light)
+	VISUAL_STYLE.add_environment(world)
+	VISUAL_STYLE.add_key_light(world, Vector3(-48, -24, 0))
 	var camera := Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = 6.3
@@ -118,8 +114,8 @@ func _build_world() -> void:
 	left_material = _material(Color("70e8ac"), true)
 	right_material = _material(Color("e8b779"), true)
 	idle_light_material = _material(Color("718590"), false)
-	_box("SortingFloor", world, Vector3(0, -0.17, 0), Vector3(12.0, 0.35, 6.0), Color("658e83"))
-	_box("Runway", world, Vector3(0, 0.02, 1.2), Vector3(9.0, 0.07, 2.0), Color("c6d9c2"))
+	_box("SortingFloor", world, Vector3(0, -0.17, 0), Vector3(12.0, 0.35, 6.0), VISUAL_STYLE.FIELD)
+	_box("Runway", world, Vector3(0, 0.02, 1.2), Vector3(9.0, 0.07, 2.0), VISUAL_STYLE.CREAM)
 	for mark in range(-3, 4):
 		_box("RunwayDash%d" % mark, world, Vector3(float(mark) * 1.1, 0.065, 1.2), Vector3(0.4, 0.03, 0.08), Color("f8f6d9"), true)
 	_make_bin(-4.65, Color("33aa76"), 0)
@@ -139,7 +135,7 @@ func _make_bin(x: float, color: Color, index: int) -> void:
 		right_light = lamp
 	var label := Label3D.new()
 	label.position = Vector3(x, 1.18, 0.17)
-	label.text = "다시 얻음" if index == 0 else "땅속 연료"
+	label.text = "다시 얻어요" if index == 0 else "곧 다시 없어요"
 	label.font_size = 44
 	label.pixel_size = 0.009
 	label.outline_size = 9
@@ -160,14 +156,15 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	if hero.shadow_mesh:
 		hero.shadow_mesh.visible = false
 	hero.call("_set_avatar_animation_state", false)
+	VISUAL_STYLE.style_hero(hero)
 
 func _build_overlay() -> void:
 	item_label = _overlay_label(Vector2(330, 7), Vector2(630, 48), "이번 에너지는?", Color("fff1a5"), 28)
 	round_label = _overlay_label(Vector2(340, 45), Vector2(620, 72), "배송 1번째", Color("e7f8ff"), 17)
 	_overlay_label(Vector2(10, 96), Vector2(345, 127), "← 자연에서 다시 얻어요", Color("b6ffcb"), 20)
-	_overlay_label(Vector2(18, 124), Vector2(338, 148), "햇빛 · 바람 · 흐르는 물", Color("e7fff1"), 16)
-	_overlay_label(Vector2(615, 96), Vector2(950, 127), "땅에서 꺼내 써요 →", Color("ffe0b2"), 20)
-	_overlay_label(Vector2(622, 124), Vector2(942, 148), "석탄 · 석유 · 천연가스", Color("fff1dc"), 16)
+	answer_labels.append(_overlay_label(Vector2(18, 124), Vector2(338, 148), "햇빛 · 바람 · 흐르는 물", Color("e7fff1"), 16))
+	_overlay_label(Vector2(615, 96), Vector2(950, 127), "곧 다시 생기지 않아요 →", Color("ffe0b2"), 20)
+	answer_labels.append(_overlay_label(Vector2(622, 124), Vector2(942, 148), "석탄 · 석유 · 천연가스", Color("fff1dc"), 16))
 	hint_label = _overlay_label(Vector2(145, 259), Vector2(815, 285), "A/← 왼쪽  ·  D/→ 오른쪽  ·  중앙에서 다음 물건 받기", Color("fff1a5"), 16)
 	flash = ColorRect.new()
 	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -179,6 +176,9 @@ func _next_item() -> void:
 	current_source = source_for_step(rng_seed, item_step).duplicate(true)
 	item_label.text = "운반: %s" % current_source["name"]
 	round_label.text = "%d번째 물건" % (item_step + 1)
+	for label in answer_labels:
+		label.visible = item_step < 2
+	hint_label.text = "처음 두 물건은 목록을 참고해요 · A/← 왼쪽  D/→ 오른쪽" if item_step < 2 else "금방 다시 얻을 수 있나요? · A/← 왼쪽  D/→ 오른쪽"
 	for child in icon_anchor.get_children():
 		icon_anchor.remove_child(child)
 		child.queue_free()
@@ -224,11 +224,24 @@ func _process(delta: float) -> void:
 	icon_anchor.rotation.y += delta * 0.7
 	if not running:
 		return
+	if returning_to_center:
+		var return_axis := -signf(hero_x)
+		hero_x = move_toward(hero_x, 0.0, RUN_SPEED * delta)
+		if is_instance_valid(hero):
+			hero.position.x = hero_x
+			hero.call("_set_avatar_animation_state", not is_zero_approx(hero_x))
+			if hero.avatar_sprite:
+				hero.avatar_sprite.flip_h = return_axis < 0.0
+		if is_zero_approx(hero_x):
+			returning_to_center = false
+			icon_anchor.visible = true
+			item_label.text = "운반: %s" % current_source["name"]
+		return
 	if cooldown > 0.0:
 		cooldown -= delta
 		return
-	var left_down := Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)
-	var right_down := Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)
+	var left_down := MINIGAME_INPUT.is_pressed(KEY_A) or MINIGAME_INPUT.is_pressed(KEY_LEFT)
+	var right_down := MINIGAME_INPUT.is_pressed(KEY_D) or MINIGAME_INPUT.is_pressed(KEY_RIGHT)
 	if waiting_for_release:
 		if not left_down and not right_down:
 			waiting_for_release = false
@@ -247,17 +260,22 @@ func _process(delta: float) -> void:
 func _deliver(bin_kind: int) -> void:
 	var correct := bin_kind == int(current_source["kind"])
 	var message := "%s → %s · %s" % [current_source["name"], "다시 얻는 곳" if bin_kind == 0 else "꺼내 쓰는 곳", current_source["reason"]]
-	arcade_event.emit(CORRECT_POINTS if correct else WRONG_PENALTY, correct, message, correct)
+	# Keep a wrong item for another try; copying its answer earns no new prize.
+	var earned := CORRECT_POINTS if correct and not retrying_item else 0
+	arcade_event.emit(earned if correct else WRONG_PENALTY, correct, message + (" 다시 골라 보세요." if not correct else ""), correct and not retrying_item)
 	left_light.material_override = left_material if bin_kind == 0 and correct else idle_light_material
 	right_light.material_override = right_material if bin_kind == 1 and correct else idle_light_material
 	flash.color = Color("62ed9b32") if correct else Color("f071633f")
 	flash_remaining = 0.22
-	hero_x = 0.0
-	if is_instance_valid(hero):
-		hero.position.x = 0.0
-		hero.call("_set_avatar_animation_state", false)
-	item_step += 1
-	_next_item()
+	returning_to_center = true
+	icon_anchor.visible = false
+	if correct:
+		item_step += 1
+		retrying_item = false
+		_next_item()
+	else:
+		retrying_item = true
+	item_label.text = "배송 완료 · 중앙으로 돌아가요" if correct else "다시 생각하며 중앙으로 돌아가요"
 	cooldown = 0.20
 	waiting_for_release = true
 
@@ -300,14 +318,7 @@ func _cylinder(node_name: String, parent: Node3D, where: Vector3, radius: float,
 	return instance
 
 func _material(color: Color, glowing: bool = false) -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.75
-	if glowing:
-		material.emission_enabled = true
-		material.emission = color
-		material.emission_energy_multiplier = 0.7
-	return material
+	return VISUAL_STYLE.material(color, glowing)
 
 func _overlay_label(from: Vector2, to: Vector2, content: String, color: Color, font_size: int) -> Label:
 	var label := Label.new()

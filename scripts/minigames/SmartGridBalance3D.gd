@@ -5,11 +5,15 @@ class_name SmartGridBalance3D
 
 signal arcade_event(points: int, success: bool, message: String, count_correct: bool)
 
+const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
+const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 const DEMAND_PHASE_SECONDS := 4.2
 const SUPPLY_CHANGE_SPEED := 42.0
 const BALANCE_TOLERANCE := 6.0
 const DANGER_DIFFERENCE := 24.0
+const BALANCE_SCORE_MAX := 3000
+const BALANCE_SCORE_ZERO_GAP := 60.0
 const DEMAND_EVENTS: Array[Dictionary] = [
 	{"label": "학교 수업 시작", "delta": 18},
 	{"label": "전기 버스 충전", "delta": 24},
@@ -18,7 +22,7 @@ const DEMAND_EVENTS: Array[Dictionary] = [
 	{"label": "공장 교대 종료", "delta": -22},
 	{"label": "점심시간 절전", "delta": -16},
 	{"label": "LED 절전 실천", "delta": -18},
-	{"label": "태양광 발전 설비 점검", "delta": 14},
+	{"label": "도서관 전기 사용 증가", "delta": 14},
 ]
 
 var viewport: SubViewport
@@ -40,12 +44,16 @@ var phase_elapsed := 0.0
 var score_tick := 0.0
 var phase_index := 0
 var phase_scored := false
+var phase_adjusted := false
 var balance_combo := 0
 var hero_adjusting := false
 var visual_time := 0.0
 var current_event := "도시 전력망 가동"
 var gap_integral := 0.0
 var measurement_time := 0.0
+var ever_adjusted := false
+var balance_score_finalized := false
+var final_balance_score := 0
 
 var normal_building_material: StandardMaterial3D
 var balanced_building_material: StandardMaterial3D
@@ -87,6 +95,9 @@ func setup(player_data: Dictionary, game_seed: int) -> void:
 	supply = 50.0
 	gap_integral = 0.0
 	measurement_time = 0.0
+	ever_adjusted = false
+	balance_score_finalized = false
+	final_balance_score = 0
 	_start_demand_phase(true)
 	running = true
 
@@ -110,23 +121,8 @@ func _build_viewport() -> void:
 	viewport.add_child(world)
 
 func _build_world() -> void:
-	var environment_node := WorldEnvironment.new()
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color("102f4c")
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("b9deed")
-	environment.ambient_light_energy = 0.72
-	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	environment_node.environment = environment
-	world.add_child(environment_node)
-
-	var light := DirectionalLight3D.new()
-	light.rotation_degrees = Vector3(-55, -28, 0)
-	light.light_color = Color("d8f5ff")
-	light.light_energy = 1.15
-	light.shadow_enabled = false
-	world.add_child(light)
+	VISUAL_STYLE.add_environment(world, "night")
+	VISUAL_STYLE.add_key_light(world, Vector3(-55, -28, 0), "night")
 
 	camera = Camera3D.new()
 	camera.position = Vector3(0.0, 6.1, 10.8)
@@ -141,7 +137,7 @@ func _build_world() -> void:
 	_build_power_routes()
 
 func _create_materials() -> void:
-	normal_building_material = _material(Color("3f7084"), false)
+	normal_building_material = _material(VISUAL_STYLE.TEAL, false)
 	balanced_building_material = _material(Color("42dca3"), true)
 	shortage_building_material = _material(Color("273e59"), false)
 	overload_building_material = _material(Color("e05a45"), true)
@@ -158,7 +154,7 @@ func _build_city() -> void:
 	ground_mesh.size = Vector3(16.0, 0.18, 12.0)
 	ground.mesh = ground_mesh
 	ground.position = Vector3(0.0, -0.13, -2.0)
-	ground.material_override = _material(Color("1b4956"), false)
+	ground.material_override = _material(VISUAL_STYLE.ROAD, false)
 	world.add_child(ground)
 
 	for row in range(3):
@@ -335,6 +331,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	hero.position = Vector3(0.0, 0.14, 2.75)
 	hero.scale = Vector3.ONE * 1.65
 	hero.call("_set_avatar_animation_state", false)
+	VISUAL_STYLE.style_hero(hero)
 
 func _process(delta: float) -> void:
 	if not running:
@@ -342,11 +339,11 @@ func _process(delta: float) -> void:
 	visual_time += delta
 	phase_elapsed += delta
 	var input_direction := 0.0
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+	if MINIGAME_INPUT.is_pressed(KEY_W) or MINIGAME_INPUT.is_pressed(KEY_UP):
 		input_direction += 1.0
-	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+	if MINIGAME_INPUT.is_pressed(KEY_S) or MINIGAME_INPUT.is_pressed(KEY_DOWN):
 		input_direction -= 1.0
-	supply = clampf(supply + input_direction * SUPPLY_CHANGE_SPEED * delta, 20.0, 120.0)
+	_apply_supply_input(input_direction, delta)
 	# 수요는 목표값으로 순간 이동하지 않고 실제 계기판처럼 연속적으로 움직입니다.
 	var demand_blend := 1.0 - exp(-delta * 1.15)
 	demand = lerpf(demand, demand_target, demand_blend)
@@ -362,32 +359,54 @@ func _process(delta: float) -> void:
 	var gap := absf(difference)
 	gap_integral += gap * delta
 	measurement_time += delta
-	# 오차 0 MW일 때 최대점, 오차가 커질수록 연속적으로 점수가 감소합니다.
-	# 따라서 30초 동안 평균 간격을 더 작게 유지한 플레이어가 반드시 유리합니다.
-	var synchronization := clampf(1.0 - gap / 60.0, 0.0, 1.0)
-	score_tick += delta
-	if score_tick >= 0.20:
-		score_tick = 0.0
-		var points := roundi(32.0 * synchronization * synchronization)
-		if synchronization >= 0.90:
+	# One award per demand change: adjust supply, then hold a small gap for a second.
+	# Merely waiting or sweeping past the target is not a recorded goal action.
+	if balanced and phase_adjusted and not phase_scored:
+		score_tick += delta
+		if score_tick >= 1.0:
+			phase_scored = true
 			balance_combo += 1
-		else:
-			balance_combo = 0
-		if points > 0:
-			var first_precise_sync := synchronization >= 0.90 and not phase_scored
-			if first_precise_sync:
-				phase_scored = true
-			arcade_event.emit(points, true, "동기화 %d%% · 간격이 작을수록 점수가 커집니다." % roundi(synchronization * 100.0), first_precise_sync)
+			arcade_event.emit(0, true, "수요와 공급의 작은 차이를 1초 지켰어요!", true)
+	else:
+		score_tick = 0.0
 
 	_update_city_visuals(delta, difference, balanced)
 	_update_hud(difference, balanced)
-	if phase_elapsed >= DEMAND_PHASE_SECONDS:
+	while phase_elapsed + 0.000001 >= DEMAND_PHASE_SECONDS:
+		var remainder := maxf(0.0, phase_elapsed - DEMAND_PHASE_SECONDS)
 		_start_demand_phase(false)
+		phase_elapsed = remainder
+
+func _apply_supply_input(direction: float, delta: float) -> void:
+	var previous := supply
+	supply = clampf(supply + direction * SUPPLY_CHANGE_SPEED * delta, 20.0, 120.0)
+	phase_adjusted = phase_adjusted or not is_equal_approx(previous, supply)
+	ever_adjusted = ever_adjusted or not is_equal_approx(previous, supply)
+
+static func score_for_average_gap(average_gap: float) -> int:
+	return roundi(BALANCE_SCORE_MAX * clampf(1.0 - maxf(0.0, average_gap) / BALANCE_SCORE_ZERO_GAP, 0.0, 1.0))
+
+func get_balance_score() -> int:
+	if balance_score_finalized:
+		return final_balance_score
+	if not ever_adjusted or measurement_time <= 0.0:
+		return 0
+	return score_for_average_gap(gap_integral / measurement_time)
+
+func finalize_balance_score() -> int:
+	if not balance_score_finalized:
+		final_balance_score = get_balance_score()
+		balance_score_finalized = true
+	return final_balance_score
 
 func _start_demand_phase(initial: bool) -> void:
+	if not initial and phase_adjusted and not phase_scored:
+		arcade_event.emit(0, false, "공급이 적으면 올리고, 많으면 내려요. 다음 변화에서 다시 해봐요.", false)
 	phase_index += 1
 	phase_elapsed = 0.0
 	phase_scored = false
+	phase_adjusted = false
+	score_tick = 0.0
 	if initial:
 		current_event = "도시 전력망 가동"
 		return
@@ -395,7 +414,10 @@ func _start_demand_phase(initial: bool) -> void:
 	var previous_target := demand_target
 	demand_target = clampf(demand_target + float(event["delta"]), 30.0, 110.0)
 	if is_equal_approx(previous_target, demand_target):
-		demand_target = clampf(demand_target - float(event["delta"]), 30.0, 110.0)
+		# Keeping an already adjusted supply is the correct action when demand stays put.
+		phase_adjusted = ever_adjusted
+		current_event = "%s · 수요는 이미 한계예요. 지금 균형을 지켜요." % str(event["label"])
+		return
 	var actual_change := roundi(demand_target - previous_target)
 	current_event = "%s  %s%d MW" % [str(event["label"]), "+" if actual_change >= 0 else "", actual_change]
 
@@ -440,9 +462,9 @@ func _update_hud(difference: float, balanced: bool) -> void:
 	var gap := absf(difference)
 	var synchronization := clampf(1.0 - gap / 60.0, 0.0, 1.0) * 100.0
 	var average_gap := gap_integral / maxf(measurement_time, 0.001)
-	demand_label.text = "수요 %d MW  ·  공급 %d MW  ·  평균 오차 %.1f" % [roundi(demand), roundi(supply), average_gap]
+	demand_label.text = "수요 %d · 공급 %d MW · 평균 차이 %.1f" % [roundi(demand), roundi(supply), average_gap]
 	if balanced:
-		balance_label.text = "✅ 동기화 %d%%  ·  간격 %.1f MW" % [roundi(synchronization), gap]
+		balance_label.text = "균형 유지 · 동기화 %d%%  ·  간격 %.1f MW" % [roundi(synchronization), gap]
 		balance_label.add_theme_color_override("font_color", Color("65f2b3"))
 	elif difference < 0.0:
 		balance_label.text = "동기화 %d%%  ·  공급 부족 %.1f MW  ·  W/↑" % [roundi(synchronization), gap]
@@ -452,11 +474,4 @@ func _update_hud(difference: float, balanced: bool) -> void:
 		balance_label.add_theme_color_override("font_color", Color("ff796d"))
 
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.72
-	if glowing:
-		material.emission_enabled = true
-		material.emission = color
-		material.emission_energy_multiplier = 0.8
-	return material
+	return VISUAL_STYLE.material(color, glowing)

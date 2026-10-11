@@ -38,6 +38,7 @@ func _run() -> void:
 	if role == "host":
 		_check(nm.create_room(PORT, {"name": "방장"}) == OK, "host listen")
 		await _until(func(): return nm.connected_players.size() == 2)
+		gm.set_learning_grade(4)
 		_check(nm.start_hosted_game(120), "start hosted game")
 		gm.players[1]["energy"] = 77
 		gm.start_first_turn()
@@ -58,8 +59,10 @@ func _run() -> void:
 		await create_timer(0.6).timeout
 		_check(paused and is_equal_approx(gm.minigame_time_remaining, minigame_remaining), "minigame clock freezes")
 		await _until(func(): return not paused)
+		# Advance only the test clock to the legal score submission window.
+		gm.minigame_time_remaining = gm.MINIGAME_SUBMISSION_GRACE_SECONDS
 		await _until(func(): return gm.minigame_scores.has(1))
-		_check(int(gm.minigame_scores[1]["score"]) == 321, "restored local score arrives once")
+		_check(int(gm.minigame_scores[1]["score"]) == 64, "restored local score arrives once")
 		# Give the guest a recovery timeout; its reserved seat becomes AI only after grace.
 		await _until(func(): return waiting_count == 3)
 		_check(not gm.players[1]["is_ai"], "AI does not replace guest during grace")
@@ -79,6 +82,7 @@ func _run() -> void:
 		await create_timer(0.25).timeout
 		_check(nm.join_room("127.0.0.1", PORT, {"name": "참가자"}) == OK, "join localhost")
 		await _until(func(): return nm.game_has_started)
+		_check(gm.learning_grade == 4, "host learning grade reaches the guest")
 		await create_timer(0.3).timeout
 		_check(not nm._resume_token.is_empty(), "private resume credential received")
 		var original_peer: int = nm.my_peer_id
@@ -90,7 +94,19 @@ func _run() -> void:
 		modal.dismiss_guide()
 		await _until(func(): return modal.round_started_locally)
 		await create_timer(0.2).timeout
-		modal.score = 321
+		# Freeze a genuine average-gap score; assigning the display score alone
+		# would now be correctly overwritten by the arcade's final calculation.
+		modal._set_arcades_running(false)
+		modal.grid_arcade.ever_adjusted = true
+		modal.grid_arcade.measurement_time = 30.0
+		modal.grid_arcade.gap_integral = 60.0 * (1.0 - 64.0 / 3000.0) * 30.0
+		modal.grid_arcade.phase_adjusted = true
+		modal.grid_arcade.phase_scored = true
+		modal.score = modal.grid_arcade.finalize_balance_score()
+		_check(modal.score == 64, "grid fixture uses the average-gap scoring contract")
+		modal.correct = 2
+		modal.attempts = 2
+		modal.best_streak = 2
 		var round_id: int = modal.round_id
 		_drop_and_wait()
 		var local_elapsed: float = modal.elapsed
@@ -98,7 +114,11 @@ func _run() -> void:
 		_check(paused and is_equal_approx(modal.elapsed, local_elapsed), "local arcade freezes")
 		_check(overlay.visible, "recovery notice visible while paused")
 		await _until(func(): return restored_count == 2)
-		_check(modal.score == 321 and modal.round_id == round_id, "minigame progress preserved")
+		_check(modal.score == 64 and modal.round_id == round_id, "minigame progress preserved")
+		modal._set_arcades_running(false)
+		# Resuming mid-round preserves progress; submission still waits for the
+		# host's end-of-round clock rather than trusting the guest's local timer.
+		await _until(func(): return gm.minigame_time_remaining <= gm.MINIGAME_SUBMISSION_GRACE_SECONDS)
 		modal._submit_score()
 		await _until(func(): return gm.minigame_scores.has(1))
 		_drop_and_wait()
@@ -114,7 +134,9 @@ func _run() -> void:
 func _drop_and_wait() -> void:
 	# Close the actual ENet transport, leaving the authoritative game untouched.
 	nm._begin_reconnect()
-	nm._next_reconnect_attempt = Time.get_ticks_msec() + 1300
+	# Leave enough wall-clock time to observe the 0.6s freeze on loaded Windows
+	# runners; the grace interval remains the production 30 seconds.
+	nm._next_reconnect_attempt = Time.get_ticks_msec() + 3000
 
 func _test_host_loss() -> void:
 	if role == "loss_host":

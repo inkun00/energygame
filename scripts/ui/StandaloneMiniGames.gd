@@ -1,7 +1,7 @@
 extends CanvasLayer
 class_name StandaloneMiniGames
 
-## 웹 링크에서 보드 없이 구현된 미니게임만 반복 체험하는 선택 화면입니다.
+## 웹 링크에서 보드 없이 미니게임을 체험합니다. 결과는 세션 밖에 저장하지 않습니다.
 
 const UI = preload("res://scripts/ui/CommercialUI.gd")
 const MINI_GAME_MODAL = preload("res://scenes/MiniGameModal.tscn")
@@ -12,10 +12,16 @@ const PREVIEWS := {
 	"grid_balance": "변하는 전력 수요와 공급을 계속 맞추기",
 	"standby_hunt": "집 안을 달리며 낭비되는 대기전력 차단하기",
 	"hydro_gate": "비 예보를 보며 수문까지 달려가 열고 닫기",
-	"energy_sort": "햇빛·바람·물과 땅속 연료를 두 곳으로 배송하기",
+	"energy_sort": "곧 다시 얻는 에너지와 오래 걸리는 연료 나누기",
 	"battery_relay": "햇빛에 남은 전기를 저장하고 흐릴 때 도시에 보내기",
 	"eco_commute": "직접 운전해 학생을 태우고 학교에 정확히 정차하기",
 	"heat_leak": "여름 교실의 열린 창문을 닫아 에어컨 효율 높이기",
+}
+const KEY_PREVIEWS := {
+	"solar_align": "A/D · Space", "wind_rhythm": "A/D · Space",
+	"grid_balance": "W/S 또는 ↑/↓", "standby_hunt": "A/D · W · Space",
+	"hydro_gate": "A/D · W · Space · E", "energy_sort": "A/D",
+	"battery_relay": "A/D", "eco_commute": "D/A · S · Space", "heat_leak": "A/D · Space"
 }
 
 var menu: PanelContainer
@@ -45,15 +51,15 @@ func _build_menu() -> void:
 	background.color = Color("071d28")
 	add_child(background)
 	menu = PanelContainer.new()
-	menu.set_anchors_preset(Control.PRESET_CENTER)
-	menu.offset_left = -475
-	menu.offset_top = -310
-	menu.offset_right = 475
-	menu.offset_bottom = 310
-	menu.add_theme_stylebox_override("panel", UI.padded_panel(Color("0b2833"), Color("42d6b0"), 28.0, 22))
+	menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	menu.offset_left = 24
+	menu.offset_top = 16
+	menu.offset_right = -24
+	menu.offset_bottom = -16
+	menu.add_theme_stylebox_override("panel", UI.padded_panel(Color("0b2833"), Color("42d6b0"), 16.0, 22))
 	add_child(menu)
 	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 15)
+	content.add_theme_constant_override("separation", 10)
 	menu.add_child(content)
 	var eyebrow := Label.new()
 	eyebrow.text = "에코 히어로즈 · 30~60초 아케이드"
@@ -62,31 +68,79 @@ func _build_menu() -> void:
 	content.add_child(eyebrow)
 	var heading := Label.new()
 	heading.text = "에너지 미니게임 체험"
-	heading.add_theme_font_size_override("font_size", 39)
+	heading.add_theme_font_size_override("font_size", 31)
 	heading.add_theme_color_override("font_color", Color("fff0a6"))
 	content.add_child(heading)
 	var intro := Label.new()
-	intro.text = "게임을 고르면 바로 시작합니다. 나와 AI 세 명이 동시에 도전하며, 종료 후 언제든 다시 플레이할 수 있어요."
+	intro.text = "미션을 골라 나와 AI 세 명이 같은 조건으로 도전해요. 순위와 학습 결과는 이번 체험에서만 보여요."
 	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	intro.add_theme_font_size_override("font_size", 17)
 	intro.add_theme_color_override("font_color", Color("c9e5e1"))
 	content.add_child(intro)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	content.add_child(scroll)
 	var grid := GridContainer.new()
-	grid.columns = 2
+	grid.name = "GameCards"
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.columns = 3
 	grid.add_theme_constant_override("h_separation", 14)
 	grid.add_theme_constant_override("v_separation", 10)
-	content.add_child(grid)
+	scroll.add_child(grid)
 	for game_id in AVAILABLE_IDS:
 		var definition: Dictionary = GameManager.MINIGAME_DEFINITIONS[game_id]
 		var button := Button.new()
-		button.text = "%s\n%s" % [definition["title"], PREVIEWS[game_id]]
-		button.custom_minimum_size = Vector2(430, 64)
-		button.add_theme_font_size_override("font_size", 17)
+		button.name = "Card_" + game_id
+		button.custom_minimum_size = Vector2(0, 150)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.tooltip_text = str(definition["input_hint"])
 		button.pressed.connect(_start_game.bind(game_id))
 		UI.apply_secondary_button(button, Color(str(definition["accent"])))
 		grid.add_child(button)
+		var box := VBoxContainer.new()
+		box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		box.offset_left = 12
+		box.offset_top = 8
+		box.offset_right = -12
+		box.offset_bottom = -8
+		box.add_theme_constant_override("separation", 3)
+		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		button.add_child(box)
+		var picture := TextureRect.new()
+		picture.name = "ScenePreview"
+		picture.custom_minimum_size = Vector2(0, 50)
+		picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var preview_path := "res://assets/images/minigame_previews/%s.png" % game_id
+		if ResourceLoader.exists(preview_path):
+			picture.texture = load(preview_path)
+		else:
+			picture.texture = load("res://assets/images/card_solar_pv.webp")
+		box.add_child(picture)
+		var title := Label.new()
+		title.text = str(definition["title"])
+		title.add_theme_font_size_override("font_size", 18)
+		title.add_theme_color_override("font_color", UI.GOLD)
+		title.clip_text = true
+		title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(title)
+		var action := Label.new()
+		action.text = PREVIEWS[game_id]
+		action.add_theme_font_size_override("font_size", 14)
+		action.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		action.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(action)
+		var hint := Label.new()
+		hint.text = "%d초 · %s" % [int(definition.get("duration", 30)), KEY_PREVIEWS[game_id]]
+		hint.add_theme_font_size_override("font_size", 14)
+		hint.add_theme_color_override("font_color", UI.TEXT_MUTED)
+		hint.clip_text = true
+		hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(hint)
 	var footer := Label.new()
-	footer.text = "키보드로 조작 · 노트북/PC 권장 · 새로고침 후에도 이 링크에서 다시 플레이 가능"
+	footer.text = "키보드 조작 · 같은 점수는 공동 순위 · 개인 기록을 저장하지 않아요"
 	footer.add_theme_font_size_override("font_size", 15)
 	footer.add_theme_color_override("font_color", Color("94b8be"))
 	content.add_child(footer)

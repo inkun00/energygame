@@ -6,10 +6,13 @@ class_name BatteryShuttle3D
 
 signal arcade_event(points: int, success: bool, message: String, count_correct: bool)
 
+const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
+const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 const PHASE_SECONDS := 5.0
+const PHASE_PROFILES := [[4.0, 6.0, 5.0, 4.0, 6.0, 5.0], [5.0, 5.0, 5.0, 4.0, 7.0, 4.0], [6.0, 4.0, 4.0, 6.0, 4.0, 6.0]]
 const BATTERY_CAPACITY := 4
-const INITIAL_CHARGE := 1
+const INITIAL_CHARGE := 0
 const STORE_POINTS := 20
 const SUPPLY_POINTS := 80
 const RUN_SPEED := 6.8
@@ -29,6 +32,7 @@ var city_windows: Array[MeshInstance3D] = []
 var solar_light: MeshInstance3D
 var battery_light: MeshInstance3D
 var city_light: MeshInstance3D
+var city_label: Label3D
 var phase_label: Label
 var phase_timer_label: Label
 var charge_label: Label
@@ -49,6 +53,8 @@ var previous_phase := -1
 var interaction_cooldown := 0.0
 var visual_time := 0.0
 var city_flash_remaining := 0.0
+var city_energy_remaining := 0.0
+var game_seed := 1
 var flash_remaining := 0.0
 var running := false
 var notice := ""
@@ -64,7 +70,8 @@ func _ready() -> void:
 	_build_overlay()
 	set_process(true)
 
-func setup(player_data: Dictionary, _game_seed: int) -> void:
+func setup(player_data: Dictionary, round_seed: int) -> void:
+	game_seed = round_seed
 	elapsed = 0.0
 	hero_x = 0.0
 	battery_units = INITIAL_CHARGE
@@ -73,6 +80,7 @@ func setup(player_data: Dictionary, _game_seed: int) -> void:
 	interaction_cooldown = 0.0
 	visual_time = 0.0
 	city_flash_remaining = 0.0
+	city_energy_remaining = 0.0
 	flash_remaining = 0.0
 	notice = "햇빛이 많아요. 왼쪽에서 남는 전기를 가져오세요!"
 	notice_remaining = 2.7
@@ -86,8 +94,18 @@ func set_running(value: bool) -> void:
 	if is_instance_valid(hero):
 		hero.call("_set_avatar_animation_state", false)
 
-static func is_sunny_at(seconds: float) -> bool:
-	return int(floor(maxf(0.0, seconds) / PHASE_SECONDS)) % 2 == 0
+static func phase_for_time(seconds: float, round_seed: int = 1) -> Dictionary:
+	var profile: Array = PHASE_PROFILES[posmod(round_seed, PHASE_PROFILES.size())]
+	var cursor := fposmod(maxf(0.0, seconds), 30.0)
+	for phase in range(profile.size()):
+		var span := float(profile[phase])
+		if cursor < span:
+			return {"index": phase, "sunny": phase % 2 == 0, "remaining": span - cursor, "demand": 1 + posmod(round_seed + int(phase / 2), 3)}
+		cursor -= span
+	return {"index": 0, "sunny": true, "remaining": float(profile[0]), "demand": 1}
+
+static func is_sunny_at(seconds: float, round_seed: int = 1) -> bool:
+	return bool(phase_for_time(seconds, round_seed)["sunny"])
 
 func _build_world() -> void:
 	viewport = SubViewport.new()
@@ -100,20 +118,8 @@ func _build_world() -> void:
 	add_child(viewport)
 	world = Node3D.new()
 	viewport.add_child(world)
-	var sky := WorldEnvironment.new()
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color("a9dbe9")
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("f0faff")
-	environment.ambient_light_energy = 0.83
-	sky.environment = environment
-	world.add_child(sky)
-	var sunlight := DirectionalLight3D.new()
-	sunlight.rotation_degrees = Vector3(-45, -22, 0)
-	sunlight.light_energy = 1.05
-	sunlight.shadow_enabled = false
-	world.add_child(sunlight)
+	VISUAL_STYLE.add_environment(world)
+	VISUAL_STYLE.add_key_light(world, Vector3(-45, -22, 0))
 	var camera := Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = 6.3
@@ -127,8 +133,8 @@ func _build_world() -> void:
 	stored_material = _material(Color("8ee8ff"), true)
 	city_on_material = _material(Color("ffe988"), true)
 	city_off_material = _material(Color("61757b"), false)
-	_box("Ground", world, Vector3(0, -0.18, 0), Vector3(12.5, 0.35, 6.0), Color("71a48a"))
-	_box("Runway", world, Vector3(0, 0.02, 1.6), Vector3(10.3, 0.08, 1.45), Color("d0dbc3"))
+	_box("Ground", world, Vector3(0, -0.18, 0), Vector3(12.5, 0.35, 6.0), VISUAL_STYLE.FIELD)
+	_box("Runway", world, Vector3(0, 0.02, 1.6), Vector3(10.3, 0.08, 1.45), VISUAL_STYLE.CREAM)
 	for mark in range(-3, 4):
 		_box("PathMark%d" % mark, world, Vector3(float(mark) * 1.28, 0.08, 1.6), Vector3(0.45, 0.03, 0.06), Color("fff2b8"), true)
 	_build_solar_station()
@@ -173,7 +179,7 @@ func _build_city_station() -> void:
 			var pane := _box("Window%d_%d" % [house_index, window_index], world, Vector3(house_x + (float(window_index) - 0.5) * 0.30, 1.48, -0.49), Vector3(0.19, 0.31, 0.05), Color("61757b"))
 			city_windows.append(pane)
 	city_light = _sphere("CityLight", world, Vector3(CITY_X, 2.45, -0.4), 0.20, Color("61757b"))
-	_label3d("도시\n전기가 필요해요", Vector3(CITY_X, 3.03, 0.30), Color("fff0ce"))
+	city_label = _label3d("도시", Vector3(CITY_X, 3.03, 0.30), Color("fff0ce"))
 	cloud = Node3D.new()
 	cloud.position = Vector3(CITY_X, 4.05, -1.0)
 	world.add_child(cloud)
@@ -194,6 +200,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	if hero.shadow_mesh:
 		hero.shadow_mesh.visible = false
 	hero.call("_set_avatar_animation_state", false)
+	VISUAL_STYLE.style_hero(hero)
 
 func _build_overlay() -> void:
 	phase_label = _overlay_label(Vector2(290, 7), Vector2(670, 40), "햇빛 많음 · 남는 전기", Color("ffe386"), 23)
@@ -220,15 +227,24 @@ func _process(delta: float) -> void:
 	if not running:
 		return
 	elapsed += delta
+	var phase_info := phase_for_time(elapsed, game_seed)
+	city_energy_remaining = maxf(0.0, city_energy_remaining - float(phase_info["demand"]) * 0.22 * delta)
 	interaction_cooldown = maxf(0.0, interaction_cooldown - delta)
 	notice_remaining = maxf(0.0, notice_remaining - delta)
-	var new_phase := int(floor(elapsed / PHASE_SECONDS)) % 2
+	var new_phase := int(phase_info["index"])
 	if new_phase != previous_phase:
 		previous_phase = new_phase
-		notice = "햇빛이 많아요! 남는 전기를 배터리에 저장해요." if new_phase == 0 else "구름이 꼈어요! 배터리 전기를 도시로 보내요."
+		notice = "햇빛이 많아요! 남는 전기를 배터리에 저장해요." if bool(phase_info["sunny"]) else "구름이 꼈어요! 도시 필요량 %d · 저장 전기를 보내요." % int(phase_info["demand"])
 		notice_remaining = 2.3
-	var axis := float(int(Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)) - int(Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)))
+	var axis := float(int(MINIGAME_INPUT.is_pressed(KEY_D) or MINIGAME_INPUT.is_pressed(KEY_RIGHT)) - int(MINIGAME_INPUT.is_pressed(KEY_A) or MINIGAME_INPUT.is_pressed(KEY_LEFT)))
+	var previous_x := hero_x
 	hero_x = clampf(hero_x + axis * RUN_SPEED * delta, SOLAR_X, CITY_X)
+	# A slow frame can cross the station without ending inside it.
+	if interaction_cooldown <= 0.0 and minf(previous_x, hero_x) <= BATTERY_X + STATION_REACH and maxf(previous_x, hero_x) >= BATTERY_X - STATION_REACH:
+		var destination := hero_x
+		hero_x = BATTERY_X
+		_try_station_action()
+		hero_x = destination
 	if is_instance_valid(hero):
 		hero.position.x = hero_x
 		if hero.is_moving != (axis != 0.0):
@@ -240,7 +256,7 @@ func _process(delta: float) -> void:
 	_update_visuals()
 
 func _try_station_action() -> void:
-	if hero_x <= SOLAR_X + STATION_REACH and cargo == 0 and is_sunny_at(elapsed) and battery_units < BATTERY_CAPACITY:
+	if hero_x <= SOLAR_X + STATION_REACH and cargo == 0 and is_sunny_at(elapsed, game_seed) and battery_units < BATTERY_CAPACITY:
 		cargo = 1
 		notice = "발전소의 남는 전기를 받았어요. 가운데 배터리로!"
 		notice_remaining = 1.5
@@ -248,18 +264,23 @@ func _try_station_action() -> void:
 	elif absf(hero_x - BATTERY_X) <= STATION_REACH and cargo == 1:
 		cargo = 0
 		battery_units += 1
-		arcade_event.emit(STORE_POINTS, true, "남는 전기 1칸을 배터리에 저장", true)
+		arcade_event.emit(STORE_POINTS, true, "남는 전기 1칸을 배터리에 저장. 흐릴 때 도시로 보내요.", false)
 		_flash(Color("67f7b145"))
 		interaction_cooldown = 0.23
-	elif absf(hero_x - BATTERY_X) <= STATION_REACH and cargo == 0 and not is_sunny_at(elapsed) and battery_units > 0:
+	elif absf(hero_x - BATTERY_X) <= STATION_REACH and cargo == 0 and not is_sunny_at(elapsed, game_seed) and battery_units > 0:
 		cargo = 2
 		battery_units -= 1
 		notice = "배터리의 저장 전기를 꺼냈어요. 오른쪽 도시로!"
 		notice_remaining = 1.5
 		interaction_cooldown = 0.23
 	elif hero_x >= CITY_X - STATION_REACH and cargo == 2:
+		if is_sunny_at(elapsed, game_seed):
+			notice = "지금은 햇빛으로 충분해요. 저장 전기는 흐릴 때 보내요."
+			notice_remaining = 1.5
+			return
 		cargo = 0
-		city_flash_remaining = 1.1
+		city_energy_remaining = minf(3.0, city_energy_remaining + 1.0)
+		city_flash_remaining = 0.45
 		arcade_event.emit(SUPPLY_POINTS, true, "저장 전기로 도시의 불을 켰어요", true)
 		_flash(Color("ffe77b45"))
 		interaction_cooldown = 0.23
@@ -271,14 +292,16 @@ func _flash(color: Color) -> void:
 func _update_visuals() -> void:
 	if not is_instance_valid(cargo_orb):
 		return
-	var sunny := is_sunny_at(elapsed)
+	var phase_info := phase_for_time(elapsed, game_seed)
+	var sunny := bool(phase_info["sunny"])
+	city_label.text = "도시\n햇빛으로 충분" if sunny else "도시\n필요량 %d · 불빛 %d%%" % [int(phase_info["demand"]), roundi(clampf(city_energy_remaining, 0.0, 1.0) * 100.0)]
 	sun.visible = sunny
 	cloud.visible = not sunny
 	solar_light.visible = sunny and battery_units < BATTERY_CAPACITY
 	for cell_index in range(battery_cells.size()):
 		battery_cells[cell_index].material_override = charged_material if cell_index < battery_units else empty_material
 	battery_light.material_override = charged_material if battery_units > 0 else empty_material
-	var city_lit := city_flash_remaining > 0.0 or sunny
+	var city_lit := city_energy_remaining > 0.0 or sunny
 	for pane in city_windows:
 		pane.material_override = city_on_material if city_lit else city_off_material
 	city_light.material_override = city_on_material if city_lit else city_off_material
@@ -287,7 +310,7 @@ func _update_visuals() -> void:
 		cargo_orb.material_override = solar_material if cargo == 1 else stored_material
 	phase_label.text = "햇빛 많음 · 남는 전기" if sunny else "구름 많음 · 전기 부족"
 	phase_label.add_theme_color_override("font_color", Color("ffe386") if sunny else Color("b8ecff"))
-	phase_timer_label.text = "%s까지 %.1f초" % ["구름" if sunny else "햇빛", PHASE_SECONDS - fposmod(elapsed, PHASE_SECONDS)]
+	phase_timer_label.text = "%s까지 %.1f초" % ["구름" if sunny else "햇빛", float(phase_info["remaining"])]
 	charge_label.text = "배터리  %d / %d칸" % [battery_units, BATTERY_CAPACITY]
 	cargo_label.text = "운반 중: %s" % ("남는 전기 → 배터리" if cargo == 1 else ("저장 전기 → 도시" if cargo == 2 else "없음"))
 	if notice_remaining > 0.0:
@@ -295,7 +318,7 @@ func _update_visuals() -> void:
 	elif cargo == 1:
 		instruction_label.text = "A/D 이동 · 가운데 배터리에 남는 전기를 넣으세요"
 	elif cargo == 2:
-		instruction_label.text = "A/D 이동 · 오른쪽 도시로 저장 전기를 보내세요"
+		instruction_label.text = "지금은 전기가 충분해요. 흐릴 때까지 저장 전기를 아껴요." if sunny else "A/D 이동 · 오른쪽 도시로 저장 전기를 보내세요"
 	elif sunny:
 		instruction_label.text = "배터리가 가득 찼어요. 구름이 올 때까지 기다리세요" if battery_units >= BATTERY_CAPACITY else "A/D 이동 · 왼쪽 태양광에서 남는 전기를 가져오세요"
 	else:
@@ -325,7 +348,7 @@ func _sphere(node_name: String, parent: Node3D, where: Vector3, radius: float, c
 	parent.add_child(instance)
 	return instance
 
-func _label3d(content: String, where: Vector3, color: Color) -> void:
+func _label3d(content: String, where: Vector3, color: Color) -> Label3D:
 	var label := Label3D.new()
 	label.position = where
 	label.text = content
@@ -335,16 +358,10 @@ func _label3d(content: String, where: Vector3, color: Color) -> void:
 	label.outline_size = 8
 	label.no_depth_test = true
 	world.add_child(label)
+	return label
 
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.72
-	if glowing:
-		material.emission_enabled = true
-		material.emission = color
-		material.emission_energy_multiplier = 0.7
-	return material
+	return VISUAL_STYLE.material(color, glowing)
 
 func _overlay_label(from: Vector2, to: Vector2, content: String, color: Color, font_size: int) -> Label:
 	var label := Label.new()

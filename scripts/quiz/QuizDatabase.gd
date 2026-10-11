@@ -1,6 +1,6 @@
 extends Node
 
-## QuizDatabase: 초등 4학년 에너지 소양 200선 객관식 데이터베이스
+## QuizDatabase: 초등 4~6학년 에너지 소양 200선. 출제 기록은 한 판의 메모리에만 둡니다.
 
 enum QuizType { MULTI_CHOICE }
 
@@ -11,6 +11,31 @@ const QUIZ_DATA_PATHS: Array[String] = [
 const EXPECTED_QUIZ_COUNT := 200
 
 var quizzes: Array[Dictionary] = []
+var learning_grade := 5
+var _session_quiz_ids: Dictionary = {}
+
+func configure_learning_grade(grade: int) -> void:
+	learning_grade = clampi(grade, 4, 6)
+	_session_quiz_ids.clear()
+
+func _minimum_grade(quiz: Dictionary) -> int:
+	# Reviewed metadata is authoritative; a keyword in a wrong option must not
+	# silently move an otherwise everyday question to a different grade.
+	if quiz.has("min_grade"):
+		return clampi(int(quiz["min_grade"]), 4, 6)
+	var text := str(quiz.get("category", "")) + str(quiz.get("question", "")) + " ".join(quiz.get("options", []))
+	if "발전단가" in text or "산업화 이전" in text or "에너지 안보" in text or "자립도" in text or "핵분열" in text:
+		return 6
+	if "탄소중립" in text or "온실가스" in text or "화학 에너지" in text or "원자력" in text:
+		return 5
+	return 4
+
+func reading_seconds(quiz: Dictionary) -> float:
+	var characters := str(quiz.get("question", "")).length()
+	for option in quiz.get("options", []):
+		characters += str(option).length()
+	var reading_rate := 7.0 if learning_grade == 4 else (9.0 if learning_grade == 5 else 11.0)
+	return clampf(12.0 + float(characters) / reading_rate, 20.0, 40.0)
 
 
 func _init() -> void:
@@ -52,11 +77,17 @@ func _load_quizzes() -> Array[Dictionary]:
 
 func _is_valid_multiple_choice_quiz(quiz: Dictionary) -> bool:
 	var options: Variant = quiz.get("options", [])
+	if not options is Array or options.size() != 4:
+		return false
+	var unique_options: Dictionary = {}
+	for option in options:
+		if not option is String or str(option).strip_edges().is_empty():
+			return false
+		unique_options[str(option).strip_edges()] = true
 	return (
 		not str(quiz.get("id", "")).is_empty()
 		and not str(quiz.get("question", "")).is_empty()
-		and options is Array
-		and options.size() == 4
+		and unique_options.size() == 4
 		and quiz.get("answer", "") in options
 	)
 
@@ -64,7 +95,26 @@ func _is_valid_multiple_choice_quiz(quiz: Dictionary) -> bool:
 func get_random_quiz() -> Dictionary:
 	if quizzes.is_empty():
 		return _get_fallback_quiz()
-	return quizzes[randi() % quizzes.size()].duplicate(true)
+	var pool: Array[Dictionary] = []
+	for quiz in quizzes:
+		if _minimum_grade(quiz) <= learning_grade:
+			pool.append(quiz)
+	if pool.is_empty():
+		return _get_fallback_quiz()
+	var available: Array[Dictionary] = []
+	for quiz in pool:
+		if not _session_quiz_ids.has(str(quiz["id"])):
+			available.append(quiz)
+	if available.is_empty():
+		_session_quiz_ids.clear()
+		available = pool
+	var selected := available[randi() % available.size()].duplicate(true)
+	_session_quiz_ids[str(selected["id"])] = true
+	var options: Array = selected["options"]
+	options.shuffle()
+	selected["time_limit"] = reading_seconds(selected)
+	selected["ai_think_seconds"] = clampf(float(selected["time_limit"]) * randf_range(0.35, 0.55), 5.0, 15.0)
+	return selected
 
 
 func get_quiz_by_type(_type: QuizType = QuizType.MULTI_CHOICE) -> Dictionary:
@@ -80,5 +130,6 @@ func _get_fallback_quiz() -> Dictionary:
 		"options": ["사용하지 않는 전등 끄기", "냉장고 문 열어두기", "빈방 난방하기", "물을 계속 틀어두기"],
 		"answer": "사용하지 않는 전등 끄기",
 		"explanation": "사용하지 않는 전등을 끄면 전기 에너지를 아낄 수 있습니다.",
-		"reward_energy": 2
+		"reward_energy": 2,
+		"min_grade": 4, "difficulty": 1, "learning_objective": "사용하지 않는 전등을 꺼 전기를 아낀다."
 	}

@@ -17,6 +17,7 @@ var shield_ring_material: StandardMaterial3D
 var current_tile: int = 0
 var move_tween: Tween
 var animation_elapsed := 0.0
+var animation_phase := 0.0
 var idle_sprite_texture: Texture2D
 var move_sprite_texture: Texture2D
 var back_run_sprite_texture: Texture2D
@@ -25,6 +26,9 @@ var is_moving := false
 var use_back_run_sprite := false
 var use_side_run_sprite := false
 var shield_elapsed := 0.0
+var last_animation_position := Vector3.ZERO
+var animation_speed := 0.0
+var animation_position_ready := false
 
 # 원본 스프라이트 첫 프레임의 투명 여백(약 0.047)을 포함해 실제 발끝이
 # 타일 윗면에 닿도록 맞춘 중심 높이입니다. 루트는 타일 윗면에 놓입니다.
@@ -103,13 +107,21 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_update_shield_visual(delta)
+	if not animation_position_ready:
+		last_animation_position = position
+		animation_position_ready = true
+	var movement := position - last_animation_position
+	last_animation_position = position
+	var horizontal_speed := Vector2(movement.x, movement.z).length() / maxf(delta, 0.001)
+	animation_speed = lerpf(animation_speed, horizontal_speed, minf(1.0, delta * 12.0))
 	if avatar_sprite != null and avatar_sprite.hframes > 1:
 		if (use_back_run_sprite or use_side_run_sprite) and not is_moving:
 			avatar_sprite.frame = 0
 			return
 		animation_elapsed += delta
-		var animation_fps := MOVE_SPRITE_FPS if is_moving else IDLE_SPRITE_FPS
-		avatar_sprite.frame = int(animation_elapsed * animation_fps) % avatar_sprite.hframes
+		var animation_fps := clampf(6.0 + animation_speed * 0.85, 6.0, 15.0) if is_moving else IDLE_SPRITE_FPS
+		animation_phase += delta * animation_fps
+		avatar_sprite.frame = int(animation_phase) % avatar_sprite.hframes
 
 func _init_components() -> void:
 	if avatar_sprite != null:
@@ -229,13 +241,19 @@ func snap_to_tile(to_tile_idx: int) -> void:
 	_set_avatar_animation_state(false)
 
 func _set_avatar_animation_state(should_move: bool) -> void:
-	is_moving = should_move
-	animation_elapsed = 0.0
 	if avatar_sprite == null:
+		is_moving = should_move
 		return
 	var next_texture := side_run_sprite_texture if use_side_run_sprite else (back_run_sprite_texture if use_back_run_sprite else idle_sprite_texture)
-	if is_moving and not use_back_run_sprite and not use_side_run_sprite:
+	if should_move and not use_back_run_sprite and not use_side_run_sprite:
 		next_texture = move_sprite_texture
+	# Arcade controllers report the movement state every frame. Do not restart
+	# the sheet on each report, otherwise a running character freezes at frame 0.
+	if is_moving == should_move and avatar_sprite.texture == next_texture and next_texture != null:
+		return
+	is_moving = should_move
+	animation_elapsed = 0.0
+	animation_phase = 0.0
 	if next_texture != null:
 		avatar_sprite.texture = next_texture
 		avatar_sprite.hframes = MOVE_SPRITE_FRAMES if is_moving or use_back_run_sprite or use_side_run_sprite else IDLE_SPRITE_FRAMES
@@ -259,6 +277,10 @@ func _update_hop_position(progress: float, from_position: Vector3, to_position: 
 	var lift := sin(progress * PI) * hop_height
 	position = ground + Vector3(0, lift, 0)
 	_update_ground_shadow(ground.y, lift)
+	if avatar_sprite:
+		var stretch_y := 1.0 + sin(progress * TAU) * 0.07
+		avatar_sprite.scale = Vector3(1.0 / sqrt(stretch_y), stretch_y, 1.0)
+		avatar_sprite.position.y = AVATAR_CENTER_HEIGHT * stretch_y
 
 func _get_tile_contact_position(tile_index: int, pawn_offset: Vector3 = Vector3.ZERO) -> Vector3:
 	var tile_position := BoardGrid.get_tile_position_3d(tile_index) + pawn_offset
@@ -269,6 +291,9 @@ func _place_on_tile(tile_index: int) -> void:
 	current_tile = clampi(tile_index, 0, BoardGrid.LAST_TILE_INDEX)
 	position = _get_tile_contact_position(current_tile, PAWN_OFFSETS_3D[player_index % 4])
 	_update_ground_shadow(position.y, 0.0)
+	if avatar_sprite:
+		avatar_sprite.scale = Vector3.ONE
+		avatar_sprite.position.y = AVATAR_CENTER_HEIGHT
 
 func _update_ground_shadow(surface_y: float, lift: float) -> void:
 	if shadow_mesh == null:

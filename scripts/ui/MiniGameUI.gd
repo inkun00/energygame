@@ -17,6 +17,7 @@ const BATTERY_SHUTTLE = preload("res://scripts/minigames/BatteryShuttle3D.gd")
 const SHARED_SCHOOL_BUS = preload("res://scripts/minigames/SharedSchoolBus3D.gd")
 const HEAT_LEAK_DASH = preload("res://scripts/minigames/HeatLeakDash3D.gd")
 const LEARNING_FEEDBACK = preload("res://scripts/minigames/MiniGameLearningFeedback.gd")
+const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 
 const STANDBY_DEVICES := [
 	{"name": "꺼진 TV", "watt": 3, "waste": true},
@@ -37,13 +38,16 @@ var dimmer: ColorRect
 var card: PanelContainer
 var standalone_mode := false
 var standalone_actions: HBoxContainer
+var touch_controls: HBoxContainer
 var title_label: Label
 var mode_label: Label
 var objective_label: Label
 var timer_label: Label
 var timer_bar: ProgressBar
 var score_label: Label
+var goal_label: Label
 var arena: VBoxContainer
+var arena_panel: PanelContainer
 var feedback_label: Label
 var lesson_label: Label
 var submission_label: Label
@@ -59,14 +63,24 @@ var guide_lesson_label: Label
 var guide_tip_label: Label
 var guide_rewards_label: Label
 var guide_start_button: Button
+var guide_practice_button: Button
+var practice_actions: HBoxContainer
+var practice_active := false
+var practice_elapsed := 0.0
+const HYDRO_PRACTICE_SECONDS := 12.0
 
 var active := false
+var surface_enabled := true
 var submitted := false
 var game_data: Dictionary = {}
 var game_id := ""
 var round_id := -1
 var duration := 30.0
 var elapsed := 0.0
+var simulation_elapsed := 0.0
+var round_start_msec := 0
+var round_pause_msec := -1
+var hydro_submit_msec := -1
 var score := 0
 var correct := 0
 var attempts := 0
@@ -117,17 +131,17 @@ func _build_ui() -> void:
 	add_child(dimmer)
 
 	card = PanelContainer.new()
-	card.set_anchors_preset(Control.PRESET_CENTER)
-	card.offset_left = -550
-	card.offset_top = -330
-	card.offset_right = 550
-	card.offset_bottom = 330
-	card.add_theme_stylebox_override("panel", UI.padded_panel(Color("0b2833fc"), Color("42d6b0"), 24.0, 24))
+	card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	card.offset_left = 18
+	card.offset_top = 10
+	card.offset_right = -18
+	card.offset_bottom = -10
+	card.add_theme_stylebox_override("panel", UI.padded_panel(Color("0b2833fc"), Color("42d6b0"), 12.0, 18))
 	add_child(card)
 
 	var content := VBoxContainer.new()
 	content.name = "ContentBox"
-	content.add_theme_constant_override("separation", 10)
+	content.add_theme_constant_override("separation", 6)
 	card.add_child(content)
 
 	var header := HBoxContainer.new()
@@ -135,7 +149,7 @@ func _build_ui() -> void:
 	content.add_child(header)
 	title_label = Label.new()
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_label.add_theme_font_size_override("font_size", 31)
+	title_label.add_theme_font_size_override("font_size", 27)
 	title_label.add_theme_color_override("font_color", Color("fff0a6"))
 	header.add_child(title_label)
 	mode_label = Label.new()
@@ -162,6 +176,8 @@ func _build_ui() -> void:
 	timer_bar.custom_minimum_size = Vector2(0, 28)
 	timer_bar.show_percentage = false
 	timer_bar.max_value = 20.0
+	timer_bar.add_theme_stylebox_override("background", UI.progress_background())
+	timer_bar.add_theme_stylebox_override("fill", UI.progress_fill(UI.TEAL))
 	status_row.add_child(timer_bar)
 	score_label = Label.new()
 	score_label.custom_minimum_size = Vector2(180, 34)
@@ -170,18 +186,18 @@ func _build_ui() -> void:
 	score_label.add_theme_color_override("font_color", Color("ffe06b"))
 	status_row.add_child(score_label)
 
-	var arena_panel := PanelContainer.new()
-	arena_panel.custom_minimum_size = Vector2(0, 300)
+	arena_panel = PanelContainer.new()
+	arena_panel.custom_minimum_size = Vector2(0, 400)
 	arena_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var arena_style := StyleBoxFlat.new()
 	arena_style.bg_color = Color("071e28")
 	arena_style.border_color = Color("235366")
 	arena_style.set_border_width_all(2)
 	arena_style.set_corner_radius_all(16)
-	arena_style.content_margin_left = 24
-	arena_style.content_margin_right = 24
-	arena_style.content_margin_top = 18
-	arena_style.content_margin_bottom = 18
+	arena_style.content_margin_left = 8
+	arena_style.content_margin_right = 8
+	arena_style.content_margin_top = 8
+	arena_style.content_margin_bottom = 8
 	arena_panel.add_theme_stylebox_override("panel", arena_style)
 	content.add_child(arena_panel)
 	arena = VBoxContainer.new()
@@ -190,9 +206,10 @@ func _build_ui() -> void:
 	arena_panel.add_child(arena)
 
 	feedback_label = Label.new()
+	feedback_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	feedback_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	feedback_label.custom_minimum_size = Vector2(0, 28)
-	feedback_label.add_theme_font_size_override("font_size", 18)
+	feedback_label.custom_minimum_size = Vector2(0, 22)
+	feedback_label.add_theme_font_size_override("font_size", 17)
 	feedback_label.add_theme_color_override("font_color", Color("a8d8dd"))
 	content.add_child(feedback_label)
 
@@ -201,12 +218,32 @@ func _build_ui() -> void:
 	lesson_label.add_theme_font_size_override("font_size", 15)
 	lesson_label.add_theme_color_override("font_color", Color("a9c9cf"))
 	content.add_child(lesson_label)
+	goal_label = Label.new()
+	goal_label.name = "GoalProgress"
+	goal_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	goal_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	goal_label.add_theme_font_size_override("font_size", 17)
+	goal_label.add_theme_color_override("font_color", UI.GOLD)
+	content.add_child(goal_label)
 
 	submission_label = Label.new()
 	submission_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	submission_label.add_theme_font_size_override("font_size", 15)
 	submission_label.add_theme_color_override("font_color", Color("72d9c1"))
 	content.add_child(submission_label)
+	practice_actions = HBoxContainer.new()
+	practice_actions.name = "PracticeActions"
+	practice_actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	practice_actions.visible = false
+	content.add_child(practice_actions)
+	var practice_end_button := _make_button("연습 마치기 · 안내로 (Esc)", Color("287ca8"))
+	# Space is a repeated gate action here, never a GUI button activation.
+	# The keyboard exit remains Esc; this button is a pointer alternative.
+	practice_end_button.focus_mode = Control.FOCUS_NONE
+	practice_end_button.custom_minimum_size = Vector2(320, 44)
+	practice_end_button.pressed.connect(_finish_hydro_practice)
+	practice_actions.add_child(practice_end_button)
+	_build_touch_controls(content)
 	if standalone_mode:
 		standalone_actions = HBoxContainer.new()
 		standalone_actions.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -224,17 +261,113 @@ func _build_ui() -> void:
 	_build_guide_ui()
 
 func _unhandled_input(event: InputEvent) -> void:
+	if not surface_enabled or not is_visible_in_tree():
+		return
+	if visible and practice_active and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		get_viewport().set_input_as_handled()
+		_finish_hydro_practice()
+		return
 	if not visible or not is_guide_open():
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
+		if game_id == "hydro_gate" and event.keycode == KEY_P:
+			get_viewport().set_input_as_handled()
+			_start_hydro_practice()
+			return
 		if event.keycode == KEY_SPACE or event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
 			get_viewport().set_input_as_handled()
 			dismiss_guide()
 
+func _build_touch_controls(parent: Control) -> void:
+	touch_controls = HBoxContainer.new()
+	touch_controls.name = "TouchControls"
+	touch_controls.alignment = BoxContainer.ALIGNMENT_CENTER
+	touch_controls.add_theme_constant_override("separation", 12)
+	touch_controls.visible = false
+	parent.add_child(touch_controls)
+	for spec in [[KEY_A, "←"], [KEY_D, "→"], [KEY_W, "↑"], [KEY_S, "↓"], [KEY_SPACE, "동작"], [KEY_E, "닫기"]]:
+		var holder := Control.new()
+		holder.set_meta("input_key", int(spec[0]))
+		holder.custom_minimum_size = Vector2(76, 48)
+		holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		touch_controls.add_child(holder)
+		var background := ColorRect.new()
+		background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		background.color = Color("235366")
+		background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		holder.add_child(background)
+		var label := Label.new()
+		label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		label.text = str(spec[1])
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		holder.add_child(label)
+		var button := TouchScreenButton.new()
+		button.name = "Touch_%d" % int(spec[0])
+		var shape := RectangleShape2D.new()
+		shape.size = Vector2(76, 48)
+		button.shape = shape
+		button.position = Vector2(38, 24)
+		button.pressed.connect(MINIGAME_INPUT.set_touch.bind(int(spec[0]), true))
+		button.released.connect(MINIGAME_INPUT.set_touch.bind(int(spec[0]), false))
+		holder.add_child(button)
+
+func _configure_touch_controls() -> void:
+	var keys: Array = [KEY_A, KEY_D, KEY_SPACE]
+	var action_label := "동작"
+	match game_id:
+		"solar_align": action_label = "점프"
+		"wind_rhythm": action_label = "제동"
+		"grid_balance": keys = [KEY_W, KEY_S]
+		"standby_hunt":
+			keys = [KEY_A, KEY_D, KEY_W, KEY_SPACE]
+			action_label = "뽑기"
+		"hydro_gate":
+			keys = [KEY_A, KEY_D, KEY_W, KEY_SPACE, KEY_E]
+			action_label = "열기"
+		"energy_sort", "battery_relay": keys = [KEY_A, KEY_D]
+		"eco_commute":
+			keys = [KEY_A, KEY_D, KEY_S, KEY_SPACE]
+			action_label = "태우기"
+		"heat_leak": action_label = "닫기"
+	for holder in touch_controls.get_children():
+		var key := int(holder.get_meta("input_key"))
+		holder.visible = key in keys
+		if key == KEY_SPACE:
+			holder.get_child(1).text = action_label
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		MINIGAME_INPUT.release_all()
+	elif what == NOTIFICATION_PAUSED and round_started_locally:
+		round_pause_msec = Time.get_ticks_msec()
+		MINIGAME_INPUT.release_all()
+	elif what == NOTIFICATION_UNPAUSED and round_pause_msec >= 0:
+		var paused_for := Time.get_ticks_msec() - round_pause_msec
+		round_start_msec += paused_for
+		if hydro_submit_msec >= 0:
+			hydro_submit_msec += paused_for
+		round_pause_msec = -1
+
+func _exit_tree() -> void:
+	MINIGAME_INPUT.release_all()
+
 func _process(delta: float) -> void:
+	if not surface_enabled:
+		return
+	if practice_active:
+		practice_elapsed += delta
+		_advance_arcade_simulation(minf(HYDRO_PRACTICE_SECONDS, practice_elapsed))
+		timer_label.text = "연습 %02d초" % ceili(maxf(0.0, HYDRO_PRACTICE_SECONDS - practice_elapsed))
+		timer_bar.value = maxf(0.0, HYDRO_PRACTICE_SECONDS - practice_elapsed)
+		if practice_elapsed >= HYDRO_PRACTICE_SECONDS:
+			_finish_hydro_practice()
+		return
 	if not active or submitted or not round_started_locally:
 		return
-	elapsed += delta
+	# Rendering stalls must not turn a 30-second round into a longer competition.
+	elapsed = maxf(elapsed + delta, float(Time.get_ticks_msec() - round_start_msec) / 1000.0)
 	if not standalone_mode and NetworkManager.is_online and NetworkManager.is_host:
 		elapsed = maxf(elapsed, duration - clampf(GameManager.minigame_time_remaining - GameManager.MINIGAME_SUBMISSION_GRACE_SECONDS, 0.0, duration))
 	var remaining := maxf(0.0, duration - elapsed)
@@ -244,16 +377,54 @@ func _process(delta: float) -> void:
 		timer_label.add_theme_color_override("font_color", Color("ff826e"))
 	else:
 		timer_label.add_theme_color_override("font_color", Color("f5f7da"))
+	if not is_instance_valid(solar_arcade):
+		_advance_arcade_simulation(minf(duration, elapsed))
 	_update_mode(delta)
-	if elapsed >= duration:
+	if is_instance_valid(grid_arcade) and grid_arcade.has_method("get_balance_score"):
+		score = int(grid_arcade.call("get_balance_score"))
+		_refresh_score()
+	_refresh_goal_progress()
+	if elapsed >= duration or (hydro_submit_msec >= 0 and Time.get_ticks_msec() >= hydro_submit_msec):
+		# Solar CharacterBody3D must complete its last step inside the physics callback.
+		if is_instance_valid(solar_arcade) and simulation_elapsed < duration - 0.00001:
+			return
 		_submit_score()
 
+func _physics_process(_delta: float) -> void:
+	if not active or submitted or not round_started_locally or not is_instance_valid(solar_arcade):
+		return
+	var clock_time := maxf(elapsed, float(Time.get_ticks_msec() - round_start_msec) / 1000.0)
+	_advance_arcade_simulation(minf(duration, clock_time))
+
+func _advance_arcade_simulation(target_time: float) -> void:
+	# Render FPS must not change weather, water flow, scoring ticks or distance travelled.
+	# Solar's move_and_slide is called only from _physics_process, at the physics step.
+	var arcades := [solar_arcade, wind_arcade, grid_arcade, standby_arcade,
+		hydro_arcade, sort_arcade, battery_arcade, commute_arcade, heat_arcade]
+	var step_size := get_physics_process_delta_time() if is_instance_valid(solar_arcade) else 1.0 / 60.0
+	step_size = maxf(0.001, step_size)
+	while target_time - simulation_elapsed >= step_size - 0.000001:
+		simulation_elapsed += step_size
+		for arcade in arcades:
+			if is_instance_valid(arcade):
+				arcade.call("_physics_process" if arcade == solar_arcade else "_process", step_size)
+
 func _on_minigame_started(data: Dictionary) -> void:
+	if not surface_enabled:
+		return
+	MINIGAME_INPUT.release_all()
+	practice_active = false
+	practice_actions.visible = false
 	game_data = data.duplicate(true)
 	game_id = str(game_data.get("id", "solar_align"))
+	_configure_touch_controls()
 	round_id = int(game_data.get("round_id", -1))
 	duration = float(game_data.get("duration", 30.0))
 	elapsed = 0.0
+	simulation_elapsed = 0.0
+	round_start_msec = 0
+	round_pause_msec = -1
+	hydro_submit_msec = -1
 	score = 0
 	correct = 0
 	attempts = 0
@@ -272,7 +443,7 @@ func _on_minigame_started(data: Dictionary) -> void:
 	rng.seed = int(game_data.get("seed", 1))
 	visible = true
 	title_label.text = str(game_data.get("title", "에너지 미니게임"))
-	mode_label.text = "전원 동시 플레이  ·  %s" % game_data.get("input_hint", "빠른 도전")
+	mode_label.text = "%d초 · 전원 동시 도전" % int(duration)
 	objective_label.text = "목표  |  " + str(game_data.get("objective", "제한시간 안에 최고 점수에 도전하세요."))
 	lesson_label.text = "에너지 원리  |  " + str(game_data.get("lesson", ""))
 	timer_bar.max_value = duration
@@ -282,23 +453,28 @@ func _on_minigame_started(data: Dictionary) -> void:
 	submission_label.text = "내 점수는 종료 즉시 비공개로 제출됩니다."
 	_refresh_score()
 	_build_mode()
+	_refresh_goal_progress()
 	_show_guide_popup()
 
 func _on_submission_changed(state: Dictionary) -> void:
-	if not visible or int((state.get("game", {}) as Dictionary).get("round_id", -2)) != round_id:
+	if not surface_enabled or not visible or int((state.get("game", {}) as Dictionary).get("round_id", -2)) != round_id:
 		return
 	var phase := str((state.get("game", {}) as Dictionary).get("phase", ""))
 	if phase == "ready":
 		var ready_count := int(state.get("ready_count", 0))
 		var player_count := int(state.get("player_count", 4))
 		var guide_seconds := ceili(float(state.get("guide_remaining", 0.0)))
-		if is_guide_open():
+		if practice_active:
+			submission_label.text = "점수 없는 조작 연습 · %d초 뒤 전체 자동 시작" % guide_seconds
+		elif is_guide_open():
 			guide_badge_label.text = "게임 방법 · %d명 준비 · %d초 뒤 자동 시작" % [ready_count, guide_seconds]
 		else:
 			feedback_label.text = "준비 완료! 다른 플레이어를 기다리는 중…"
 			submission_label.text = "준비 %d / %d명 · %d초 뒤 자동 시작" % [ready_count, player_count, guide_seconds]
 		return
 	if phase == "countdown":
+		if practice_active:
+			_finish_hydro_practice()
 		var countdown := maxi(1, ceili(float(state.get("countdown_remaining", 0.0))))
 		if is_guide_open():
 			guide_badge_label.text = "다 함께 %d초 후 시작!" % countdown
@@ -312,12 +488,22 @@ func _on_submission_changed(state: Dictionary) -> void:
 	if phase == "playing" and round_started_locally:
 		var authoritative_elapsed := duration - clampf(float(state.get("time_remaining", duration + GameManager.MINIGAME_SUBMISSION_GRACE_SECONDS)) - GameManager.MINIGAME_SUBMISSION_GRACE_SECONDS, 0.0, duration)
 		elapsed = maxf(elapsed, authoritative_elapsed)
+		round_start_msec = mini(round_start_msec, Time.get_ticks_msec() - roundi(elapsed * 1000.0))
 	submission_label.text = "점수 제출 %d / %d명%s" % [int(state.get("submitted_count", 0)), int(state.get("player_count", 4)), "  ·  내 점수 제출 완료" if submitted else ""]
 
 func _begin_local_round() -> void:
 	if round_started_locally or not active or submitted:
 		return
+	# A host timeout/reconnect can start the round while a player is practicing.
+	# Reset the same seed and discard every practice action before competition.
+	if practice_active:
+		_finish_hydro_practice(false)
 	round_started_locally = true
+	round_start_msec = Time.get_ticks_msec()
+	round_pause_msec = -1
+	objective_label.visible = false
+	lesson_label.visible = false
+	goal_label.visible = true
 	guide_open = false
 	if is_instance_valid(guide_panel):
 		guide_panel.visible = false
@@ -325,12 +511,15 @@ func _begin_local_round() -> void:
 	if is_instance_valid(content_node):
 		content_node.visible = true
 	elapsed = 0.0
+	simulation_elapsed = 0.0
 	_set_arcades_running(true)
-	feedback_label.text = "게임 시작! 최고 점수에 도전하세요."
+	feedback_label.text = "게임 시작! 조건을 보고 알맞게 선택해요."
 
 func _on_minigame_finished(results: Array) -> void:
 	if not visible:
 		return
+	if practice_active:
+		_finish_hydro_practice(false)
 	if is_instance_valid(guide_panel):
 		guide_panel.visible = false
 	var content_node := card.find_child("ContentBox", false, false)
@@ -340,14 +529,24 @@ func _on_minigame_finished(results: Array) -> void:
 	round_started_locally = false
 	active = false
 	submitted = true
+	_set_arcades_running(false)
 	if learning_snapshot.is_empty():
 		learning_snapshot = _learning_metrics_snapshot()
 	var learning_report: Dictionary = LEARNING_FEEDBACK.result_lines(game_id, learning_snapshot)
+	for entry_variant in results:
+		var entry: Dictionary = entry_variant
+		if int(entry.get("player_idx", -1)) == _local_player_index():
+			score = int(entry.get("score", 0))
+			_refresh_score()
+			break
 	_build_results(results)
+	objective_label.visible = false
+	lesson_label.visible = true
+	goal_label.visible = false
 	timer_label.text = "종료"
 	timer_bar.value = 0
 	lesson_label.text = "내 플레이  |  " + str(learning_report.get("evidence", ""))
-	feedback_label.text = "다음 도전  |  " + str(learning_report.get("next_action", ""))
+	feedback_label.text = "함께 확인  |  " + str(learning_report.get("next_action", ""))
 	feedback_label.add_theme_color_override("font_color", Color("83f2b6"))
 	if standalone_mode:
 		submission_label.text = "언제든 다시 플레이하거나 다른 게임을 선택할 수 있어요."
@@ -366,6 +565,8 @@ func _on_turn_changed(_player_idx: int) -> void:
 		visible = false
 
 func cancel_minigame() -> void:
+	practice_active = false
+	practice_actions.visible = false
 	_set_arcades_running(false)
 	if is_instance_valid(guide_panel):
 		guide_panel.visible = false
@@ -377,7 +578,14 @@ func cancel_minigame() -> void:
 	submitted = false
 	visible = false
 
+func set_surface_enabled(value: bool) -> void:
+	surface_enabled = value
+	if not value:
+		cancel_minigame()
+
 func restore_online_round() -> void:
+	if not surface_enabled:
+		return
 	var restored: Dictionary = GameManager.active_minigame
 	if restored.is_empty():
 		cancel_minigame()
@@ -389,7 +597,7 @@ func restore_online_round() -> void:
 		_on_minigame_finished(restored.get("results", []))
 		return
 	var local_idx := _local_player_index()
-	if str(restored.get("phase", "")) == "ready" and not is_guide_open() and not GameManager.minigame_ready_players.has(local_idx):
+	if str(restored.get("phase", "")) == "ready" and not is_guide_open() and not practice_active and not GameManager.minigame_ready_players.has(local_idx):
 		GameManager.start_minigame_action(local_idx, round_id)
 	if GameManager.minigame_scores.has(local_idx):
 		submitted = true
@@ -397,16 +605,27 @@ func restore_online_round() -> void:
 		_set_arcades_running(false)
 	elif submitted and str(restored.get("phase", "")) == "playing":
 		# A score sent just before the outage may not have reached the host.
-		GameManager.submit_minigame_score(local_idx, score, {"correct": correct, "attempts": attempts, "best_streak": best_streak}, round_id)
+		GameManager.submit_minigame_score(local_idx, score, _submission_stats(), round_id)
 	_on_submission_changed(GameManager.get_minigame_state())
 
 func _set_arcades_running(running_state: bool) -> void:
+	if not running_state:
+		MINIGAME_INPUT.release_all()
+	else:
+		get_viewport().gui_release_focus()
+	if is_instance_valid(touch_controls):
+		touch_controls.visible = running_state and DisplayServer.is_touchscreen_available()
+		arena_panel.custom_minimum_size.y = 320 if touch_controls.visible else 400
 	var arcades := [
 		solar_arcade, wind_arcade, grid_arcade, standby_arcade,
 		hydro_arcade, sort_arcade, battery_arcade, commute_arcade, heat_arcade
 	]
 	for arc in arcades:
 		if is_instance_valid(arc):
+			# The modal owns the shared simulation clock; children must not run twice.
+			arc.set_process(false)
+			arc.set_physics_process(false)
+			arc.custom_minimum_size.y = 304 if touch_controls.visible else 384
 			if arc.has_method("set_running"):
 				arc.call("set_running", running_state)
 			elif "running" in arc:
@@ -483,6 +702,8 @@ func _build_guide_ui() -> void:
 	ctrl_box.get_child(0).add_child(guide_controls_container)
 
 	var lesson_box := _make_guide_section("알아두면 유익한 에너지 과학 원리", Color("ffd66e"))
+	# 원리는 설명을 읽는 대신 게임 안의 물·빛·도시 반응으로 경험합니다.
+	lesson_box.visible = false
 	body.add_child(lesson_box)
 	guide_lesson_label = Label.new()
 	guide_lesson_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -490,16 +711,18 @@ func _build_guide_ui() -> void:
 	guide_lesson_label.add_theme_color_override("font_color", Color("dbeff0"))
 	lesson_box.get_child(0).add_child(guide_lesson_label)
 
-	var tip_box := _make_guide_section("고득점 공략 & 순위 보상", Color("ffb86c"))
+	var tip_box := _make_guide_section("목표와 보너스", Color("ffb86c"))
 	body.add_child(tip_box)
 	guide_tip_label = Label.new()
+	guide_tip_label.visible = false
 	guide_tip_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	guide_tip_label.add_theme_font_size_override("font_size", 15)
 	guide_tip_label.add_theme_color_override("font_color", Color("ffeac2"))
 	tip_box.get_child(0).add_child(guide_tip_label)
 
 	guide_rewards_label = Label.new()
-	guide_rewards_label.text = "순위별 에너지 보상: 1위 +20  |  2위 +10  |  3위 +5  |  4위 +1"
+	guide_rewards_label.text = "목표 행동을 확인하면 순위에 따라 에너지를 받아요. 0점은 보상 없이 다시 연습해요."
+	guide_rewards_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	guide_rewards_label.add_theme_font_size_override("font_size", 15)
 	guide_rewards_label.add_theme_color_override("font_color", Color("95f2d6"))
 	tip_box.get_child(0).add_child(guide_rewards_label)
@@ -507,6 +730,13 @@ func _build_guide_ui() -> void:
 	var footer := HBoxContainer.new()
 	footer.alignment = BoxContainer.ALIGNMENT_CENTER
 	guide_content.add_child(footer)
+	guide_practice_button = Button.new()
+	guide_practice_button.text = "조작 연습 (P)"
+	guide_practice_button.custom_minimum_size = Vector2(190, 52)
+	guide_practice_button.add_theme_font_size_override("font_size", 18)
+	guide_practice_button.pressed.connect(_start_hydro_practice)
+	UI.apply_secondary_button(guide_practice_button)
+	footer.add_child(guide_practice_button)
 
 	guide_start_button = Button.new()
 	guide_start_button.text = "게임 시작!  (Space 또는 Enter)"
@@ -553,6 +783,8 @@ func _populate_guide_content() -> void:
 	guide_objective_label.text = str(game_data.get("objective", "제한시간 안에 최고 점수를 달성하세요."))
 	guide_lesson_label.text = str(game_data.get("lesson", "신재생에너지를 올바르게 활용하여 탄소를 줄입니다."))
 	guide_tip_label.text = str(game_data.get("tip", "신속하고 정확하게 조작하여 콤보 점수를 획득하세요!"))
+	guide_practice_button.visible = game_id == "hydro_gate"
+	guide_rewards_label.text = "%s\n목표 달성 + 양수 점수: 순위에 따라 에너지 20 / 10 / 5 / 1. 같은 점수는 공동 순위예요." % LEARNING_FEEDBACK.goal_requirement(game_id)
 
 	for child in guide_controls_container.get_children():
 		guide_controls_container.remove_child(child)
@@ -625,7 +857,7 @@ func _show_guide_popup() -> void:
 	feedback_label.text = "게임 방법을 확인하고 시작 버튼을 누르세요."
 
 func dismiss_guide() -> void:
-	if not guide_open:
+	if not guide_open or practice_active:
 		return
 	guide_open = false
 	if is_instance_valid(guide_panel):
@@ -641,6 +873,47 @@ func dismiss_guide() -> void:
 
 func is_guide_open() -> bool:
 	return guide_open and is_instance_valid(guide_panel) and guide_panel.visible
+
+func _start_hydro_practice() -> void:
+	if game_id != "hydro_gate" or not is_guide_open() or round_started_locally or not active:
+		return
+	practice_active = true
+	practice_elapsed = 0.0
+	simulation_elapsed = 0.0
+	guide_panel.visible = false
+	card.find_child("ContentBox", false, false).visible = true
+	objective_label.visible = false
+	lesson_label.visible = false
+	goal_label.visible = true
+	goal_label.text = "연습: A/D 이동 · W 점프 · 레버 앞 Space 3번 → 물·터빈 확인 → E 닫기"
+	practice_actions.visible = true
+	timer_bar.max_value = HYDRO_PRACTICE_SECONDS
+	timer_bar.value = HYDRO_PRACTICE_SECONDS
+	score_label.text = "점수 없는 연습"
+	feedback_label.text = "연습에서는 넘치지 않아요. 실제 게임은 새 상태로 모두 함께 시작해요."
+	submission_label.text = "연습 후 시작 버튼을 누르면 준비 완료 · Esc로 안내로 돌아가기"
+	hydro_arcade.call("set_practice_mode", true)
+	_set_arcades_running(true)
+
+func _finish_hydro_practice(show_guide: bool = true) -> void:
+	if not practice_active:
+		return
+	practice_active = false
+	practice_actions.visible = false
+	_set_arcades_running(false)
+	var local_idx := _local_player_index()
+	var player_data: Dictionary = GameManager.players[local_idx] if local_idx >= 0 and local_idx < GameManager.players.size() else {}
+	hydro_arcade.call("setup", player_data, int(game_data.get("seed", 1)))
+	_set_arcades_running(false)
+	simulation_elapsed = 0.0
+	elapsed = 0.0
+	timer_bar.max_value = duration
+	timer_bar.value = duration
+	timer_label.text = "%02d초" % ceili(duration)
+	_refresh_score()
+	_refresh_goal_progress()
+	if show_guide:
+		_show_guide_popup()
 
 func _build_mode() -> void:
 	_clear_arena()
@@ -850,7 +1123,7 @@ func _build_hydro_gate() -> void:
 func _on_hydro_arcade_event(points: int, success: bool, message: String, count_correct: bool) -> void:
 	if not _can_play():
 		return
-	if points <= 0:
+	if points <= 0 and not count_correct:
 		feedback_label.text = message
 		_show_learning_cue(success, points, count_correct)
 		return
@@ -865,11 +1138,7 @@ func _on_hydro_game_over(generated_kwh: float) -> void:
 		return
 	feedback_label.text = "댐이 넘쳤어요! %.1f kWh 생산 후 도전 종료" % generated_kwh
 	feedback_label.add_theme_color_override("font_color", Color("ff937e"))
-	var finished_round := round_id
-	get_tree().create_timer(1.3, false).timeout.connect(func():
-		if round_id == finished_round and _can_play():
-			_submit_score()
-	)
+	hydro_submit_msec = Time.get_ticks_msec() + 1300
 
 func _build_energy_sort() -> void:
 	sort_arcade = ENERGY_SOURCE_SORT.new()
@@ -882,6 +1151,8 @@ func _build_energy_sort() -> void:
 func _on_sort_arcade_event(points: int, success: bool, message: String, count_correct: bool) -> void:
 	if not _can_play():
 		return
+	if is_instance_valid(sort_arcade) and bool(sort_arcade.get("retrying_item")):
+		learning_counts["sort_retries"] = int(learning_counts.get("sort_retries", 0)) + 1
 	attempts += 1
 	if success:
 		_register_success(points, message, count_correct)
@@ -957,11 +1228,11 @@ func _update_mode(delta: float) -> void:
 
 func _register_success(points: int, message: String, count_correct: bool = true) -> void:
 	score = mini(GameManager.MINIGAME_SCORE_LIMIT, score + points)
-	streak += 1
-	best_streak = maxi(best_streak, streak)
 	if count_correct:
 		correct += 1
-	feedback_label.text = "%s  ·  +%d점%s" % [message, points, "  ·  콤보 ×%d" % streak if streak >= 2 else ""]
+		streak += 1
+		best_streak = maxi(best_streak, streak)
+	feedback_label.text = "%s%s%s" % [message, "  ·  +%d점" % points if points > 0 else "", "  ·  목표 행동 ×%d" % streak if count_correct and streak >= 2 else ""]
 	feedback_label.add_theme_color_override("font_color", Color("83f2b6"))
 	_track_learning_event(true, points, count_correct)
 	_refresh_score()
@@ -969,7 +1240,7 @@ func _register_success(points: int, message: String, count_correct: bool = true)
 func _register_miss(penalty: int, message: String) -> void:
 	score = maxi(0, score - penalty)
 	streak = 0
-	feedback_label.text = "%s  ·  -%d점" % [message, penalty]
+	feedback_label.text = message + ("  ·  -%d점" % penalty if penalty > 0 else "")
 	feedback_label.add_theme_color_override("font_color", Color("ffb28e"))
 	_track_learning_event(false, penalty, false)
 	_refresh_score()
@@ -999,11 +1270,38 @@ func _show_learning_cue(success: bool, points: int, count_correct: bool) -> void
 	var cue: String = LEARNING_FEEDBACK.live_line(game_id, success, points, count_correct, _learning_metrics_snapshot())
 	if not cue.is_empty():
 		lesson_label.text = "방금 선택  |  " + cue
+		if round_started_locally and not submitted and game_id != "energy_sort":
+			feedback_label.text = cue + ("  +%d점" % points if success and points > 0 else "  -%d점" % points if not success and points > 0 else "")
+	_refresh_goal_progress()
+
+func _refresh_goal_progress() -> void:
+	if not is_instance_valid(goal_label):
+		return
+	var stats := _submission_stats()
+	var goal_correct := int(stats.get("correct", 0))
+	var concept_attempts := int(stats.get("concept_attempts", 0))
+	var accuracy := 0 if concept_attempts <= 0 else roundi(100.0 * float(goal_correct) / float(concept_attempts))
+	var progress := ""
+	match game_id:
+		"solar_align": progress = "햇빛 받는 패널 %d/3 · 올바른 선택 %d%% / 목표 60%%" % [mini(3, goal_correct), accuracy]
+		"wind_rhythm": progress = "풍향 맞춤 %d/1 · 돌풍 정지 %d/1" % [mini(1, int(learning_counts.get("wind_aligned", 0))), mini(1, int(learning_counts.get("storm_braked", 0)))]
+		"grid_balance": progress = "균형 유지 %d/2 · 평균 차이 %.1f MW" % [mini(2, goal_correct), float(_learning_metrics_snapshot().get("average_gap", 0.0))]
+		"standby_hunt": progress = "대기전력 차단 %d/2 · 올바른 선택 %d%% / 목표 60%%" % [mini(2, goal_correct), accuracy]
+		"hydro_gate": progress = "높은 수위에서 발전 %d/1 · 닫아 물 모으기 %d/1" % [mini(1, goal_correct), mini(1, int(stats.get("hydro_managed_closures", 0)))]
+		"energy_sort": progress = "첫 선택 성공 %d/2 · 올바른 분류 %d%% / 목표 60%%" % [mini(2, goal_correct), accuracy]
+		"battery_relay": progress = "저장한 전기를 부족할 때 공급 %d/1" % mini(1, goal_correct)
+		"eco_commute": progress = "2명 이상 함께 학교 하차 %d/1" % mini(1, goal_correct)
+		"heat_leak": progress = "열린 창문 닫기 %d/2 · 올바른 선택 %d%% / 목표 60%%" % [mini(2, goal_correct), accuracy]
+	var achieved := GameManager.has_minigame_goal_actions(game_id, score, stats)
+	goal_label.text = ("보너스 목표 달성 ✓  |  " if achieved else "보너스 목표  |  ") + progress
+	goal_label.add_theme_color_override("font_color", UI.SUCCESS if achieved else UI.GOLD)
 
 func _learning_metrics_snapshot() -> Dictionary:
 	var metrics := learning_counts.duplicate()
 	metrics["correct"] = correct
 	metrics["attempts"] = attempts
+	if game_id == "energy_sort":
+		metrics["first_sort_attempts"] = attempts - int(learning_counts.get("sort_retries", 0))
 	if is_instance_valid(grid_arcade):
 		metrics["grid_gap"] = absf(float(grid_arcade.get("demand")) - float(grid_arcade.get("supply")))
 		metrics["measurement_time"] = float(grid_arcade.get("measurement_time"))
@@ -1014,9 +1312,16 @@ func _learning_metrics_snapshot() -> Dictionary:
 	if is_instance_valid(hydro_arcade):
 		metrics["generated_kwh"] = float(hydro_arcade.get("generated_kwh"))
 		metrics["overflowed"] = bool(hydro_arcade.get("overflowed"))
+		metrics["hydro_closures"] = int(hydro_arcade.get("managed_closures"))
 	if is_instance_valid(commute_arcade):
 		metrics["delivered_total"] = int(commute_arcade.get("delivered_total"))
 		metrics["passengers"] = int(commute_arcade.get("passengers"))
+		metrics["trip_per_person"] = float(commute_arcade.get("last_trip_per_person"))
+		metrics["trip_solo_energy"] = float(commute_arcade.get("last_trip_solo_energy"))
+	if is_instance_valid(battery_arcade):
+		metrics["battery_units"] = int(battery_arcade.get("battery_units"))
+	if is_instance_valid(heat_arcade):
+		metrics["cooling_used"] = float(heat_arcade.get("cooling_used"))
 	return metrics
 
 func _refresh_score() -> void:
@@ -1028,6 +1333,9 @@ func _submit_score() -> void:
 		return
 	if is_instance_valid(hydro_arcade) and hydro_arcade.has_method("finalize_generation_score"):
 		hydro_arcade.call("finalize_generation_score")
+	if is_instance_valid(grid_arcade) and grid_arcade.has_method("finalize_balance_score"):
+		score = int(grid_arcade.call("finalize_balance_score"))
+		_refresh_score()
 	learning_snapshot = _learning_metrics_snapshot()
 	submitted = true
 	active = false
@@ -1035,11 +1343,37 @@ func _submit_score() -> void:
 	feedback_label.text = "도전 종료! 점수를 제출했습니다."
 	feedback_label.add_theme_color_override("font_color", Color("ffe083"))
 	submission_label.text = "다른 플레이어의 도전이 끝나기를 기다리는 중…"
-	GameManager.submit_minigame_score(_local_player_index(), score, {"correct": correct, "attempts": attempts, "best_streak": best_streak}, round_id)
+	GameManager.submit_minigame_score(_local_player_index(), score, _submission_stats(), round_id)
+
+func _submission_stats() -> Dictionary:
+	var goal_correct := correct
+	var reported_attempts := attempts
+	if is_instance_valid(grid_arcade):
+		# Phase events are normally emitted after a hold or a demand change.
+		# An unfinished last adjustment is still a real attempt, even at the buzzer.
+		if bool(grid_arcade.get("phase_adjusted")) and not bool(grid_arcade.get("phase_scored")):
+			reported_attempts += 1
+		if bool(grid_arcade.get("ever_adjusted")):
+			reported_attempts = maxi(1, reported_attempts)
+	var concept_attempts := reported_attempts
+	if game_id == "solar_align":
+		concept_attempts = correct + int(learning_counts.get("solar_wrong", 0))
+	elif game_id == "standby_hunt":
+		concept_attempts = correct + int(learning_counts.get("active_unplugged", 0))
+	elif game_id == "energy_sort":
+		concept_attempts = attempts - int(learning_counts.get("sort_retries", 0))
+	elif game_id == "wind_rhythm":
+		goal_correct = mini(int(learning_counts.get("wind_aligned", 0)), int(learning_counts.get("storm_braked", 0)))
+	if is_instance_valid(hydro_arcade) and bool(hydro_arcade.get("overflowed")):
+		goal_correct = 0
+	var stats := {"correct": goal_correct, "attempts": reported_attempts, "concept_attempts": concept_attempts, "best_streak": best_streak}
+	if is_instance_valid(hydro_arcade):
+		stats["hydro_managed_closures"] = int(hydro_arcade.get("managed_closures"))
+	return stats
 
 func _build_results(results: Array) -> void:
 	_clear_arena()
-	var heading := _arena_label("에너지 챌린지 최종 순위", 28, Color("ffe06b"))
+	var heading := _arena_label("경쟁 순위 · 목표 행동 기록은 따로 확인해요", 24, Color("ffe06b"))
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	for result_variant in results:
 		var result: Dictionary = result_variant
@@ -1057,7 +1391,7 @@ func _build_results(results: Array) -> void:
 		columns.add_theme_constant_override("separation", 12)
 		row.add_child(columns)
 		var rank_color := Color("fff0a6") if int(result["rank"]) == 1 else Color("d7edf0")
-		var rank_label := _result_column("%d위" % int(result["rank"]), 66, rank_color)
+		var rank_label := _result_column("%d위" % int(result["rank"]) if int(result["rank"]) > 0 else "연습", 66, rank_color)
 		columns.add_child(rank_label)
 		var name_label := _result_column(str(result["name"]), 0, rank_color)
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1066,7 +1400,7 @@ func _build_results(results: Array) -> void:
 		var score_column := _result_column("%d점" % int(result["score"]), 140, rank_color)
 		score_column.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		columns.add_child(score_column)
-		var reward_label := _result_column("에너지 +%d" % int(result["reward"]), 165, rank_color)
+		var reward_label := _result_column("확인 · +%d" % int(result["reward"]) if bool(result.get("goal_checked", false)) else "다시 연습 · +0", 165, rank_color)
 		reward_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		columns.add_child(reward_label)
 
@@ -1111,7 +1445,7 @@ func _make_button(text_value: String, color: Color) -> Button:
 	return button
 
 func _can_play() -> bool:
-	return active and not submitted and not is_guide_open()
+	return active and round_started_locally and not practice_active and not submitted and not is_guide_open()
 
 func _local_player_index() -> int:
 	if NetworkManager and NetworkManager.is_online:

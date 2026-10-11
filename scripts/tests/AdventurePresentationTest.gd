@@ -15,8 +15,6 @@ func _run() -> void:
 	await process_frame
 	var hud = main.find_child("HUD", true, false)
 	var planner = hud.adventure_planner
-	planner.settings_path = "user://adventure_guide_test.cfg"
-	if FileAccess.file_exists(planner.settings_path): DirAccess.remove_absolute(planner.settings_path)
 	var configs: Array[Dictionary] = [{"name": "탐험대장", "is_ai": false, "char_icon": "res://assets/characters/eco_roster/captain_eco.webp", "char_color": Color("49d97b")}]
 	main._on_start_game_requested(configs)
 	gm.set_process(false)
@@ -39,7 +37,7 @@ func _run() -> void:
 	gm.special_skill_completed.emit(0)
 	check(not planner.tutorial_active, "All four actual actions should complete guide")
 	planner.begin_exploration(0)
-	check(not planner.tutorial_active and planner.selected_goal == -1, "Guide completion persists but goals reset each game")
+	check(planner.tutorial_active and planner.selected_goal == -1, "Every new game shows its guide without permanent completion records")
 	planner.replay_tutorial()
 	check(planner.tutorial.visible, "Help should replay completed guide")
 	planner.open_catalog()
@@ -54,7 +52,6 @@ func _run() -> void:
 	planner.open_catalog()
 	gm.open_market_state_changed.emit({"active": true, "phase": 1})
 	check(not planner.exploration_active and not planner.catalog.visible, "Market must close exploration UI")
-	DirAccess.remove_absolute(planner.settings_path)
 	# Optional real-renderer snapshots also verify minimum-size layout at 1280 x 720.
 	if "--snapshots" in OS.get_cmdline_user_args():
 		main.find_child("QuizModal", true, false).hide()

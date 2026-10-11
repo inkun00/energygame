@@ -52,8 +52,9 @@ func _run() -> void:
 			_fail("host minigame did not pause")
 			return
 		await _until(func(): return not get_tree().paused)
+		GameManager.minigame_time_remaining = GameManager.MINIGAME_SUBMISSION_GRACE_SECONDS
 		await _until(func(): return GameManager.minigame_scores.has(1))
-		if GameManager.players[1]["is_ai"] or int(GameManager.minigame_scores[1]["score"]) != 432:
+		if GameManager.players[1]["is_ai"] or int(GameManager.minigame_scores[1]["score"]) != 64:
 			_fail("restored score or human slot differs")
 			return
 		_publish("passed", {"checks": "WebRTC host: pause, same slot, score delivery", "code": NetworkManager.room_code})
@@ -65,7 +66,16 @@ func _run() -> void:
 		modal.dismiss_guide()
 		await _until(func(): return modal.round_started_locally)
 		await get_tree().create_timer(0.3).timeout
-		modal.score = 432
+		modal._set_arcades_running(false)
+		modal.grid_arcade.ever_adjusted = true
+		modal.grid_arcade.measurement_time = 30.0
+		modal.grid_arcade.gap_integral = 60.0 * (1.0 - 64.0 / 3000.0) * 30.0
+		modal.grid_arcade.phase_adjusted = true
+		modal.grid_arcade.phase_scored = true
+		modal.score = modal.grid_arcade.finalize_balance_score()
+		modal.correct = 2
+		modal.attempts = 2
+		modal.best_streak = 2
 		NetworkManager._begin_reconnect()
 		NetworkManager._next_reconnect_attempt = Time.get_ticks_msec() + 2300
 		_publish("reconnecting")
@@ -75,9 +85,10 @@ func _run() -> void:
 			_fail("guest arcade did not pause")
 			return
 		await _until(func(): return restored)
-		if NetworkManager.get_local_player_index() != 1 or GameManager.players[1]["energy"] != 77 or modal.score != 432:
+		if NetworkManager.get_local_player_index() != 1 or GameManager.players[1]["energy"] != 77 or modal.score != 64:
 			_fail("guest state differs after WebRTC recovery: slot=%d energy=%d score=%d" % [NetworkManager.get_local_player_index(), GameManager.players[1]["energy"], modal.score])
 			return
+		await _until(func(): return GameManager.minigame_time_remaining <= GameManager.MINIGAME_SUBMISSION_GRACE_SECONDS)
 		modal._submit_score()
 		await _until(func(): return GameManager.minigame_scores.has(1))
 		_publish("passed", {"checks": "WebRTC guest: pause, credential, snapshot, local progress"})

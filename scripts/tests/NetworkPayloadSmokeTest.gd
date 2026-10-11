@@ -42,13 +42,20 @@ func _run() -> void:
 	network_manager.is_host = false
 	game_manager.apply_network_patch({
 		"player_updates": {0: expected_player},
-		"game_time_remaining": 123.0
+		"game_time_remaining": 123.0,
+		"active_quiz_time_remaining": 27.0,
+		"last_quiz_choice": "실제로 선택한 보기",
+		"learning_grade": 4,
+		"village_finished_players": {1: true}
 	}, "", [])
 	if int(game_manager.players[0]["energy"]) != 77 or int(game_manager.players[1]["energy"]) != 33:
 		_fail("플레이어 변경분이 지정된 플레이어에만 적용되지 않았습니다.")
 		return
 	if not is_equal_approx(game_manager.game_time_remaining, 123.0):
 		_fail("타이머 변경분이 참가자 상태에 적용되지 않았습니다.")
+		return
+	if game_manager.last_quiz_choice != "실제로 선택한 보기" or not is_equal_approx(game_manager.active_quiz_time_remaining, 27.0) or game_manager.learning_grade != 4 or not game_manager.village_finished_players.has(1):
+		_fail("학년·퀴즈 실제 선택·응답 시간·사람 건설 마침 상태가 참가자에게 적용되어야 합니다.")
 		return
 	network_manager.is_online = false
 

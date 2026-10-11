@@ -5,7 +5,9 @@ class_name StandbyPowerHunt3D
 
 signal arcade_event(points: int, success: bool, message: String, count_correct: bool)
 
+const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
+const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 const ASSET_ROOT := "res://assets/third_party/kenney/standby_house/"
 const WALL = preload(ASSET_ROOT + "wall.glb")
 const WALL_WINDOW = preload(ASSET_ROOT + "wallWindow.glb")
@@ -34,8 +36,8 @@ const DEVICE_SPECS: Array[Dictionary] = [
 	{"x": 16.0, "room": "주방", "name": "조리 중 토스터", "scene": TOASTER, "standby": 0, "active": 700, "can_standby": false, "scale": 1.9, "tint": Color("d3a46d")},
 	{"x": 18.5, "room": "주방", "name": "전자레인지", "scene": preload(ASSET_ROOT + "kitchenMicrowave.glb"), "standby": 3, "active": 90, "can_standby": true, "scale": 1.65, "tint": Color("6e7d91")},
 	{"x": 22.0, "room": "주방", "name": "커피머신", "scene": preload(ASSET_ROOT + "kitchenCoffeeMachine.glb"), "standby": 2, "active": 800, "can_standby": true, "scale": 1.75, "tint": Color("b06e45")},
-	{"x": 28.0, "room": "침실", "name": "노트북", "scene": preload(ASSET_ROOT + "laptop.glb"), "standby": 2, "active": 35, "can_standby": true, "scale": 1.85, "tint": Color("547891")},
-	{"x": 32.0, "room": "침실", "name": "모니터", "scene": preload(ASSET_ROOT + "computerScreen.glb"), "standby": 2, "active": 22, "can_standby": true, "scale": 1.55, "tint": Color("43596c")},
+	{"x": 28.0, "level": 1.05, "room": "침실", "name": "노트북", "scene": preload(ASSET_ROOT + "laptop.glb"), "standby": 2, "active": 35, "can_standby": true, "scale": 1.85, "tint": Color("547891")},
+	{"x": 32.0, "level": 1.05, "room": "침실", "name": "모니터", "scene": preload(ASSET_ROOT + "computerScreen.glb"), "standby": 2, "active": 22, "can_standby": true, "scale": 1.55, "tint": Color("43596c")},
 	{"x": 39.0, "room": "세탁실", "name": "세탁기", "scene": preload(ASSET_ROOT + "washer.glb"), "standby": 0, "active": 500, "can_standby": false, "scale": 1.35, "tint": Color("8bc3cc")},
 	{"x": 43.0, "room": "세탁실", "name": "건조기", "scene": preload(ASSET_ROOT + "dryer.glb"), "standby": 0, "active": 900, "can_standby": false, "scale": 1.35, "tint": Color("9ba9b8")},
 ]
@@ -45,6 +47,8 @@ const RUN_SPEED := 6.4
 const RUN_ACCELERATION := 18.0
 const INTERACTION_DISTANCE := 1.65
 const PASS_DISTANCE := 1.95
+const RECOVERY_SECONDS := 3.5
+const INTERACTION_HEIGHT := 0.65
 const GROUND_Y := 0.04
 const JUMP_IMPULSE := 7.4
 const GRAVITY := 17.5
@@ -69,10 +73,12 @@ var vertical_velocity := 0.0
 var lap_index := 1
 var saved_watts := 0
 var visual_time := 0.0
+var play_elapsed := 0.0
 var space_was_down := false
 var jump_was_down := false
 var device_records: Array[Dictionary] = []
 var barrier_records: Array[Dictionary] = []
+var platform_records: Array[Dictionary] = []
 
 var neutral_material: StandardMaterial3D
 var active_material: StandardMaterial3D
@@ -106,6 +112,7 @@ func setup(player_data: Dictionary, game_seed: int) -> void:
 	vertical_velocity = 0.0
 	space_was_down = false
 	jump_was_down = false
+	play_elapsed = 0.0
 	_spawn_hero(player_data)
 	_build_house_course()
 	running = true
@@ -129,22 +136,8 @@ func _build_viewport() -> void:
 	viewport.add_child(world)
 
 func _build_world() -> void:
-	var environment_node := WorldEnvironment.new()
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color("94c7d3")
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("fff3da")
-	environment.ambient_light_energy = 0.85
-	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	environment_node.environment = environment
-	world.add_child(environment_node)
-	var light := DirectionalLight3D.new()
-	light.rotation_degrees = Vector3(-42, -18, 0)
-	light.light_color = Color("fff0d1")
-	light.light_energy = 1.35
-	light.shadow_enabled = false
-	world.add_child(light)
+	VISUAL_STYLE.add_environment(world, "indoor")
+	VISUAL_STYLE.add_key_light(world, Vector3(-42, -18, 0), "indoor")
 	neutral_material = _material(Color("f5e5c7"), false)
 	active_material = _material(Color("5ee6c0"), true)
 	safe_material = _material(Color("71ed9f"), true)
@@ -170,20 +163,43 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	hero.position = Vector3(1.0, GROUND_Y, 1.0)
 	hero.scale = Vector3.ONE * 2.8
 	hero.call("_set_avatar_animation_state", false)
+	VISUAL_STYLE.style_hero(hero)
 
 func _build_house_course() -> void:
 	if is_instance_valid(course_root):
 		course_root.queue_free()
 	device_records.clear()
 	barrier_records.clear()
+	platform_records.clear()
 	course_root = Node3D.new()
 	course_root.name = "KenneyHouseLap%d" % lap_index
 	world.add_child(course_root)
 	_build_house_shell()
 	_build_room_decor()
 	_build_jump_barriers()
+	_build_upper_route()
 	for device_index in range(DEVICE_SPECS.size()):
 		_build_device(device_index, DEVICE_SPECS[device_index])
+
+func _build_upper_route() -> void:
+	# One short optional upper route adds a jump choice without a maze of controls.
+	for spec in [{"left": 25.0, "right": 26.3, "height": 0.45}, {"left": 26.8, "right": 33.8, "height": 1.05}, {"left": 34.2, "right": 35.4, "height": 0.45}]:
+		var left := float(spec["left"])
+		var height := float(spec["height"])
+		var platform := FLOOR.instantiate() as Node3D
+		platform.name = "UpperRouteFloor"
+		platform.position = Vector3(left, height - 0.05, 1.6)
+		platform.scale = Vector3(float(spec["right"]) - left, 1.0, 1.4)
+		course_root.add_child(platform)
+		_apply_model_tint(platform, Color("d9b47b"))
+		platform_records.append(spec)
+	var sign := Label3D.new()
+	sign.text = "↑ 점프해서 위층 기기도 확인!"
+	sign.position = Vector3(28.5, 4.0, 0.6)
+	sign.font_size = 40
+	sign.pixel_size = 0.006
+	sign.no_depth_test = true
+	course_root.add_child(sign)
 
 func _build_house_shell() -> void:
 	for tile_x in range(48):
@@ -249,7 +265,8 @@ func _model_bounds(model_root: Node3D) -> AABB:
 
 func _build_device(device_index: int, spec: Dictionary) -> void:
 	var station := Node3D.new()
-	station.position = Vector3(float(spec["x"]), 0.0, 0.22)
+	var level := float(spec.get("level", 0.0))
+	station.position = Vector3(float(spec["x"]), level, 0.22)
 	station.name = "Device_%s" % str(spec["name"])
 	course_root.add_child(station)
 	var model := (spec["scene"] as PackedScene).instantiate() as Node3D
@@ -260,6 +277,8 @@ func _build_device(device_index: int, spec: Dictionary) -> void:
 	var can_standby := bool(spec["can_standby"])
 	var is_waste := can_standby and (str(spec["name"]) == "TV" or rng.randf() < 0.58)
 	var watts := int(spec["standby"] if is_waste else spec["active"])
+	_set_model_activity(model, not is_waste)
+	VISUAL_STYLE.prepare_imported(model)
 	var plug := MeshInstance3D.new()
 	plug.name = "Plug"
 	var plug_mesh := BoxMesh.new()
@@ -270,7 +289,7 @@ func _build_device(device_index: int, spec: Dictionary) -> void:
 	station.add_child(plug)
 	var status := Label3D.new()
 	status.name = "StatusLabel"
-	status.position = Vector3(0, 2.45, 0.15)
+	status.position = Vector3(0, 1.55, 0.15)
 	status.text = "%s\n%s · %d W" % [str(spec["name"]), "전원 꺼짐" if is_waste else "사용 중", watts]
 	status.font_size = 46
 	status.pixel_size = 0.006
@@ -289,19 +308,20 @@ func _build_device(device_index: int, spec: Dictionary) -> void:
 		activity.position = Vector3(-0.72, 0.45, 0.5)
 		activity.material_override = active_material
 		station.add_child(activity)
-	device_records.append({"node": station, "x": float(spec["x"]), "name": str(spec["name"]), "room": str(spec["room"]), "waste": is_waste, "watt": watts, "resolved": false, "label": status, "plug": plug})
+	device_records.append({"node": station, "model": model, "x": float(spec["x"]), "level": level, "name": str(spec["name"]), "room": str(spec["room"]), "waste": is_waste, "powered": not is_waste, "watt": watts, "resolved": false, "label": status, "plug": plug, "miss_deadline": -1.0})
 
 func _process(delta: float) -> void:
 	visual_time += delta
 	_animate_scene()
 	if not running or not is_instance_valid(hero):
 		return
+	play_elapsed += delta
 	var direction := Input.get_axis("ui_left", "ui_right")
-	if Input.is_key_pressed(KEY_A): direction -= 1.0
-	if Input.is_key_pressed(KEY_D): direction += 1.0
+	if MINIGAME_INPUT.is_pressed(KEY_A): direction -= 1.0
+	if MINIGAME_INPUT.is_pressed(KEY_D): direction += 1.0
 	direction = clampf(direction, -1.0, 1.0)
-	var jump_down := Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP)
-	if jump_down and not jump_was_down and hero.position.y <= GROUND_Y + 0.01:
+	var jump_down := MINIGAME_INPUT.is_pressed(KEY_W) or MINIGAME_INPUT.is_pressed(KEY_UP)
+	if jump_down and not jump_was_down and is_zero_approx(vertical_velocity) and hero.position.y <= _floor_height_at(hero.position.x, hero.position.y) + 0.02:
 		vertical_velocity = JUMP_IMPULSE
 	jump_was_down = jump_down
 	_update_jump(delta)
@@ -317,7 +337,7 @@ func _process(delta: float) -> void:
 	camera.look_at(Vector3(camera.position.x, 2.25, 0.0), Vector3.UP)
 	_update_device_passes()
 	_update_hud()
-	var space_down := Input.is_key_pressed(KEY_SPACE)
+	var space_down := MINIGAME_INPUT.is_pressed(KEY_SPACE)
 	if space_down and not space_was_down:
 		_try_disconnect()
 	space_was_down = space_down
@@ -325,14 +345,29 @@ func _process(delta: float) -> void:
 		_start_new_lap()
 
 func _update_jump(delta: float) -> void:
-	if hero.position.y > GROUND_Y or vertical_velocity > 0.0:
-		hero.position.y += vertical_velocity * delta
+	var floor_height := _floor_height_at(hero.position.x, hero.position.y)
+	if hero.position.y > floor_height + 0.01 or not is_zero_approx(vertical_velocity):
+		var previous_y := hero.position.y
+		hero.position.y += vertical_velocity * delta - 0.5 * GRAVITY * delta * delta
 		vertical_velocity -= GRAVITY * delta
-		if hero.position.y <= GROUND_Y:
-			hero.position.y = GROUND_Y
+		var landing_height := GROUND_Y
+		if vertical_velocity <= 0.0:
+			for platform in platform_records:
+				var height := float(platform["height"])
+				if hero.position.x >= float(platform["left"]) and hero.position.x <= float(platform["right"]) and previous_y >= height - 0.01 and hero.position.y <= height:
+					landing_height = maxf(landing_height, height)
+		if hero.position.y <= landing_height:
+			hero.position.y = landing_height
 			vertical_velocity = 0.0
 	if hero.has_method("_update_ground_shadow"):
-		hero.call("_update_ground_shadow", GROUND_Y, hero.position.y - GROUND_Y)
+		hero.call("_update_ground_shadow", floor_height, hero.position.y - floor_height)
+
+func _floor_height_at(x_pos: float, y_pos: float) -> float:
+	var height := GROUND_Y
+	for platform in platform_records:
+		if x_pos >= float(platform["left"]) and x_pos <= float(platform["right"]) and y_pos >= float(platform["height"]) - 0.02:
+			height = maxf(height, float(platform["height"]))
+	return height
 
 func _constrain_by_furniture(from_x: float, desired_x: float) -> float:
 	for barrier in barrier_records:
@@ -358,14 +393,25 @@ func _animate_scene() -> void:
 		var glow := node.get_node_or_null("ActivityGlow") as MeshInstance3D
 		if glow:
 			glow.scale = Vector3.ONE * (0.82 + sin(visual_time * 6.0 + float(record["x"])) * 0.18)
+		var model := record.get("model") as Node3D
+		if is_instance_valid(model) and bool(record.get("powered", false)):
+			if "오디오" in str(record["name"]) or "스피커" in str(record["name"]):
+				model.rotation_degrees.z = sin(visual_time * 8.0) * 2.0
+			elif str(record["name"]) in ["세탁기", "건조기"]:
+				model.rotation_degrees.z = sin(visual_time * 16.0) * 0.8
 
 func _update_device_passes() -> void:
-	if run_velocity <= 0.1:
-		return
 	for record in device_records:
 		if bool(record["resolved"]): continue
-		if hero.position.x > float(record["x"]) + PASS_DISTANCE:
+		var deadline := float(record.get("miss_deadline", -1.0))
+		if deadline >= 0.0 and play_elapsed >= deadline:
 			_resolve_device(record, false)
+		elif deadline < 0.0 and run_velocity > 0.1 and hero.position.x > float(record["x"]) + PASS_DISTANCE:
+			if bool(record["waste"]):
+				record["miss_deadline"] = play_elapsed + RECOVERY_SECONDS
+				(record["label"] as Label3D).text = "%s\n← 아직 돌아가서 차단할 수 있어요" % str(record["name"])
+			else:
+				_resolve_device(record, false)
 
 func _nearest_unresolved_device() -> Dictionary:
 	var nearest: Dictionary = {}
@@ -373,7 +419,8 @@ func _nearest_unresolved_device() -> Dictionary:
 	for record in device_records:
 		if bool(record["resolved"]): continue
 		var distance := absf(hero.position.x - float(record["x"]))
-		if distance <= INTERACTION_DISTANCE and distance < best_distance:
+		var same_level := absf(hero.position.y - (GROUND_Y + float(record.get("level", 0.0)))) <= INTERACTION_HEIGHT
+		if distance <= INTERACTION_DISTANCE and same_level and distance < best_distance:
 			nearest = record
 			best_distance = distance
 	return nearest
@@ -396,6 +443,10 @@ func _resolve_device(record: Dictionary, disconnect: bool) -> void:
 	var status := record["label"] as Label3D
 	var plug := record["plug"] as MeshInstance3D
 	if disconnect:
+		record["powered"] = false
+		_set_model_activity(record["model"] as Node3D, false)
+		var activity := (record["node"] as Node3D).get_node_or_null("ActivityGlow")
+		if activity: activity.visible = false
 		if is_instance_valid(plug):
 			plug.material_override = safe_material if is_waste else danger_material
 			var tween := create_tween().set_parallel(true)
@@ -423,6 +474,8 @@ func _resolve_device(record: Dictionary, disconnect: bool) -> void:
 			status.modulate = Color("84eab7")
 
 func _start_new_lap() -> void:
+	for record in device_records:
+		if not bool(record["resolved"]): _resolve_device(record, false)
 	lap_index += 1
 	hero.position.x = 0.8
 	hero.position.y = GROUND_Y
@@ -442,6 +495,11 @@ func _update_hud() -> void:
 			return
 	var nearest := _nearest_unresolved_device()
 	if nearest.is_empty():
+		for record in device_records:
+			var deadline := float(record.get("miss_deadline", -1.0))
+			if not bool(record["resolved"]) and deadline > play_elapsed:
+				action_label.text = "← %s 돌아가서 차단 · %.1f초" % [str(record["name"]), deadline - play_elapsed]
+				return
 		action_label.text = "A/D로 집 안을 이동하세요"
 	else:
 		action_label.text = "[SPACE] %s 플러그 확인" % str(nearest["name"])
@@ -450,7 +508,7 @@ func _update_hud() -> void:
 func _build_overlay() -> void:
 	var help := Label.new()
 	help.position = Vector2(14, 9)
-	help.text = "A/D 이동    W/↑ 가구 넘기    SPACE 꺼진 기기 플러그 뽑기    사용 중인 기기는 그대로!"
+	help.text = "A/D 이동 · W/↑ 점프 · SPACE 꺼진 기기 차단 · 놓치면 잠깐 돌아갈 수 있어요"
 	help.add_theme_font_size_override("font_size", 16)
 	help.add_theme_color_override("font_color", Color("fff0b3"))
 	help.add_theme_color_override("font_outline_color", Color("18343d"))
@@ -492,9 +550,9 @@ func _place_model(scene: PackedScene, position_value: Vector3, scale_value: floa
 	course_root.add_child(model)
 	var tint := Color.WHITE
 	match node_name:
-		"Floor": tint = Color("c39a6b")
-		"Wall", "RoomDivider": tint = Color("ecd6ad")
-		"Sofa": tint = Color("4d91a5")
+		"Floor": tint = VISUAL_STYLE.CREAM
+		"Wall", "RoomDivider": tint = VISUAL_STYLE.WALL
+		"Sofa": tint = VISUAL_STYLE.TEAL
 		"CoffeeTable", "TvCabinet", "SideTable", "Bookcase", "JumpFurniture": tint = Color("956a49")
 		"KitchenCabinet": tint = Color("ddb878")
 		"Bed": tint = Color("89b6c7")
@@ -503,6 +561,7 @@ func _place_model(scene: PackedScene, position_value: Vector3, scale_value: floa
 		_: pass
 	if tint != Color.WHITE:
 		_apply_model_tint(model, tint)
+	VISUAL_STYLE.prepare_imported(model)
 	return model
 
 func _apply_model_tint(model_root: Node3D, tint: Color) -> void:
@@ -519,12 +578,18 @@ func _apply_model_tint(model_root: Node3D, tint: Color) -> void:
 			material.albedo_color *= tint
 			mesh_instance.set_surface_override_material(surface_index, material)
 
+func _set_model_activity(model_root: Node3D, active: bool) -> void:
+	for mesh_node in model_root.find_children("*", "MeshInstance3D", true, false):
+		var mesh := mesh_node as MeshInstance3D
+		if mesh.mesh == null: continue
+		for index in range(mesh.mesh.get_surface_count()):
+			var source := mesh.get_active_material(index)
+			var material := source.duplicate() as StandardMaterial3D if source is StandardMaterial3D else StandardMaterial3D.new()
+			material.emission_enabled = active
+			material.emission = Color("75dfff")
+			material.emission_energy_multiplier = 0.18
+			if not active: material.albedo_color *= Color(0.60, 0.65, 0.72)
+			mesh.set_surface_override_material(index, material)
+
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.72
-	if glowing:
-		material.emission_enabled = true
-		material.emission = color
-		material.emission_energy_multiplier = 1.2
-	return material
+	return VISUAL_STYLE.material(color, glowing)

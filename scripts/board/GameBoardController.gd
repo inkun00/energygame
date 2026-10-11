@@ -7,6 +7,7 @@ const TileMarker3D = preload("res://scripts/board/TileMarker3D.gd")
 const BoardItemPickup3D = preload("res://scripts/board/BoardItemPickup3D.gd")
 const SpecialSkillEffect3D = preload("res://scripts/effects/SpecialSkillEffect3D.gd")
 const EnergyFairyVillage3D = preload("res://scripts/board/EnergyFairyVillage3D.gd")
+const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 
 @onready var viewport: SubViewport = $ViewportContainer/SubViewport
 @onready var viewport_container: SubViewportContainer = $ViewportContainer
@@ -68,12 +69,17 @@ const CAMERA_RESTORE_SECONDS := 0.48
 
 func set_board_active(is_active: bool) -> void:
 	visible = is_active
+	if is_instance_valid(minigame_modal):
+		minigame_modal.set_surface_enabled(is_active)
 	if is_instance_valid(ui_layer):
 		ui_layer.visible = is_active
 	if is_instance_valid(modals_layer):
 		modals_layer.visible = is_active
 	if is_instance_valid(viewport):
 		viewport.get_parent().visible = is_active
+		viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if is_active else SubViewport.UPDATE_DISABLED
+	if is_instance_valid(energy_fairy_village):
+		energy_fairy_village.set_process(is_active)
 
 func _ready() -> void:
 	# CanvasLayer는 숨겨진 부모와 별개로 표시될 수 있으므로, 로비 단계에서는
@@ -88,9 +94,13 @@ func _ready() -> void:
 	# 아이템과 텍스처도 로딩 화면이 떠 있는 초기화 단계에서 한 번 만들어 둡니다.
 	# 게임 시작 버튼을 누른 뒤 98개 Sprite3D를 만드는 정지를 없앱니다.
 	_reset_tile_item_pickups()
+	# One-time matte normalization also applies to the board's imported scenery.
+	# Recovery still changes the ruined village into a green village below.
+	VISUAL_STYLE.prepare_imported(world3d)
 	viewport_container.gui_input.connect(_on_board_gui_input)
 	if hud.has_signal("board_zoom_requested"):
 		hud.connect("board_zoom_requested", _zoom_board)
+	_build_board_overview_button()
 	if hud.has_signal("special_skill_tile_targets_changed"):
 		hud.connect("special_skill_tile_targets_changed", _on_special_skill_tile_targets_changed)
 	
@@ -135,6 +145,7 @@ func _build_energy_fairy_village_backdrop() -> void:
 	energy_fairy_village = EnergyFairyVillage3D.new()
 	world3d.add_child(energy_fairy_village)
 	energy_fairy_village.build_village()
+	energy_fairy_village.set_process(visible)
 
 func _process(delta: float) -> void:
 	if camera_follow_active and is_instance_valid(camera_follow_pawn):
@@ -160,6 +171,39 @@ func _configure_3d_camera() -> void:
 	camera3d.fov = 45.0
 	camera3d.current = true
 	_apply_camera_distance(camera_distance)
+
+func _build_board_overview_button() -> void:
+	var rail := hud.get_node_or_null("RightRail") as VBoxContainer
+	if not rail:
+		return
+	var button := Button.new()
+	button.name = "OverviewButton"
+	button.text = "전체"
+	button.custom_minimum_size = Vector2(52, 42)
+	button.add_theme_font_size_override("font_size", 16)
+	button.tooltip_text = "100칸 전체 보기 (Home 키)"
+	preload("res://scripts/ui/CommercialUI.gd").apply_secondary_button(button)
+	button.pressed.connect(_show_board_overview)
+	rail.add_child(button)
+
+func _show_board_overview() -> void:
+	_cancel_camera_follow()
+	if camera_zoom_tween and camera_zoom_tween.is_valid():
+		camera_zoom_tween.kill()
+	camera_yaw = 0.0
+	camera_pitch = deg_to_rad(62.0)
+	camera_focus = Vector3.ZERO
+	camera_distance = CAMERA_MAX_DISTANCE
+	_apply_camera_transform()
+	if hud.has_method("show_zoom_level"):
+		hud.show_zoom_level(70)
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not visible or quiz_modal.visible or minigame_modal.visible:
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_HOME:
+		_show_board_overview()
+		get_viewport().set_input_as_handled()
 
 func _apply_camera_distance(distance_value: float) -> void:
 	camera_distance = clampf(distance_value, CAMERA_MIN_DISTANCE, CAMERA_MAX_DISTANCE)
@@ -536,6 +580,7 @@ func start_board_game(player_configs: Array[Dictionary], duration_seconds: int =
 		var pawn = PlayerPawn.new()
 		pawns_container.add_child(pawn)
 		pawn.setup_player(p_data)
+		VISUAL_STYLE.style_hero(pawn)
 		player_pawns.append(pawn)
 		
 	if hud and hud.has_method("initialize_hud"):
@@ -563,6 +608,7 @@ func begin_render_warmup() -> void:
 	# 미리 컴파일합니다. HUD와 모달은 로비 위로 나타나지 않게 유지합니다.
 	visible = true
 	viewport_container.visible = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	ui_layer.visible = false
 	modals_layer.visible = false
 
@@ -656,8 +702,8 @@ func _on_kingdom_progress_changed(projects_built: int, total_projects: int, heal
 		board_base_material.emission_enabled = recovery > 0.0
 		board_base_material.emission = Color("1fbf80") * recovery * 0.32
 	if world_environment and world_environment.environment:
-		world_environment.environment.ambient_light_color = Color("5d6972").lerp(Color("8fe2b7"), recovery)
-		world_environment.environment.ambient_light_energy = lerpf(0.55, 1.05, recovery)
+		world_environment.environment.ambient_light_color = Color("5d6972").lerp(Color("e5eee2"), recovery)
+		world_environment.environment.ambient_light_energy = lerpf(0.55, 0.70, recovery)
 	while built_landmark_count < projects_built and built_landmark_count < total_projects:
 		_add_renewable_landmark(built_landmark_count)
 		built_landmark_count += 1

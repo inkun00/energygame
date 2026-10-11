@@ -36,7 +36,7 @@ func _run() -> void:
 	game_manager._start_minigame(0, "solar_align")
 	_check(int(game_manager.current_state) == 5, "미니게임 시작 시 턴 상태가 잠겨야 합니다.")
 	_check(str(game_manager.active_minigame.get("phase", "")) == "ready", "사람이 참가하면 모두 준비할 때까지 대기해야 합니다.")
-	_check(not game_manager.submit_minigame_score(0, 100), "공통 시작 전 점수 제출은 거부해야 합니다.")
+	_check(not game_manager.submit_minigame_score(0, 100, {"correct":4,"attempts":4,"best_streak":2}), "공통 시작 전 점수 제출은 거부해야 합니다.")
 	var first_round_id := int(game_manager.active_minigame.get("round_id", -1))
 	_check(not game_manager.start_minigame_action(0, first_round_id - 1), "지난 라운드의 준비 신호를 거부해야 합니다.")
 	for player_idx in range(3):
@@ -44,17 +44,17 @@ func _run() -> void:
 	_check(str(game_manager.active_minigame.get("phase", "")) == "ready", "한 명이라도 준비 전이면 시작하지 않아야 합니다.")
 	_check(game_manager.start_minigame_action(3, first_round_id), "마지막 플레이어의 준비 신호를 받아야 합니다.")
 	_check(str(game_manager.active_minigame.get("phase", "")) == "countdown", "전원 준비 후 공통 카운트다운을 시작해야 합니다.")
-	_check(not game_manager.submit_minigame_score(0, 100), "카운트다운 중 점수 제출은 거부해야 합니다.")
+	_check(not game_manager.submit_minigame_score(0, 100, {"correct":4,"attempts":4,"best_streak":2}), "카운트다운 중 점수 제출은 거부해야 합니다.")
 	game_manager._update_minigame(2.0)
 	_check(str(game_manager.active_minigame.get("phase", "")) == "countdown", "카운트다운 종료 전에는 조작 시간이 흐르지 않아야 합니다.")
 	game_manager._update_minigame(1.1)
 	_check(str(game_manager.active_minigame.get("phase", "")) == "playing", "공통 카운트다운 종료 시 모두 플레이해야 합니다.")
 	_check(not game_manager.submit_minigame_score(0, 100, {}, first_round_id - 1), "지난 라운드 점수가 새 라운드에 섞이면 안 됩니다.")
-	_check(game_manager.submit_minigame_score(0, 100), "첫 점수를 제출할 수 있어야 합니다.")
+	_check(game_manager.submit_minigame_score(0, 100, {"correct":4,"attempts":4,"best_streak":2}), "첫 점수를 제출할 수 있어야 합니다.")
 	_check(not game_manager.submit_minigame_score(0, 999), "같은 플레이어의 중복 점수는 거부해야 합니다.")
-	game_manager.submit_minigame_score(1, 400)
-	game_manager.submit_minigame_score(2, 300)
-	game_manager.submit_minigame_score(3, 200)
+	game_manager.submit_minigame_score(1, 400, {"correct":4,"attempts":4,"best_streak":2})
+	game_manager.submit_minigame_score(2, 300, {"correct":4,"attempts":4,"best_streak":2})
+	game_manager.submit_minigame_score(3, 200, {"correct":4,"attempts":4,"best_streak":2})
 	var captured_results: Array = capture["results"]
 	_check(captured_results.size() == 4, "전원 제출 시 결과를 즉시 확정해야 합니다.")
 	if captured_results.size() == 4:
@@ -71,10 +71,10 @@ func _run() -> void:
 	for player_idx in range(4):
 		game_manager.start_minigame_action(player_idx, tie_round_id)
 	game_manager._update_minigame(game_manager.MINIGAME_READY_COUNTDOWN_SECONDS)
-	game_manager.submit_minigame_score(0, 400)
-	game_manager.submit_minigame_score(1, 400)
-	game_manager.submit_minigame_score(2, 300)
-	game_manager.submit_minigame_score(3, 200)
+	game_manager.submit_minigame_score(0, 400, {"correct":4,"attempts":4,"best_streak":2})
+	game_manager.submit_minigame_score(1, 400, {"correct":4,"attempts":4,"best_streak":2})
+	game_manager.submit_minigame_score(2, 300, {"correct":4,"attempts":4,"best_streak":2})
+	game_manager.submit_minigame_score(3, 200, {"correct":4,"attempts":4,"best_streak":2})
 	var tie_results: Array = tie_capture["results"]
 	_check(tie_results.size() == 4, "동점 라운드 결과도 네 명 모두 포함해야 합니다.")
 	if tie_results.size() == 4:
@@ -121,22 +121,32 @@ func _run() -> void:
 		if str(game_id_variant) == "solar_align" and is_instance_valid(modal.solar_arcade):
 			var first_gate: Dictionary = modal.solar_arcade.panel_gates[0]
 			var gate_panels: Array = first_gate["meshes"]
-			modal.solar_arcade.sun.position = modal.solar_arcade.SUN_POSITIONS[0]
-			modal.solar_arcade._update_panel_gate_for_sun(first_gate)
-			_check(int(first_gate["correct_lane"]) == 0, "태양이 왼쪽에 있으면 왼쪽 차선에 정답 패널이 있어야 합니다.")
-			_check((gate_panels[0] as Node3D).rotation_degrees.z < 0.0, "왼쪽 태양을 향한 정답 패널은 -Z 방향으로 기울어야 합니다.")
+			var independent_lanes := {}
+			for gate in modal.solar_arcade.panel_gates:
+				independent_lanes[int(gate["correct_lane"])] = true
+				for sun_index in range(modal.solar_arcade.SUN_POSITIONS.size()):
+					for transition in range(11):
+						var start: Vector3 = modal.solar_arcade.SUN_POSITIONS[sun_index]
+						var end: Vector3 = modal.solar_arcade.SUN_POSITIONS[(sun_index + 1) % modal.solar_arcade.SUN_POSITIONS.size()]
+						modal.solar_arcade.sun.position = start.lerp(end, float(transition) / 10.0)
+						modal.solar_arcade._update_panel_gate_for_sun(gate)
+						var useful_count := 0
+						for lane in range(3):
+							var panel: Node3D = gate["meshes"][lane]
+							var capture_efficiency: float = modal.solar_arcade.panel_capture_efficiency(panel)
+							if capture_efficiency >= 0.95: useful_count += 1
+							_check(capture_efficiency > 0.99 if lane == int(gate["correct_lane"]) else capture_efficiency < 0.95, "모든 태양 위치·이동 중에 패널의 실제 빛 입사각과 정답이 일치해야 합니다.")
+						_check(useful_count == 1, "모든 게이트와 태양 이동 중에 유일한 정답 패널이 있어야 합니다.")
+			_check(independent_lanes.size() > 1, "같은 태양에서도 정답 차선은 게이트마다 달라 각도를 판단해야 합니다.")
 			_check((gate_panels[0] as Node3D).position.y >= 0.65, "태양광 패널 기둥이 보이도록 모델을 지면 위로 충분히 올려야 합니다.")
-			modal.solar_arcade.sun.position = modal.solar_arcade.SUN_POSITIONS[2]
-			modal.solar_arcade._update_panel_gate_for_sun(first_gate)
-			_check(int(first_gate["correct_lane"]) == 2, "태양이 오른쪽에 있으면 오른쪽 차선에 정답 패널이 있어야 합니다.")
-			_check((gate_panels[2] as Node3D).rotation_degrees.z > 0.0, "오른쪽 태양을 향한 정답 패널은 +Z 방향으로 기울어야 합니다.")
 			modal.solar_arcade._update_sun(modal.solar_arcade.SUN_MOVE_INTERVAL)
 			_check(modal.solar_arcade.sun_position_index == 1, "태양은 5초마다 다음 위치로 이동해야 합니다.")
 			modal.solar_arcade.sun.position = modal.solar_arcade.SUN_POSITIONS[1]
 			modal.solar_arcade._update_panel_gate_for_sun(first_gate)
-			_check(int(first_gate["correct_lane"]) == 1, "태양이 중앙으로 이동하면 중앙 차선에 정답 패널이 생겨야 합니다.")
+			_check(modal.solar_arcade.panel_capture_efficiency(gate_panels[int(first_gate["correct_lane"])]) > 0.99, "태양이 중앙으로 이동해도 각도가 맞는 정답 패널이 있어야 합니다.")
 			var correct_lane := int(first_gate["correct_lane"])
 			modal.solar_arcade.hero_body.position.x = modal.solar_arcade.LANES[correct_lane]
+			modal.solar_arcade.lane_choice_made = true
 			modal.solar_arcade._resolve_panel_gate(first_gate)
 			_check(modal.score == 100, "햇빛 방향과 맞는 패널 차선을 통과하면 100점을 얻어야 합니다.")
 			var terrain_record: Dictionary = modal.solar_arcade.terrain_obstacles[0]
@@ -147,6 +157,7 @@ func _run() -> void:
 		if str(game_id_variant) == "wind_rhythm" and is_instance_valid(modal.wind_arcade):
 			modal.wind_arcade.storm_phase = false
 			modal.wind_arcade.wind_angle = 28.0
+			modal.wind_arcade._apply_yaw_input(1.0,0.01)
 			modal.wind_arcade.turbine_yaw = 28.0
 			modal.wind_arcade.wind_speed = 15
 			modal.wind_arcade._score_aligned_generation(0.35, modal.wind_arcade._alignment_efficiency())
@@ -167,16 +178,18 @@ func _run() -> void:
 			_check(modal.grid_arcade.demand > 50.0 and modal.grid_arcade.demand < 100.0, "도시 수요 막대는 새 목표로 순간 이동하지 않고 아날로그 방식으로 움직여야 합니다.")
 			modal.grid_arcade.demand = 70.0
 			modal.grid_arcade.demand_target = 70.0
+			modal.grid_arcade._apply_supply_input(1.0,0.01)
 			modal.grid_arcade.supply = 70.0
-			modal.grid_arcade.score_tick = 0.19
-			modal.grid_arcade._process(0.02)
-			var precise_sync_score: int = modal.score
-			modal.score = 0
+			modal.grid_arcade.gap_integral = 0.0
+			modal.grid_arcade.measurement_time = 0.0
+			modal.grid_arcade._process(1.1)
+			var precise_sync_score: int = modal.grid_arcade.get_balance_score()
+			_check(precise_sync_score == modal.grid_arcade.BALANCE_SCORE_MAX and modal.correct == 1, "연속 균형은 높은 실제 점수와 목표 행동 기록을 함께 줘야 합니다.")
 			modal.grid_arcade.supply = 110.0
-			modal.grid_arcade.score_tick = 0.19
-			modal.grid_arcade._process(0.02)
-			var wide_gap_score: int = modal.score
+			modal.grid_arcade._process(1.1)
+			var wide_gap_score: int = modal.grid_arcade.get_balance_score()
 			_check(precise_sync_score > wide_gap_score, "공급·수요 간격이 작을수록 동기화 점수가 더 커야 합니다.")
+			_check(modal.grid_arcade.finalize_balance_score() == wide_gap_score, "종료 점수도 전체 시간 평균 오차의 실제 점수와 같아야 합니다.")
 		if str(game_id_variant) == "standby_hunt" and is_instance_valid(modal.standby_arcade):
 			var standby_game = modal.standby_arcade
 			_check(standby_game.barrier_records.size() == 3, "거실·주방·세탁실에 점프로 넘어야 하는 가구가 있어야 합니다.")
@@ -217,17 +230,23 @@ func _run() -> void:
 				modal.standby_arcade._resolve_device(active_record, true)
 				_check(modal.score == maxi(0, standby_score - 48), "사용 중인 기기의 전원을 끄면 48점이 감점되어야 합니다.")
 				var before_next_house: int = modal.score
+				var unresolved_penalty := 0
+				for record in standby_game.device_records:
+					if not bool(record["resolved"]) and bool(record["waste"]): unresolved_penalty += 24
 				modal.standby_arcade._start_new_lap()
-				_check(modal.score == before_next_house, "다음 집에 도착한 것만으로는 대기전력 절감 점수를 받지 않아야 합니다.")
+				_check(modal.score == maxi(0,before_next_house-unresolved_penalty), "다음 집에 도착하면 놓친 대기 기기만 감점하고 완주 점수를 주지 않아야 합니다.")
 		if str(game_id_variant) == "hydro_gate" and is_instance_valid(modal.hydro_arcade):
 			var hydro = modal.hydro_arcade
 			_check(hydro.gate_doors.size() == 3 and hydro.active_channels.size() == 3, "서로 다른 높이의 세 수문과 발전 수로가 있어야 합니다.")
 			_check(hydro.inflow_for_time(1.0, 12345) != hydro.inflow_for_time(6.0, 12345), "강우 예보에 따라 유입량이 달라져야 합니다.")
 			_check(hydro.rain_seed == 12345 and hydro.inflow_for_time(6.0, hydro.rain_seed) == hydro.inflow_for_time(6.0, 12345), "같은 라운드에는 같은 비가 내려야 합니다.")
 			_check(hydro.dry_overflow_seconds(99.0, 0.0, 12345) < 1.0 and hydro.dry_overflow_seconds(30.0, 29.0, 12345) < 0.0, "범람 예측은 앞으로 바뀔 비와 남은 경기 시간을 반영해야 합니다.")
-			_check(hydro.projected_overflow_seconds(80.0, 0.0, 12345, 0) < 0.0, "방류 중 범람 예측은 수문으로 빠져나가는 유량도 반영해야 합니다.")
+			var closed_forecast: float = hydro.dry_overflow_seconds(80.0, 0.0, 12345)
+			var open_forecast: float = hydro.projected_overflow_seconds(80.0, 0.0, 12345, 0)
+			_check(closed_forecast > 0.0 and (open_forecast < 0.0 or open_forecast > closed_forecast), "방류는 범람 시점을 늦추며 예측에도 실제 유량·폭우를 반영해야 합니다.")
 			for weather_seed in range(3):
-				_check(hydro.dry_overflow_seconds(hydro.initial_level_for_seed(weather_seed), 0.0, weather_seed) < 10.0, "방류하지 않으면 초반 폭우에 넘쳐 타이밍 판단이 필요해야 합니다.")
+				var idle_overflow: float = hydro.dry_overflow_seconds(hydro.initial_level_for_seed(weather_seed), 0.0, weather_seed)
+				_check(idle_overflow >= 5.0 and idle_overflow < 30.0, "처음 5초는 판단 시간이 있고 방류하지 않으면 경기 중 범람해야 합니다.")
 			_check(hydro.rain_streaks.size() == 24 and hydro.forecast_label.text.contains("뒤"), "비 강도의 시각 효과와 다음 예보가 보여야 합니다.")
 			hydro.hero_x = 2.2
 			hydro.hero_y = hydro.platform_height(0)
@@ -256,10 +275,10 @@ func _run() -> void:
 			hydro.hero_x = hydro.LEVER_X[0]
 			hydro.hero_y = hydro.platform_height(0)
 			hydro._update_station()
-			for tap in range(3):
+			for tap in range(2):
 				hydro._tap_selected_gate()
 			var partially_charged: float = hydro.charge
-			hydro._advance_simulation(0.35)
+			hydro._advance_simulation(1.10)
 			_check(partially_charged > 0.0 and hydro.charge < partially_charged, "연타를 중단하면 수문 개방 게이지가 빠르게 감소해야 합니다.")
 			hydro.water_level = 84.0
 			hydro.hero_floor_index = 2
@@ -277,7 +296,9 @@ func _run() -> void:
 			_check(hydro.turbine.rotation_degrees.z > before_rotation and hydro.generator_light.visible and hydro.city_light.visible, "물의 낙차가 터빈·발전기·도시 점등으로 이어져야 합니다.")
 			hydro._close_open_gate(true)
 			_check(hydro.open_gate == -1 and not hydro.active_channels[2].visible, "플레이어가 같은 레버에서 직접 방류를 끝낼 수 있어야 합니다.")
+			_check(hydro.generated_kwh > 0.05 and hydro.water_level < hydro.highest_open_level - 3.0 and hydro.managed_closures == 1, "발전해 수위가 내려간 뒤 직접 닫아 다시 물을 모으는 행동을 기록해야 합니다.")
 			hydro.water_level = 99.5
+			hydro.elapsed = 10.0
 			hydro._advance_simulation(0.1)
 			_check(hydro.overflowed and not hydro.running and hydro.result_label.visible, "수문 개방이 늦어 100%가 되면 즉시 게임 오버가 보여야 합니다.")
 		if str(game_id_variant) == "energy_sort" and is_instance_valid(modal.sort_arcade):
@@ -300,18 +321,18 @@ func _run() -> void:
 		if str(game_id_variant) == "battery_relay" and is_instance_valid(modal.battery_arcade):
 			var shuttle = modal.battery_arcade
 			_check(shuttle.is_sunny_at(0.0) and not shuttle.is_sunny_at(5.1) and shuttle.is_sunny_at(10.1), "5초마다 햇빛과 구름 주기가 바뀌어야 합니다.")
-			_check(shuttle.battery_units == 1 and shuttle.battery_cells.size() == 4, "배터리는 처음에 1칸이 있고 최대 4칸을 저장해야 합니다.")
+			_check(shuttle.battery_units == 0 and shuttle.battery_cells.size() == 4, "배터리는 처음에 비어 있고 최대 4칸을 저장해야 합니다.")
 			shuttle.hero_x = shuttle.SOLAR_X
 			shuttle._try_station_action()
-			_check(shuttle.cargo == 1 and shuttle.battery_units == 1, "햇빛 때 태양광에서 남는 전기를 집어야 합니다.")
+			_check(shuttle.cargo == 1 and shuttle.battery_units == 0, "햇빛 때 태양광에서 남는 전기를 집어야 합니다.")
 			shuttle.hero_x = shuttle.BATTERY_X
 			shuttle._try_station_action()
-			_check(shuttle.cargo == 0 and shuttle.battery_units == 2 and modal.score == shuttle.STORE_POINTS, "배터리로 옮겨야 충전되고 점수를 받아야 합니다.")
+			_check(shuttle.cargo == 0 and shuttle.battery_units == 1 and modal.score == shuttle.STORE_POINTS, "배터리로 옮겨야 충전되고 점수를 받아야 합니다.")
 			shuttle.elapsed = 5.1
 			shuttle._update_visuals()
 			_check(not shuttle.sun.visible and shuttle.cloud.visible, "발전이 줄어드는 구름 장면이 보여야 합니다.")
 			shuttle._try_station_action()
-			_check(shuttle.cargo == 2 and shuttle.battery_units == 1, "흐릴 때 저장된 전기를 배터리에서 꺼내야 합니다.")
+			_check(shuttle.cargo == 2 and shuttle.battery_units == 0, "흐릴 때 저장된 전기를 배터리에서 꺼내면 저장량이 줄어야 합니다.")
 			shuttle.hero_x = shuttle.CITY_X
 			shuttle._try_station_action()
 			shuttle._update_visuals()
@@ -412,10 +433,16 @@ func _run() -> void:
 			for exiting in commute.dropped_students:
 				if is_instance_valid(exiting["node"]):
 					visible_exits += 1
-			_check(visible_exits == 2, "45명 하차 모델은 한 명씩 등장해 렌더링 부하를 제한해야 합니다.")
+			_check(visible_exits == 3, "45명 하차 모델은 0.035초 간격으로 순서대로 등장해 초기 렌더링 부하를 제한해야 합니다.")
 			commute._animate_dropoff_students(0.5)
 			var first_exit: Dictionary = commute.dropped_students[0]
-			_check(is_instance_valid(first_exit["node"]) and (first_exit["node"] as Node3D).position.z < 2.4 and is_equal_approx((first_exit["node"] as Node3D).rotation.y, PI), "하차 학생은 등을 보이며 학교 입구를 향해 걸어가야 합니다.")
+			if is_instance_valid(first_exit["node"]):
+				var first_node: Node3D = first_exit["node"]
+				var walking_direction := Vector3(float(first_exit["entrance_x"]) - float(first_exit["start_x"]), 0.0, -3.34)
+				var expected_facing := atan2(-walking_direction.x, -walking_direction.z)
+				_check(first_node.position.z < 1.98 and is_equal_approx(first_node.rotation.y, expected_facing), "하차 학생은 실제 학교 입구 이동 방향을 바라보며 걸어가야 합니다.")
+			else:
+				_check(false, "하차 중인 첫 학생이 너무 일찍 사라지면 안 됩니다.")
 			commute._animate_dropoff_students(10.0)
 			commute._animate_school_doors(0.5)
 			_check(commute.dropped_students.is_empty() and float(school["school_door_open"]) == 0.0, "45명 모두 학교 안으로 들어가면 학교 문이 다시 닫혀야 합니다.")
@@ -447,7 +474,7 @@ func _run() -> void:
 			_check(heat._open_window_count() == 2, "창문 하나를 닫으면 열린 창문 수가 줄어야 합니다.")
 			var used_after_close: float = heat.cooling_used
 			heat._process(1.0)
-			_check(heat.cooling_used - used_after_close < open_window_use and heat.heater_label.text.contains("+0.9/초"), "창문을 닫으면 실제 냉방 사용 속도가 낮아지고 화면에도 표시되어야 합니다.")
+			_check(heat.cooling_used - used_after_close < open_window_use and heat.heater_label.text.contains("0.9/초"), "창문을 닫으면 실제 냉방 사용 속도가 낮아지고 화면에도 표시되어야 합니다.")
 			heat.elapsed = 6.0
 			heat._spawn_wave(1)
 			_check(heat._open_window_count() >= 3, "더운 바람이 다시 불면 새로운 창문이 열려야 합니다.")

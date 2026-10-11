@@ -43,39 +43,59 @@ jobs:
       - name: Verify room-service authentication and reconnect signaling
         run: node --test services/room-directory/test/*.test.js
 
-      - name: Verify real peer reconnection and host loss
+      - name: Verify real peer reconnection, host loss and ranked score delivery
         run: |
           set -euo pipefail
           run_peers() {
+            local script="$1"
+            shift
             local pids=() result=0
             for role in "$@"; do
-              timeout 60s godot --headless --path . --script scripts/tests/NetworkRecoveryTest.gd -- "--role=$role" > "$role.log" 2>&1 &
+              timeout 60s godot --headless --path . --script "$script" -- "--role=$role" > "$role.log" 2>&1 &
               pids+=("$!")
             done
             for pid in "${pids[@]}"; do wait "$pid" || result=1; done
-            for role in "$@"; do cat "$role.log"; done
+            for role in "$@"; do
+              cat "$role.log"
+              if grep -Eq 'SCRIPT ERROR|Parse Error|\[FAIL\]' "$role.log"; then result=1; fi
+            done
             return "$result"
           }
-          run_peers host client intruder
-          run_peers loss_host loss_client
+          run_peers scripts/tests/NetworkRecoveryTest.gd host client intruder
+          run_peers scripts/tests/NetworkRecoveryTest.gd loss_host loss_client
+          run_peers scripts/tests/LobbyRegistrationTimeoutTest.gd host idle1 idle2 idle3 idle4
+          run_peers scripts/tests/MiniGameOnlineSyncTest.gd host client
 
       - name: Run regression tests
         run: |
           set -euo pipefail
           for test in \
             CoreRulesSmokeTest \
+            NetworkInputValidationTest \
             MiniGameSystemTest \
             StandaloneMiniGamesTest \
+            StandaloneInputIsolationTest \
             MiniGameFairnessTest \
+            MiniGameLearningRulesTest \
+            MiniGameLearningFeedbackTest \
+            MiniGameRenderLifecycleTest \
+            MiniGamesAQualityTest \
+            MiniGamesBQualityTest \
+            MainGameQualityTest \
+            QualityPresentationTest \
             NetworkPayloadSmokeTest \
             NetworkRecoveryRulesTest \
             QuizMultipleChoiceTest \
+            QuizReviewedDataTest \
+            HydroPracticeTest \
+            MiniGameVisualStyleTest \
             QuizMarketTransitionTest \
             OpenMarketCraftAssistTest \
             TimedLapRewardTest \
             AdventurePresentationTest \
             FullGameSimulation; do
-            godot --headless --path . --script "scripts/tests/${test}.gd"
+            godot --headless --path . --script "scripts/tests/${test}.gd" 2>&1 | tee "${test}.log"
+            if grep -Eq 'SCRIPT ERROR|Parse Error|\[FAIL\]' "${test}.log"; then exit 1; fi
           done
 
   build-and-deploy:

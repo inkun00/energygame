@@ -5,13 +5,16 @@ class_name HeatLeakDash3D
 ## 창문이 열려 있는 동안 더운 공기가 들어와 에어컨 사용 속도가 증가합니다.
 signal arcade_event(points: int, success: bool, message: String, count_correct: bool)
 
+const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
+const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 const WINDOW_MODEL = preload("res://assets/third_party/kenney/standby_house/wallWindow.glb")
 const FLOOR_MODEL = preload("res://assets/third_party/kenney/standby_house/floorFull.glb")
 const WINDOW_X := [-6.0, -3.6, -1.2, 1.2, 3.6, 6.0]
 const RUN_SPEED := 6.3
 const CLOSE_REACH := 0.76
 const WAVE_INTERVAL := 6.0
+const WAVE_PROFILES := [[0.0, 5.0, 12.0, 17.0, 24.0], [0.0, 6.0, 11.0, 18.0, 23.0], [0.0, 7.0, 12.0, 19.0, 25.0]]
 const WAVE_COUNT := 5
 const OPEN_PER_WAVE := 3
 const BASE_COOLING_USE := 0.10
@@ -24,6 +27,8 @@ var windows: Array[Dictionary] = []
 var temperature_label: Label
 var leak_label: Label
 var heater_label: Label
+var preview_label: Label
+var cooling_use_bar: ProgressBar
 var action_label: Label
 var flash: ColorRect
 var hero_x := 0.0
@@ -92,6 +97,9 @@ static func wave_positions(round_seed: int, wave: int) -> Array[int]:
 static func score_for_close(open_seconds: float) -> int:
 	return maxi(35, 110 - roundi(maxf(0.0, open_seconds) * 11.0))
 
+static func wave_time(round_seed: int, wave: int) -> float:
+	return float(WAVE_PROFILES[posmod(round_seed, WAVE_PROFILES.size())][clampi(wave, 0, WAVE_COUNT - 1)])
+
 func _build_world() -> void:
 	viewport = SubViewport.new()
 	viewport.name = "HeatLeakViewport"
@@ -103,20 +111,8 @@ func _build_world() -> void:
 	add_child(viewport)
 	world = Node3D.new()
 	viewport.add_child(world)
-	var sky := WorldEnvironment.new()
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color("73cbea")
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("fff0cd")
-	environment.ambient_light_energy = 0.9
-	sky.environment = environment
-	world.add_child(sky)
-	var sunlight := DirectionalLight3D.new()
-	sunlight.rotation_degrees = Vector3(-46, -22, 0)
-	sunlight.light_energy = 1.1
-	sunlight.shadow_enabled = false
-	world.add_child(sunlight)
+	VISUAL_STYLE.add_environment(world, "indoor")
+	VISUAL_STYLE.add_key_light(world, Vector3(-46, -22, 0), "indoor")
 	var camera := Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = 6.9
@@ -124,13 +120,14 @@ func _build_world() -> void:
 	camera.current = true
 	world.add_child(camera)
 	camera.look_at(Vector3(0.0, 1.55, 0.0), Vector3.UP)
-	_box(world, Vector3(0.0, -0.20, 0.0), Vector3(16.4, 0.35, 5.3), Color("c5b393"))
-	_box(world, Vector3(0.0, 3.43, -1.42), Vector3(16.0, 0.85, 0.18), Color("eed8b2"))
-	_box(world, Vector3(0.0, 0.43, -1.42), Vector3(16.0, 0.86, 0.18), Color("eed8b2"))
+	_box(world, Vector3(0.0, -0.20, 0.0), Vector3(16.4, 0.35, 5.3), VISUAL_STYLE.CREAM)
+	_box(world, Vector3(0.0, 3.43, -1.42), Vector3(16.0, 0.85, 0.18), VISUAL_STYLE.WALL)
+	_box(world, Vector3(0.0, 0.43, -1.42), Vector3(16.0, 0.86, 0.18), VISUAL_STYLE.WALL)
 	for index in range(16):
 		var floor_tile := FLOOR_MODEL.instantiate() as Node3D
 		floor_tile.position = Vector3(-7.5 + float(index), -0.02, 0.25)
 		world.add_child(floor_tile)
+		VISUAL_STYLE.prepare_imported(floor_tile)
 	for index in range(WINDOW_X.size()):
 		_build_window(index)
 	# 에어컨은 열린 창문 수에 따라 커지는 냉방 에너지 사용량을 보여 줍니다.
@@ -148,14 +145,29 @@ func _build_window(index: int) -> void:
 	model.position = Vector3(x, 0.75, -1.36)
 	model.scale = Vector3.ONE * 1.15
 	world.add_child(model)
+	VISUAL_STYLE.prepare_imported(model)
 	var window_pane := model.find_child("window", true, false) as Node3D
+	var center_x := x
+	if window_pane is MeshInstance3D:
+		var pane_mesh := window_pane as MeshInstance3D
+		center_x = (pane_mesh.global_transform * pane_mesh.mesh.get_aabb().get_center()).x
+		model.position.x += x - center_x
+		center_x = x
 	var pane_base_position := window_pane.position if window_pane else Vector3.ZERO
-	var status := _label3d(world, "창문 열림!", Vector3(x, 3.17, -0.65), Color("ffb16f"))
+	# Keep repeated window cues inside each window's lane and below the AC label.
+	var status := _label3d(world, "더운 공기 ↑", Vector3(x, 2.72, -0.65), Color("ffb16f"))
+	status.font_size = 32
+	status.pixel_size = 0.007
+	status.outline_size = 6
 	var particles: Array[MeshInstance3D] = []
-	for particle_index in range(3):
+	for particle_index in range(5):
 		var particle := _box(world, Vector3(x + 0.68, 1.74 + float(particle_index) * 0.32, -0.30), Vector3(0.18, 0.13, 0.13), Color("ff754f"), true)
 		particles.append(particle)
-	windows.append({"x": x, "model": model, "pane": window_pane, "pane_base_position": pane_base_position, "status": status, "particles": particles, "open": false, "closed": true, "since": 0.0, "open_amount": 0.0})
+	var reach_marker := _box(world, Vector3(center_x, 0.08, 1.12), Vector3(CLOSE_REACH * 2.0, 0.035, 0.42), Color("88f0b9"), true)
+	reach_marker.visible = false
+	var prompt := _label3d(world, "Space 닫기", Vector3(center_x, 1.45, 1.2), Color("b8ffd4"))
+	prompt.visible = false
+	windows.append({"x": center_x, "model": model, "pane": window_pane, "pane_base_position": pane_base_position, "status": status, "particles": particles, "reach_marker": reach_marker, "prompt": prompt, "open": false, "closed": true, "since": 0.0, "open_amount": 0.0})
 
 func _spawn_hero(player_data: Dictionary) -> void:
 	if is_instance_valid(hero):
@@ -171,11 +183,25 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	if hero.shadow_mesh:
 		hero.shadow_mesh.visible = false
 	hero.call("_set_avatar_animation_state", false)
+	VISUAL_STYLE.style_hero(hero)
 
 func _build_overlay() -> void:
 	temperature_label = _overlay_label(Vector2(20, 9), Vector2(300, 42), "실내 24.0°C", Color("fff0bf"), 22)
 	leak_label = _overlay_label(Vector2(330, 9), Vector2(630, 42), "열린 창문 3개", Color("a8eaff"), 22)
 	heater_label = _overlay_label(Vector2(655, 9), Vector2(940, 42), "냉방 +1.4/초", Color("ffd2a4"), 20)
+	preview_label = _overlay_label(Vector2(170, 43), Vector2(650, 73), "", Color("fff0bf"), 18)
+	cooling_use_bar = ProgressBar.new()
+	cooling_use_bar.position = Vector2(675, 46)
+	cooling_use_bar.size = Vector2(260, 18)
+	cooling_use_bar.max_value = BASE_COOLING_USE + OPEN_WINDOW_USE * float(WINDOW_X.size())
+	cooling_use_bar.show_percentage = false
+	var cooling_fill := StyleBoxFlat.new()
+	cooling_fill.bg_color = Color("ffa067")
+	var cooling_background := StyleBoxFlat.new()
+	cooling_background.bg_color = Color("173744")
+	cooling_use_bar.add_theme_stylebox_override("fill", cooling_fill)
+	cooling_use_bar.add_theme_stylebox_override("background", cooling_background)
+	add_child(cooling_use_bar)
 	action_label = _overlay_label(Vector2(95, 254), Vector2(865, 283), "A/D 이동 · 열린 창문 앞에서 Space로 닫기", Color("fff0bf"), 17)
 	flash = ColorRect.new()
 	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -192,13 +218,13 @@ func _process(delta: float) -> void:
 		return
 	elapsed += delta
 	notice_remaining = maxf(0.0, notice_remaining - delta)
-	while next_wave < WAVE_COUNT and elapsed >= float(next_wave) * WAVE_INTERVAL:
+	while next_wave < WAVE_COUNT and elapsed >= wave_time(game_seed, next_wave):
 		_spawn_wave(next_wave)
 		next_wave += 1
 	var active_count := _open_window_count()
 	cooling_used += (BASE_COOLING_USE + OPEN_WINDOW_USE * float(active_count)) * delta
-	room_temperature = clampf(room_temperature + (-0.025 + 0.090 * float(active_count)) * delta, 22.0, 30.0)
-	var axis := float(int(Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)) - int(Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)))
+	room_temperature = clampf(room_temperature + (-0.15 + 0.22 * float(active_count)) * delta, 22.0, 30.0)
+	var axis := float(int(MINIGAME_INPUT.is_pressed(KEY_D) or MINIGAME_INPUT.is_pressed(KEY_RIGHT)) - int(MINIGAME_INPUT.is_pressed(KEY_A) or MINIGAME_INPUT.is_pressed(KEY_LEFT)))
 	hero_x = clampf(hero_x + axis * RUN_SPEED * delta, -7.0, 7.0)
 	if is_instance_valid(hero):
 		hero.position.x = hero_x
@@ -206,7 +232,7 @@ func _process(delta: float) -> void:
 			hero.call("_set_avatar_animation_state", axis != 0.0)
 		if axis != 0.0 and hero.avatar_sprite:
 			hero.avatar_sprite.flip_h = axis < 0.0
-	var space_down := Input.is_key_pressed(KEY_SPACE)
+	var space_down := MINIGAME_INPUT.is_pressed(KEY_SPACE)
 	if space_down and not space_was_down:
 		_try_close()
 	space_was_down = space_down
@@ -214,7 +240,7 @@ func _process(delta: float) -> void:
 
 func _spawn_wave(wave: int) -> void:
 	var newly_opened := 0
-	for window_index in wave_positions(game_seed, wave):
+	for window_index in _opening_candidates(wave):
 		var window: Dictionary = windows[window_index]
 		if bool(window["open"]):
 			continue
@@ -227,6 +253,15 @@ func _spawn_wave(wave: int) -> void:
 			break
 	if wave > 0:
 		_notice("더운 바람! 창문 %d개가 열렸어요 · 빨간 공기가 들어와요" % newly_opened if newly_opened > 0 else "모든 창문이 열렸어요! 가까운 곳부터 닫으세요.")
+
+func _opening_candidates(wave: int) -> Array[int]:
+	var candidates: Array[int] = []
+	for window_index in wave_positions(game_seed, wave):
+		if not bool(windows[window_index]["open"]):
+			candidates.append(window_index)
+			if candidates.size() >= OPEN_PER_WAVE:
+				break
+	return candidates
 
 func _try_close() -> void:
 	var closest: Dictionary = {}
@@ -284,7 +319,7 @@ func _animate_heat(delta: float) -> void:
 			var particle := particles[index] as Node3D
 			var phase := fposmod(elapsed * 1.8 + float(index) * 0.34, 1.0)
 			particle.position.x = float(window["x"]) + 0.58 - phase * 0.42
-			particle.position.y = 1.75 + float(index) * 0.28 + sin(phase * PI) * 0.35
+			particle.position.y = 1.33 + float(index) * 0.12 + sin(phase * PI) * 0.18
 			particle.position.z = -1.00 + phase * 1.25
 
 func _notice(message: String) -> void:
@@ -294,7 +329,26 @@ func _notice(message: String) -> void:
 func _update_overlay() -> void:
 	temperature_label.text = "실내 %.1f°C" % room_temperature
 	leak_label.text = "열린 창문 %d개" % _open_window_count()
-	heater_label.text = "냉방 +%.1f/초 · 누적 %.1f" % [BASE_COOLING_USE + OPEN_WINDOW_USE * float(_open_window_count()), cooling_used]
+	heater_label.text = "전기 사용 %.1f/초" % (BASE_COOLING_USE + OPEN_WINDOW_USE * float(_open_window_count()))
+	cooling_use_bar.value = BASE_COOLING_USE + OPEN_WINDOW_USE * float(_open_window_count())
+	var to_wave := wave_time(game_seed, next_wave) - elapsed if next_wave < WAVE_COUNT else -1.0
+	var upcoming_windows: Array[int] = []
+	if to_wave >= 0.0 and to_wave <= 2.5 and next_wave < WAVE_COUNT:
+		upcoming_windows = _opening_candidates(next_wave)
+	preview_label.text = "%.1f초 뒤 더운 바람! 창문을 살펴요" % to_wave if to_wave >= 0.0 and to_wave <= 2.5 else ("창문을 닫으면 더운 공기 ↓ · 냉방 전기 ↓" if _open_window_count() > 0 else "더운 공기 차단! 적은 전기로 시원하게 유지해요")
+	for window in windows:
+		var reachable := bool(window["open"]) and absf(hero_x - float(window["x"])) <= CLOSE_REACH
+		(window["reach_marker"] as Node3D).visible = reachable
+		(window["prompt"] as Node3D).visible = reachable
+		var upcoming := int(windows.find(window)) in upcoming_windows
+		if upcoming and not bool(window["open"]):
+			(window["status"] as Label3D).visible = true
+			(window["status"] as Label3D).text = "바람 예고"
+			(window["status"] as Label3D).modulate = Color("ffe178")
+		else:
+			(window["status"] as Label3D).visible = bool(window["open"])
+			(window["status"] as Label3D).text = "더운 공기 ↑"
+			(window["status"] as Label3D).modulate = Color("ffb16f")
 	action_label.text = notice if notice_remaining > 0.0 else "A/D 이동 · 열린 창문 앞 Space · 닫으면 냉방 효율 상승"
 
 func _box(parent: Node3D, where: Vector3, size_value: Vector3, color: Color, glowing: bool = false) -> MeshInstance3D:
@@ -303,14 +357,7 @@ func _box(parent: Node3D, where: Vector3, size_value: Vector3, color: Color, glo
 	var node := MeshInstance3D.new()
 	node.mesh = mesh
 	node.position = where
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.72
-	if glowing:
-		material.emission_enabled = true
-		material.emission = color
-		material.emission_energy_multiplier = 0.65
-	node.material_override = material
+	node.material_override = VISUAL_STYLE.material(color, glowing)
 	parent.add_child(node)
 	return node
 
@@ -322,14 +369,7 @@ func _sphere(parent: Node3D, where: Vector3, radius: float, color: Color, glowin
 	var node := MeshInstance3D.new()
 	node.mesh = mesh
 	node.position = where
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.70
-	if glowing:
-		material.emission_enabled = true
-		material.emission = color
-		material.emission_energy_multiplier = 0.75
-	node.material_override = material
+	node.material_override = VISUAL_STYLE.material(color, glowing)
 	parent.add_child(node)
 	return node
 

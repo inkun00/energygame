@@ -1,5 +1,7 @@
 extends SubViewportContainer
 class_name SharedSchoolBus3D
+const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
+const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 
 ## 버스의 가속·제동·짧은 후진을 직접 조작합니다. 정류장과 학교에 정확히
 ## 멈추고 움직이는 학생을 태우며 1인당 운행 에너지를 확인합니다.
@@ -35,6 +37,7 @@ var bus_door_right: Node3D
 var bus_door_open := 0.0
 var segments: Dictionary = {}
 var dropped_students: Array[Dictionary] = []
+var boarding_students: Array[Dictionary] = []
 var passenger_label: Label
 var efficiency_label: Label
 var route_label: Label
@@ -88,6 +91,7 @@ func setup(_player_data: Dictionary, game_seed: int) -> void:
 		if is_instance_valid(record["node"]):
 			(record["node"] as Node3D).queue_free()
 	dropped_students.clear()
+	boarding_students.clear()
 	_ensure_segments()
 	_animate_students(0.0)
 	_update_visuals()
@@ -122,20 +126,8 @@ func _build_world() -> void:
 	add_child(viewport)
 	world = Node3D.new()
 	viewport.add_child(world)
-	var sky := WorldEnvironment.new()
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color("a7d9ea")
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("eef8ff")
-	environment.ambient_light_energy = 0.84
-	sky.environment = environment
-	world.add_child(sky)
-	var sunlight := DirectionalLight3D.new()
-	sunlight.rotation_degrees = Vector3(-50, -20, 0)
-	sunlight.light_energy = 1.1
-	sunlight.shadow_enabled = false
-	world.add_child(sunlight)
+	VISUAL_STYLE.add_environment(world)
+	VISUAL_STYLE.add_key_light(world, Vector3(-50, -20, 0))
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = 6.5
@@ -148,6 +140,7 @@ func _build_world() -> void:
 	model.scale = Vector3.ONE * 0.050
 	model.rotation.y = PI * 0.5
 	bus.add_child(model)
+	VISUAL_STYLE.prepare_imported(model)
 	_build_bus_door()
 	_update_camera_and_bus()
 
@@ -179,7 +172,7 @@ func _is_at_service_point() -> bool:
 	return false
 
 func _animate_bus_door(delta: float) -> void:
-	var should_open := absf(bus_speed) <= STOP_SPEED_LIMIT and _is_at_service_point()
+	var should_open := not boarding_students.is_empty() or not dropped_students.is_empty() or (absf(bus_speed) <= STOP_SPEED_LIMIT and _is_at_service_point())
 	bus_door_open = move_toward(bus_door_open, 1.0 if should_open else 0.0, delta * 2.5)
 	_set_bus_door_position()
 
@@ -198,12 +191,12 @@ func _build_segment(index: int) -> Dictionary:
 	var group := Node3D.new()
 	group.name = "RouteSegment%d" % index
 	world.add_child(group)
-	_box(group, Vector3(start_x + SEGMENT_LENGTH * 0.5, -0.22, -1.1), Vector3(SEGMENT_LENGTH, 0.34, 6.0), Color("79bf90"))
-	_box(group, Vector3(start_x + SEGMENT_LENGTH * 0.5, -0.03, 1.1), Vector3(SEGMENT_LENGTH, 0.10, 2.45), Color("667886"))
+	_box(group, Vector3(start_x + SEGMENT_LENGTH * 0.5, -0.22, -1.1), Vector3(SEGMENT_LENGTH, 0.34, 6.0), VISUAL_STYLE.FIELD)
+	_box(group, Vector3(start_x + SEGMENT_LENGTH * 0.5, -0.03, 1.1), Vector3(SEGMENT_LENGTH, 0.10, 2.45), VISUAL_STYLE.ROAD)
 	if index == 0:
 		# 시작 위치 뒤쪽도 같은 길로 채워 첫 화면에서 도로가 끊겨 보이지 않게 합니다.
-		_box(group, Vector3(-10.0, -0.22, -1.1), Vector3(20.0, 0.34, 6.0), Color("79bf90"))
-		_box(group, Vector3(-10.0, -0.03, 1.1), Vector3(20.0, 0.10, 2.45), Color("667886"))
+		_box(group, Vector3(-10.0, -0.22, -1.1), Vector3(20.0, 0.34, 6.0), VISUAL_STYLE.FIELD)
+		_box(group, Vector3(-10.0, -0.03, 1.1), Vector3(20.0, 0.10, 2.45), VISUAL_STYLE.ROAD)
 		for back_mark in range(17):
 			_box(group, Vector3(-19.4 + float(back_mark) * 1.2, 0.03, 1.1), Vector3(0.52, 0.03, 0.08), Color("e9e9d1"), true)
 	for mark in range(50):
@@ -258,17 +251,18 @@ func _process(delta: float) -> void:
 	if flash_remaining <= 0.0:
 		flash.color = Color.TRANSPARENT
 	_animate_dropoff_students(delta)
+	_animate_boarding_students(delta)
 	_animate_school_doors(delta)
 	if not running:
 		return
 	elapsed += delta
 	notice_remaining = maxf(0.0, notice_remaining - delta)
-	_step_vehicle(delta, Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT), Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN), Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT))
+	_step_vehicle(delta, MINIGAME_INPUT.is_pressed(KEY_D) or MINIGAME_INPUT.is_pressed(KEY_RIGHT), MINIGAME_INPUT.is_pressed(KEY_S) or MINIGAME_INPUT.is_pressed(KEY_DOWN), MINIGAME_INPUT.is_pressed(KEY_A) or MINIGAME_INPUT.is_pressed(KEY_LEFT))
 	_ensure_segments()
 	_animate_students(delta)
 	_animate_bus_door(delta)
 	_update_camera_and_bus()
-	var space_down := Input.is_key_pressed(KEY_SPACE)
+	var space_down := MINIGAME_INPUT.is_pressed(KEY_SPACE)
 	if space_down and not space_was_down:
 		_attempt_pickup()
 	space_was_down = space_down
@@ -276,6 +270,10 @@ func _process(delta: float) -> void:
 	_update_visuals()
 
 func _step_vehicle(delta: float, accelerate: bool, brake: bool, reverse: bool) -> void:
+	# Keep the doorway beside students until everybody has cleared it.
+	if not boarding_students.is_empty() or not dropped_students.is_empty():
+		bus_speed = 0.0
+		return
 	if brake:
 		bus_speed = move_toward(bus_speed, 0.0, BRAKE * delta)
 	elif reverse:
@@ -301,9 +299,11 @@ func _activate_stop(stop: Dictionary) -> void:
 		var student := student_scene.instantiate() as Node3D
 		student.name = "WaitingStudent"
 		var start_x := stop_x + 3.4 + float(int(state["late_order"]) % 6) * 0.85 if bool(state["late"]) else float(state["base_x"])
-		student.position = Vector3(start_x, 0.72, float(state["base_z"]))
+		student.position = Vector3(start_x, 0.255, float(state["base_z"]))
 		student.scale = Vector3.ONE * 0.42
+		student.rotation.y = PI * 0.5 if bool(state["late"]) else PI
 		(stop["root"] as Node3D).add_child(student)
+		VISUAL_STYLE.prepare_imported(student)
 		(stop["students"] as Array).append(student)
 		var animator := student.find_child("AnimationPlayer", true, false) as AnimationPlayer
 		if animator:
@@ -345,6 +345,7 @@ func _animate_students(delta: float) -> void:
 						state["approaching"] = true
 					if bool(state["approaching"]):
 						student.position.x = move_toward(student.position.x, float(state["base_x"]), float(state["run_speed"]) * delta)
+						_face_student(student, Vector3(-1.0, 0.0, 0.0))
 						if animator and animator.current_animation != "sprint":
 							animator.play("sprint")
 						if absf(student.position.x - float(state["base_x"])) < 0.05:
@@ -356,8 +357,8 @@ func _animate_students(delta: float) -> void:
 					ready_count += 1
 					student.position.x = float(state["base_x"]) + sin(elapsed * 1.7 + float(state["phase"])) * 0.10
 					student.position.z = float(state["base_z"]) + sin(elapsed * 1.15 + float(state["phase"])) * 0.05
-					if animator and animator.current_animation != "walk":
-						animator.play("walk")
+					if animator and animator.current_animation != "idle":
+						animator.play("idle")
 			stop["waiting"] = ready_count
 			(stop["label"] as Label3D).text = "대기 %d명%s" % [ready_count, " · 뛰는 중 %d명" % running_count if running_count > 0 else ""]
 			(stop["label"] as Label3D).modulate = Color("ffc288") if running_count > 0 else Color("fff3c4")
@@ -386,7 +387,11 @@ func _attempt_pickup() -> void:
 	for state in (closest["states"] as Array):
 		if bool(state["arrived"]) and not bool(state["boarded"]) and passengers + boarding < BUS_CAPACITY:
 			state["boarded"] = true
-			(state["node"] as Node3D).visible = false
+			var student := state["node"] as Node3D
+			boarding_students.append({"node": student, "age": 0.0, "delay": float(boarding) * 0.025, "start": student.position, "target": Vector3(bus_x + 1.08, 0.335, 1.98)})
+			var animator := state["animator"] as AnimationPlayer
+			if animator:
+				animator.play("walk")
 			boarding += 1
 	if boarding <= 0:
 		_notice("학생이 아직 정류장으로 뛰어오고 있어요. 잠시 기다리세요!")
@@ -417,13 +422,18 @@ func _check_school_stop() -> void:
 			record["school_missed_notice"] = true
 			_notice("학교를 지나쳤어요! S로 멈추고 A로 조금 후진하세요.")
 
+var last_trip_per_person := 0.0
+var last_trip_solo_energy := 0.0
+
 func _unload_at_school(school_x: float) -> void:
 	if passengers > 0:
 		var per_person := energy_per_person(passengers, route_distance)
+		last_trip_per_person = per_person
+		last_trip_solo_energy = energy_per_person(1, route_distance)
 		var earned := score_for_trip(passengers, route_distance)
 		_spawn_dropoff_students(school_x, passengers)
 		delivered_total += passengers
-		arcade_event.emit(earned, true, "학생 %d명 도착 · 1인당 에너지 %.1f" % [passengers, per_person], true)
+		arcade_event.emit(earned, true, "학생 %d명 도착 · 같은 길을 혼자 타면 %.1f, 함께 타면 1인당 %.1f" % [passengers, last_trip_solo_energy, per_person], passengers >= 2)
 		_notice("학교 도착! 함께 탄 %d명의 1인당 에너지 %.1f" % [passengers, per_person])
 		flash.color = Color("ffe77e42")
 		flash_remaining = 0.25
@@ -438,7 +448,28 @@ func _spawn_dropoff_students(school_x: float, count: int) -> void:
 	for student_index in range(count):
 		var local_index := student_index % 9
 		var start_x := school_x + 1.1 + (float(local_index % 3) - 1.0) * 0.16
-		dropped_students.append({"node": null, "age": 0.0, "delay": float(student_index) * 0.075, "start_x": start_x, "school_x": school_x, "entrance_x": school_x + SCHOOL_ENTRANCE_OFFSET, "variant": student_index % 2})
+		dropped_students.append({"node": null, "age": 0.0, "delay": float(student_index) * 0.035, "start_x": start_x, "school_x": school_x, "entrance_x": school_x + SCHOOL_ENTRANCE_OFFSET, "variant": student_index % 2})
+
+func _face_student(student: Node3D, direction: Vector3) -> void:
+	if direction.length_squared() > 0.0001:
+		student.rotation.y = atan2(-direction.x, -direction.z)
+
+func _animate_boarding_students(delta: float) -> void:
+	for index in range(boarding_students.size() - 1, -1, -1):
+		var record: Dictionary = boarding_students[index]
+		if not is_instance_valid(record["node"]):
+			boarding_students.remove_at(index)
+			continue
+		record["age"] = float(record["age"]) + delta
+		var student := record["node"] as Node3D
+		var progress := clampf((float(record["age"]) - float(record["delay"])) / 0.75, 0.0, 1.0)
+		var start: Vector3 = record["start"]
+		var target: Vector3 = record["target"]
+		student.position = start.lerp(target, progress)
+		_face_student(student, target - start)
+		if progress >= 1.0:
+			student.visible = false
+			boarding_students.remove_at(index)
 
 func _animate_dropoff_students(delta: float) -> void:
 	for index in range(dropped_students.size() - 1, -1, -1):
@@ -450,17 +481,19 @@ func _animate_dropoff_students(delta: float) -> void:
 			var student_scene: PackedScene = STUDENT_A if int(record["variant"]) == 0 else STUDENT_B
 			var new_student := student_scene.instantiate() as Node3D
 			new_student.scale = Vector3.ONE * 0.42
-			new_student.position = Vector3(float(record["start_x"]), 0.55, 2.4)
-			new_student.rotation.y = PI
+			new_student.position = Vector3(float(record["start_x"]), 0.335, 1.98)
 			world.add_child(new_student)
+			VISUAL_STYLE.prepare_imported(new_student)
 			var animator := new_student.find_child("AnimationPlayer", true, false) as AnimationPlayer
 			if animator:
 				animator.play("walk")
 			record["node"] = new_student
 		var student := record["node"] as Node3D
-		var progress := clampf((float(record["age"]) - float(record["delay"])) / 2.2, 0.0, 1.0)
-		student.position.z = lerpf(2.4, -1.36, progress)
+		var progress := clampf((float(record["age"]) - float(record["delay"])) / 1.8, 0.0, 1.0)
+		student.position.z = lerpf(1.98, -1.36, progress)
 		student.position.x = lerpf(float(record["start_x"]), float(record["entrance_x"]), progress)
+		student.position.y = lerpf(0.335, 0.02, minf(1.0, progress * 5.0))
+		_face_student(student, Vector3(float(record["entrance_x"]) - float(record["start_x"]), 0.0, -3.34))
 		if progress >= 1.0:
 			student.queue_free()
 			dropped_students.remove_at(index)
@@ -489,7 +522,7 @@ func _update_visuals() -> void:
 	efficiency_label.text = "1인당 에너지  %.1f" % energy_per_person(passengers, route_distance) if passengers > 0 else "1인당 에너지  --"
 	var direction := "후진" if bus_speed < -STOP_SPEED_LIMIT else "전진" if bus_speed > STOP_SPEED_LIMIT else "정차"
 	route_label.text = "%s %.1f · 에너지 %.1f" % [direction, absf(bus_speed), route_energy(route_distance)]
-	action_label.text = notice if notice_remaining > 0.0 else "D/A 길게 가속 · S 정차 · 정류장 Space · 학교 정차 시 하차"
+	action_label.text = "학생 %d명이 학교로 들어가는 중 · 안전하게 기다려요" % dropped_students.size() if not dropped_students.is_empty() else ("학생 %d명 승차 중 · 문 앞을 비우면 출발해요" % boarding_students.size() if not boarding_students.is_empty() else (notice if notice_remaining > 0.0 else "D/A 길게 가속 · S 정차 · 정류장 Space · 학교 정차 시 하차"))
 
 func _update_camera_and_bus() -> void:
 	bus.position = Vector3(bus_x, 0.12, 1.1)
@@ -502,14 +535,7 @@ func _box(parent: Node3D, where: Vector3, dimensions: Vector3, color: Color, glo
 	var instance := MeshInstance3D.new()
 	instance.mesh = mesh
 	instance.position = where
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.74
-	if glowing:
-		material.emission_enabled = true
-		material.emission = color
-		material.emission_energy_multiplier = 0.65
-	instance.material_override = material
+	instance.material_override = VISUAL_STYLE.material(color, glowing)
 	parent.add_child(instance)
 	return instance
 

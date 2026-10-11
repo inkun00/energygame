@@ -25,6 +25,23 @@ func _capture() -> void:
 	var error := image.save_png("res://.godot/board_preview.png")
 	if error == OK:
 		print("[PASS] Board preview captured")
+		var board: Node = main.get_node("GameBoard")
+		board._show_board_overview()
+		await process_frame
+		await RenderingServer.frame_post_draw
+		var viewport_bounds := Rect2(Vector2.ZERO, Vector2(board.viewport.size))
+		for index in range(100):
+			var center: Vector3 = BoardGrid.get_tile_position_3d(index)
+			if board.camera3d.is_position_behind(center) or not viewport_bounds.has_point(board.camera3d.unproject_position(center)):
+				push_error("Overview hides tile %d" % index)
+				quit(1)
+				return
+		error = root.get_texture().get_image().save_png("res://.godot/board_overview_preview.png")
+		if error != OK:
+			push_error("Overview preview failed: %s" % error)
+			quit(1)
+			return
+		print("[PASS] Overview camera shows all 100 tiles")
 		quit(0)
 	else:
 		push_error("보드 미리보기 저장 실패: %s" % error)

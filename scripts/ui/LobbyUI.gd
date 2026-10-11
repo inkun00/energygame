@@ -38,7 +38,7 @@ const UI = preload("res://scripts/ui/CommercialUI.gd")
 var characters: Array[Dictionary] = [
 	{"name": "캡틴 에코", "icon": "res://assets/characters/eco_roster/captain_eco.webp", "color": Color(0.28, 0.90, 0.34), "role": "자연의 힘으로 도시를 회복하는 밸런스형 히어로"},
 	{"name": "물방울 정령 포포", "icon": "res://assets/characters/eco_roster/water_popo.webp", "color": Color(0.20, 0.72, 0.96), "role": "깨끗한 물의 힘으로 오염을 씻어 내는 회복형 히어로"},
-	{"name": "에코 베어 퐁이", "icon": "res://assets/characters/eco_roster/bear_pongi.webp", "color": Color(0.30, 0.92, 0.82), "role": "튼튼한 장비와 보호막으로 모두를 지키는 방어형 히어로"},
+	{"name": "에코 베어 퐁이", "icon": "res://assets/characters/eco_roster/bear_pongi.webp", "color": Color(0.30, 0.92, 0.82), "role": "필요한 부품을 찾아 마을 건설을 돕는 자원 수집형 히어로"},
 	{"name": "태양 여우 솔", "icon": "res://assets/characters/eco_roster/solar_fox_sol.webp", "color": Color(1.00, 0.58, 0.12), "role": "태양광 장비로 에너지를 충전하는 기술형 히어로"},
 	{"name": "바람 토끼 보리", "icon": "res://assets/characters/eco_roster/wind_rabbit_bori.webp", "color": Color(0.22, 0.82, 0.92), "role": "바람보다 빠르게 길을 개척하는 기동형 히어로"},
 	{"name": "재활용 너구리 링고", "icon": "res://assets/characters/eco_roster/recycle_raccoon_ringo.webp", "color": Color(0.36, 0.82, 0.28), "role": "버려진 자원을 멋진 도구로 바꾸는 발명형 히어로"},
@@ -48,6 +48,7 @@ var characters: Array[Dictionary] = [
 ]
 
 var _character_buttons: Array[Button] = []
+var learning_grade_option: OptionButton
 var _room_popup: Control
 var _room_cards: HBoxContainer
 var _room_code_label: Label
@@ -76,7 +77,7 @@ const OPENING_STORY := [
 	{"caption": "에너지요정 나라는 풍부한 에너지를 당연하게 여기며, 불필요한 전기와 마법 에너지를 낭비했습니다."},
 	{"caption": "에너지가 부족해지자 요정들은 화석연료를 마구 사용해 부족분을 메우려 했습니다."},
 	{"caption": "그 결과 지구온난화·환경오염·자원고갈의 위기가 왕국을 뒤덮었습니다."},
-	{"caption": "이제 퀴즈를 풀고 건설 아이템을 모아, 화력발전소를 재생에너지 발전소로 바꿔야 합니다!"}
+	{"caption": "퀴즈와 에너지 미션으로 힘을 모으고, 길에서 찾은 부품을 함께 써 깨끗한 에너지 마을을 만들어요!"}
 ]
 
 func _ready() -> void:
@@ -84,6 +85,7 @@ func _ready() -> void:
 	_setup_character_selector()
 	_setup_mode_selector()
 	_setup_game_time_selector()
+	_setup_learning_grade_selector()
 	_connect_actions()
 	_build_room_popup()
 	_room_browser = preload("res://scripts/ui/RoomBrowser.gd").new()
@@ -92,6 +94,7 @@ func _ready() -> void:
 	_room_browser.join_requested.connect(_join_listed_room)
 	char_option_button.select(0)
 	_on_character_selected(0)
+	_fit_hero_badge.call_deferred()
 	_on_mode_selected(0)
 	# 항상 보이는 드롭다운으로 캐릭터 선택을 보장합니다.
 	char_option_button.visible = true
@@ -260,6 +263,45 @@ func _setup_game_time_selector() -> void:
 		game_time_option_button.add_item("%d분" % minutes)
 		game_time_option_button.set_item_metadata(game_time_option_button.item_count - 1, minutes * 60)
 	game_time_option_button.select(1)
+	var time_label := get_node_or_null("MenuPanel/Content/GameTimeRow/Label") as Label
+	if time_label:
+		time_label.text = "탐험 시간"
+	game_time_option_button.tooltip_text = "탐험 시계만 계산합니다. 미니게임·시장·건설 시간은 별도예요."
+
+func _setup_learning_grade_selector() -> void:
+	var content := get_node("MenuPanel/Content") as VBoxContainer
+	var row := HBoxContainer.new()
+	row.name = "LearningGradeRow"
+	row.add_theme_constant_override("separation", 12)
+	content.add_child(row)
+	content.move_child(row, game_time_option_button.get_parent().get_index() + 1)
+	var label := Label.new()
+	label.text = "퀴즈 난이도"
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.add_theme_font_size_override("font_size", 17)
+	label.add_theme_color_override("font_color", UI.GOLD)
+	row.add_child(label)
+	learning_grade_option = OptionButton.new()
+	learning_grade_option.name = "LearningGradeOption"
+	learning_grade_option.custom_minimum_size = Vector2(185, 40)
+	for grade in [4, 5, 6]:
+		learning_grade_option.add_item("%d학년 수준" % grade)
+		learning_grade_option.set_item_metadata(learning_grade_option.item_count - 1, grade)
+	learning_grade_option.select(1)
+	learning_grade_option.tooltip_text = "방장이 고른 수준으로 같은 퀴즈를 풀어요. 학년별 용어와 읽기 시간을 조절합니다."
+	UI.apply_input(learning_grade_option)
+	row.add_child(learning_grade_option)
+
+func _apply_learning_grade() -> void:
+	if is_instance_valid(learning_grade_option):
+		GameManager.set_learning_grade(int(learning_grade_option.get_selected_metadata()))
+
+func _fit_hero_badge() -> void:
+	# Wait for wrapped text width before replacing the provisional first-frame height.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if is_instance_valid(hero_badge):
+		hero_badge.size = Vector2(570, maxf(190, hero_badge.get_combined_minimum_size().y))
 
 func _connect_actions() -> void:
 	local_start_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -325,6 +367,7 @@ func _on_character_selected(idx: int) -> void:
 	skill_name_label.text = "특수기술 · %s  |  필요 SP %d  |  %s" % [skill.get("name", "특수기술"), int(skill.get("cost", 0)), target_label]
 	skill_name_label.add_theme_color_override("font_color", skill_accent.lightened(0.22))
 	skill_description_label.text = "%s 턴당 1회 사용할 수 있으며, 사용 후에도 주사위를 굴릴 수 있습니다." % str(skill.get("description", ""))
+	_fit_hero_badge.call_deferred()
 	hero_glow.modulate = Color(character["color"], 0.22)
 	_update_character_button_styles(idx)
 	if _intro_finished:
@@ -358,6 +401,7 @@ func _on_mode_selected(idx: int) -> void:
 		_room_browser.open_browser()
 
 func _on_local_start_pressed() -> void:
+	_apply_learning_grade()
 	_commit_line_edit_ime(nickname_edit)
 	var my_name := nickname_edit.text.strip_edges().left(6)
 	if my_name.is_empty():
@@ -373,11 +417,12 @@ func _on_local_start_pressed() -> void:
 		configs.append({"name": character["name"] + " (AI)", "is_ai": true, "char_icon": character["icon"], "char_color": character["color"]})
 
 	_pending_game_duration_seconds = int(game_time_option_button.get_selected_metadata())
-	status_label.text = "%d분 동안 진행할 에너지 원정을 준비하는 중..." % (_pending_game_duration_seconds / 60)
+	status_label.text = "탐험 %d분 준비 중 · 미니게임과 함께 짓는 시간은 별도예요." % (_pending_game_duration_seconds / 60)
 	_begin_opening_story(configs)
 
 func _on_host_pressed() -> void:
 	if NetworkManager.is_online and NetworkManager.is_host:
+		_apply_learning_grade()
 		_pending_game_duration_seconds = int(game_time_option_button.get_selected_metadata())
 		if NetworkManager.start_hosted_game(_pending_game_duration_seconds):
 			status_label.text = "참가자들과 게임을 시작합니다..."
@@ -389,6 +434,7 @@ func _on_host_pressed() -> void:
 
 
 func _create_configured_room(settings: Dictionary) -> void:
+	_apply_learning_grade()
 	var error := NetworkManager.create_room(NetworkManager.DEFAULT_PORT, _get_local_player_info(), settings)
 	if error == OK:
 		ip_edit.text = NetworkManager.room_code
@@ -660,7 +706,7 @@ func _online_mode_hint() -> String:
 	return "방장이 만든 6자리 코드를 같은 네트워크의 친구가 입력하면 자동으로 참가합니다. 빈 자리는 AI가 채웁니다."
 
 func _on_help_pressed() -> void:
-	status_label.text = "퀴즈로 발전소 자재를 모아 화력발전소를 재생에너지 발전소로 바꿔 보세요!"
+	status_label.text = "퀴즈는 에너지와 SP, 길에서 만나는 부품은 공동 건설에 써요. 탐험 시간 외에 미니게임·건설 시간이 있어요."
 	var tween := create_tween()
 	tween.tween_property(status_label, "modulate", Color(1.0, 0.9, 0.38, 1.0), 0.14)
 	tween.tween_property(status_label, "modulate", Color.WHITE, 0.35)

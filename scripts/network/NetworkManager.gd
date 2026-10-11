@@ -372,8 +372,8 @@ func start_hosted_game(duration_seconds: int) -> bool:
 	_stop_room_announcement()
 	print("[Network] 공통 게임 시작 전송 · 사람 %d명" % configs.size())
 	# 원격 시작 패킷을 먼저 큐에 넣어 뒤이어 발생하는 첫 턴 상태보다 앞서 도착시킵니다.
-	_rpc_begin_game.rpc(configs, duration_seconds, game_peer_ids, shared_board_tiles)
-	_rpc_begin_game(configs, duration_seconds, game_peer_ids.duplicate(), shared_board_tiles.duplicate(true))
+	_rpc_begin_game.rpc(configs, duration_seconds, game_peer_ids, shared_board_tiles, GameManager.learning_grade)
+	_rpc_begin_game(configs, duration_seconds, game_peer_ids.duplicate(), shared_board_tiles.duplicate(true), GameManager.learning_grade)
 	return true
 
 
@@ -1047,7 +1047,7 @@ func _rpc_session_credentials(token: String) -> void:
 
 
 func _update_connection_recovery(delta: float) -> void:
-	if not is_online or not game_has_started:
+	if not is_online:
 		return
 	var now := Time.get_ticks_msec()
 	if is_host:
@@ -1055,6 +1055,9 @@ func _update_connection_recovery(delta: float) -> void:
 			if now >= int(_pending_registrations[peer_id]):
 				_pending_registrations.erase(peer_id)
 				multiplayer.multiplayer_peer.disconnect_peer(int(peer_id))
+	if not game_has_started:
+		return
+	if is_host:
 		for peer_id in _peer_last_seen.keys():
 			if now - int(_peer_last_seen[peer_id]) > int(CONNECTION_SILENCE_SECONDS * 1000):
 				# A cable pull can leave the transport apparently connected for a long time.
@@ -1307,7 +1310,7 @@ func request_minigame_score(player_idx: int, score: int, learning_stats: Diction
 
 
 func request_evaluate_village() -> void:
-	_request_game_action("evaluate_village", {})
+	_request_game_action("evaluate_village", {"player_idx": get_local_player_index()})
 
 
 func _request_game_action(action: String, payload: Dictionary) -> void:
@@ -1327,13 +1330,15 @@ func _on_peer_connected(id: int) -> void:
 
 func _on_peer_disconnected(id: int) -> void:
 	print("[Network] 플레이어 연결 종료: %d" % id)
+	var was_registered := connected_players.has(id)
 	connected_players.erase(id)
 	_drop_browser_connection(id)
 	_pending_registrations.erase(id)
 	_peer_last_seen.erase(id)
 	player_disconnected.emit(id)
 	if is_host:
-		_broadcast_lobby_state()
+		if was_registered:
+			_broadcast_lobby_state()
 		var player_idx := get_player_index_for_peer(id)
 		if game_has_started and player_idx >= 0 and player_idx < GameManager.players.size():
 			if not _pending_reconnects.has(player_idx):
@@ -1415,9 +1420,10 @@ func _rpc_sync_lobby(players_data: Dictionary, title: String = "에너지 모험
 
 
 @rpc("authority", "call_remote", "reliable")
-func _rpc_begin_game(configs: Array, duration_seconds: int, peer_ids: Array, board_tiles: Array) -> void:
+func _rpc_begin_game(configs: Array, duration_seconds: int, peer_ids: Array, board_tiles: Array, grade: int = 5) -> void:
 	print("[Network] 공통 게임 시작 수신 · peer=%d" % multiplayer.get_unique_id())
 	game_has_started = true
+	GameManager.set_learning_grade(grade)
 	room_capacity = clampi(peer_ids.size(), 2, 4)
 	_last_host_contact = Time.get_ticks_msec()
 	var received_peer_ids := peer_ids.duplicate()
@@ -1455,7 +1461,8 @@ func _handle_game_action(sender_peer_id: int, action: String, payload: Dictionar
 		"quiz_answer":
 			if int(payload.get("player_idx", -1)) == player_idx and GameManager.active_quiz_player_idx == player_idx:
 				var choice := str(payload.get("choice", ""))
-				GameManager.on_network_quiz_resolved(player_idx, choice == str(GameManager.active_quiz_data.get("answer", "")))
+				if choice.is_empty() or choice in GameManager.active_quiz_data.get("options", []):
+					GameManager.on_network_quiz_resolved(player_idx, choice == str(GameManager.active_quiz_data.get("answer", "")), choice)
 		"spectator_guess":
 			GameManager.submit_spectator_quiz_guess(player_idx, int(payload.get("target_idx", -1)), str(payload.get("choice", "")))
 		"special_skill":
@@ -1477,11 +1484,11 @@ func _handle_game_action(sender_peer_id: int, action: String, payload: Dictionar
 			if int(payload.get("player_idx", -1)) == player_idx:
 				GameManager.start_minigame_action(player_idx, int(payload.get("round_id", -1)))
 		"minigame_score":
-			if int(payload.get("player_idx", -1)) == player_idx and int(payload.get("round_id", -1)) == int(GameManager.active_minigame.get("round_id", -2)):
-				GameManager.submit_minigame_score(player_idx, int(payload.get("score", 0)), payload.get("stats", {}), int(payload.get("round_id", -1)))
+			if typeof(payload.get("player_idx")) == TYPE_INT and payload["player_idx"] == player_idx:
+				GameManager.submit_network_minigame_score(player_idx, payload.get("score"), payload.get("stats"), payload.get("round_id"))
 		"evaluate_village":
-			if sender_peer_id == 1:
-				GameManager.evaluate_village()
+			if int(payload.get("player_idx", -1)) == player_idx:
+				GameManager.finish_village_construction(player_idx)
 
 
 func _broadcast_lobby_state() -> void:
@@ -1571,7 +1578,8 @@ func _capture_time_patch(event_name: String, event_args: Array) -> Dictionary:
 		"game_time_changed":
 			return {
 				"game_time_remaining": float(event_args[0]) if event_args.size() >= 1 else GameManager.game_time_remaining,
-				"game_duration_seconds": int(event_args[1]) if event_args.size() >= 2 else GameManager.game_duration_seconds
+				"game_duration_seconds": int(event_args[1]) if event_args.size() >= 2 else GameManager.game_duration_seconds,
+				"active_quiz_time_remaining": GameManager.active_quiz_time_remaining
 			}
 		"dice_input_time_changed":
 			return {
@@ -1606,8 +1614,10 @@ func _capture_game_state_patch(event_name: String, event_args: Array) -> Diction
 		"quiz_requested":
 			patch["active_quiz_data"] = GameManager.active_quiz_data.duplicate(true)
 			patch["active_quiz_player_idx"] = GameManager.active_quiz_player_idx
+			patch["active_quiz_time_remaining"] = GameManager.active_quiz_time_remaining
 			patch["active_spectator_quiz_attempts"] = GameManager.active_spectator_quiz_attempts.duplicate(true)
 		"quiz_resolved":
+			patch["last_quiz_choice"] = GameManager.last_quiz_choice
 			_add_player_update(patch, int(event_args[0]) if not event_args.is_empty() else -1)
 			patch["active_quiz_data"] = GameManager.active_quiz_data.duplicate(true)
 			patch["active_quiz_player_idx"] = GameManager.active_quiz_player_idx
@@ -1635,6 +1645,7 @@ func _capture_game_state_patch(event_name: String, event_args: Array) -> Diction
 			patch["players"] = GameManager.players.duplicate(true)
 			_add_minigame_state(patch)
 		"village_construction_started", "village_construction_changed":
+			patch["village_finished_players"] = GameManager.village_finished_players.duplicate(true)
 			patch["players"] = GameManager.players.duplicate(true)
 			_add_kingdom_state(patch)
 			patch["village_construction_active"] = GameManager.village_construction_active
@@ -1698,12 +1709,16 @@ func _capture_game_state() -> Dictionary:
 		"is_game_active": GameManager.is_game_active,
 		"active_quiz_data": GameManager.active_quiz_data.duplicate(true),
 		"active_quiz_player_idx": GameManager.active_quiz_player_idx,
+		"active_quiz_time_remaining": GameManager.active_quiz_time_remaining,
+		"last_quiz_choice": GameManager.last_quiz_choice,
+		"learning_grade": GameManager.learning_grade,
 		"active_spectator_quiz_attempts": GameManager.active_spectator_quiz_attempts.duplicate(true),
 		"projects_built": GameManager.projects_built,
 		"kingdom_health": GameManager.kingdom_health,
 		"kingdom_recovered": GameManager.kingdom_recovered,
 		"team_quiz_correct": GameManager.team_quiz_correct,
 		"village_construction_active": GameManager.village_construction_active,
+		"village_finished_players": GameManager.village_finished_players.duplicate(true),
 		"built_project_ids": GameManager.built_project_ids.duplicate(),
 		"built_project_placements": GameManager.built_project_placements.duplicate(true),
 		"built_project_owners": GameManager.built_project_owners.duplicate(true),

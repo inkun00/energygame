@@ -23,7 +23,6 @@ var tutorial_steps := {"dice": false, "pickup": false, "goal": false, "skill": f
 var tutorial_active := false
 var exploration_active := false
 var quiz_open := false
-var settings_path := "user://adventure_guide.cfg"
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -186,9 +185,9 @@ func begin_exploration(index: int) -> void:
 	exploration_active = true
 	quiz_open = false
 	for step in tutorial_steps: tutorial_steps[step] = false
-	var config := ConfigFile.new()
-	config.load(settings_path)
-	tutorial_active = not bool(config.get_value("guide", "completed", false))
+	# A classroom laptop can be shared by different students. Guide completion
+	# is local to this adventure; do not save a permanent play/completion record.
+	tutorial_active = true
 	close_catalog()
 	refresh({})
 	_refresh_tutorial()
@@ -321,9 +320,6 @@ func replay_tutorial() -> void:
 
 func dismiss_tutorial() -> void:
 	tutorial_active = false
-	var config := ConfigFile.new()
-	config.set_value("guide", "completed", true)
-	config.save(settings_path)
 	_refresh_visibility()
 
 func _refresh_tutorial() -> void:

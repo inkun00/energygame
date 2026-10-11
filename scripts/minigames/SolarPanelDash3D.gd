@@ -2,11 +2,13 @@ extends SubViewportContainer
 class_name SolarPanelDash3D
 
 ## 저사양 노트북을 위한 경량 3D 자동 달리기 미니게임입니다.
-## 햇빛을 향한 패널 차선을 고르고 구름 그림자를 뛰어넘으며 발전 원리를 익힙니다.
+## 패널의 각도를 살펴 햇빛을 받는 경로를 고르고 지형물을 뛰어넘습니다.
 
 signal arcade_event(points: int, success: bool, message: String, count_correct: bool)
 
+const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
+const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 const SOLAR_PANEL_MODEL: PackedScene = preload("res://assets/third_party/kenney/solar_dash/solar-panel-landscape.glb")
 const SOLAR_FARM_MODEL: PackedScene = preload("res://assets/third_party/kenney/solar_dash/solar-panel-landscape-group.glb")
 const SOLAR_BUILDING_MODEL: PackedScene = preload("res://assets/third_party/kenney/solar_dash/building-a.glb")
@@ -32,6 +34,8 @@ const KNOCKBACK_LIFT := 3.4
 const FORWARD_SPRING := 18.0
 const FORWARD_DAMPING := 4.2
 const SUN_MOVE_INTERVAL := 5.0
+const SUN_TRANSITION_SECONDS := 0.85
+const PANEL_SURFACE_NORMAL := Vector3(0.0, 0.8660254, -0.5)
 const SUN_POSITIONS: Array[Vector3] = [
 	Vector3(-6.2, 7.0, -18.0),
 	Vector3(0.0, 8.0, -18.0),
@@ -46,6 +50,7 @@ var hero: Node3D
 var hero_body: CharacterBody3D
 var sun: MeshInstance3D
 var rng := RandomNumberGenerator.new()
+var visual_rng := RandomNumberGenerator.new()
 var running := false
 var jump_velocity := 0.0
 var jump_height := 0.0
@@ -53,7 +58,7 @@ var spawn_elapsed := 0.0
 var distance := 0.0
 var sun_move_elapsed := 0.0
 var sun_position_index := 0
-var sun_move_tween: Tween
+var sun_move_count := 0
 var panel_gates: Array[Dictionary] = []
 var terrain_obstacles: Array[Dictionary] = []
 var road_stripes: Array[MeshInstance3D] = []
@@ -65,6 +70,7 @@ var energy_material: StandardMaterial3D
 var overlay_label: Label
 var score_rule_label: Label
 var sun_timer_label: Label
+var panel_gate_index := 0
 
 func _ready() -> void:
 	stretch = true
@@ -78,7 +84,14 @@ func _ready() -> void:
 	set_process(true)
 
 func setup(player_data: Dictionary, game_seed: int) -> void:
+	lane_choice_made = false
 	rng.seed = game_seed
+	visual_rng.seed = game_seed ^ 0x5A71
+	panel_gate_index = 0
+	sun_move_elapsed = 0.0
+	sun_position_index = 0
+	sun_move_count = 0
+	sun.position = SUN_POSITIONS[0]
 	_spawn_hero(player_data)
 	for gate_index in range(4):
 		_spawn_panel_gate(-8.0 - float(gate_index) * 8.0)
@@ -106,23 +119,8 @@ func _build_viewport() -> void:
 	viewport.add_child(world)
 
 func _build_world() -> void:
-	var environment_node := WorldEnvironment.new()
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color("69b9d0")
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("dff7ff")
-	environment.ambient_light_energy = 0.75
-	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	environment_node.environment = environment
-	world.add_child(environment_node)
-
-	var light := DirectionalLight3D.new()
-	light.rotation_degrees = Vector3(-52, -35, 0)
-	light.light_color = Color("fff1b2")
-	light.light_energy = 1.15
-	light.shadow_enabled = false
-	world.add_child(light)
+	VISUAL_STYLE.add_environment(world)
+	VISUAL_STYLE.add_key_light(world, Vector3(-52, -35, 0))
 
 	camera = Camera3D.new()
 	camera.position = Vector3(0, 5.2, 8.6)
@@ -142,7 +140,7 @@ func _build_ground() -> void:
 	road_box.size = Vector3(9.7, 0.20, 46.0)
 	road.mesh = road_box
 	road.position = Vector3(0, -0.12, -13.5)
-	road.material_override = _material(Color("315b57"), false)
+	road.material_override = _material(VISUAL_STYLE.ROAD, false)
 	world.add_child(road)
 	var road_body := StaticBody3D.new()
 	road_body.position = road.position
@@ -159,7 +157,7 @@ func _build_ground() -> void:
 		field_box.size = Vector3(16.0, 0.12, 46.0)
 		field.mesh = field_box
 		field.position = Vector3(float(side) * 12.8, -0.17, -13.5)
-		field.material_override = _material(Color("6f9d55"), false)
+		field.material_override = _material(VISUAL_STYLE.FIELD, false)
 		world.add_child(field)
 
 	for lane_separator in [-1.35, 1.35]:
@@ -181,14 +179,16 @@ func _build_sun() -> void:
 	sun.mesh = sphere
 	sun.position = SUN_POSITIONS[0]
 	var sun_material := _material(Color("ffd957"), true)
-	sun_material.emission_energy_multiplier = 2.4
+	# A clear yellow direction marker, without light-plus-emission white clipping.
+	sun_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	sun_material.emission_enabled = false
 	sun.material_override = sun_material
 	world.add_child(sun)
 
 func _build_horizon() -> void:
 	for x in [-7.2, 7.2]:
 		for z_index in range(5):
-			_spawn_static_asset(TREE_MODEL, Vector3(x + rng.randf_range(-1.0, 1.0), 0.0, -3.0 - z_index * 7.0), Vector3.ONE * rng.randf_range(1.45, 1.85), float(z_index * 31))
+			_spawn_static_asset(TREE_MODEL, Vector3(x + visual_rng.randf_range(-1.0, 1.0), 0.0, -3.0 - z_index * 7.0), Vector3.ONE * visual_rng.randf_range(1.45, 1.85), float(z_index * 31))
 			if z_index % 2 == 0:
 				_spawn_static_asset(BUSH_MODEL, Vector3(x * 0.82, 0.0, -5.0 - z_index * 7.0), Vector3.ONE * 1.2, float(z_index * 47))
 	for side in [-1, 1]:
@@ -201,6 +201,7 @@ func _spawn_static_asset(scene: PackedScene, position_value: Vector3, scale_valu
 	instance.scale = scale_value
 	instance.rotation_degrees.y = yaw_degrees
 	world.add_child(instance)
+	VISUAL_STYLE.prepare_imported(instance)
 	return instance
 
 func _create_materials() -> void:
@@ -208,16 +209,16 @@ func _create_materials() -> void:
 	panel_material.emission = Color("123f78")
 	panel_material.emission_energy_multiplier = 0.45
 	correct_material = _material(Color("48e58d"), true)
-	correct_material.emission_energy_multiplier = 1.4
+	correct_material.emission_energy_multiplier = 0.62
 	wrong_material = _material(Color("e65f58"), true)
-	wrong_material.emission_energy_multiplier = 1.1
+	wrong_material.emission_energy_multiplier = 0.62
 	energy_material = _material(Color("ffe66b"), true)
-	energy_material.emission_energy_multiplier = 1.8
+	energy_material.emission_energy_multiplier = 0.55
 
 func _build_overlay() -> void:
 	overlay_label = Label.new()
 	overlay_label.position = Vector2(14, 12)
-	overlay_label.text = "A / D  차선 이동       SPACE  점프       발전 설비와 지형물 충돌을 피하세요!"
+	overlay_label.text = "A/D 이동 · SPACE 점프 · 햇빛을 정면으로 받는 패널을 찾아요"
 	overlay_label.add_theme_font_size_override("font_size", 16)
 	overlay_label.add_theme_color_override("font_color", Color("fff7c2"))
 	overlay_label.add_theme_color_override("font_outline_color", Color("12313b"))
@@ -226,7 +227,7 @@ func _build_overlay() -> void:
 
 	score_rule_label = Label.new()
 	score_rule_label.position = Vector2(14, 40)
-	score_rule_label.text = "☀ 햇빛을 보는 패널  +100점     🪨 지형물 회피  +30점     충돌 시 뒤로 밀림"
+	score_rule_label.text = "패널 각도를 보세요 · 태양과 같은 차선이 정답은 아니에요"
 	score_rule_label.add_theme_font_size_override("font_size", 15)
 	score_rule_label.add_theme_color_override("font_color", Color("ffe66b"))
 	score_rule_label.add_theme_color_override("font_outline_color", Color("12313b"))
@@ -272,13 +273,17 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	hero.position = Vector3.ZERO
 	hero.scale = Vector3.ONE * 2.15
 	hero.call("_set_avatar_animation_state", true)
+	VISUAL_STYLE.style_hero(hero)
 
 func _spawn_panel_gate(start_z: float = -30.0) -> void:
 	var gate := Node3D.new()
 	gate.position.z = start_z
 	world.add_child(gate)
-	var correct_lane := _correct_lane_for_current_sun()
+	# The same sun position can have a useful panel in any lane. Judge its angle.
+	var correct_lane := rng.randi_range(0, LANES.size() - 1)
+	panel_gate_index += 1
 	var panels: Array[Node3D] = []
+	var beams: Array[MeshInstance3D] = []
 	for lane_index in range(3):
 		var station := Node3D.new()
 		station.position.x = LANES[lane_index]
@@ -290,12 +295,25 @@ func _spawn_panel_gate(start_z: float = -30.0) -> void:
 		# Kenney 모델의 지면 기준점보다 높여 지지 기둥과 받침이 모두 보이게 합니다.
 		panel.position.y = 0.68
 		station.add_child(panel)
+		VISUAL_STYLE.prepare_imported(panel)
 		panels.append(panel)
+		var beam := MeshInstance3D.new()
+		var ray := CylinderMesh.new()
+		ray.top_radius = 0.014
+		ray.bottom_radius = 0.014
+		ray.height = 2.0
+		ray.radial_segments = 6
+		beam.mesh = ray
+		beam.material_override = energy_material
+		station.add_child(beam)
+		beams.append(beam)
 	panel_gates.append({
 		"node": gate,
 		"correct_lane": correct_lane,
 		"resolved": false,
 		"meshes": panels,
+		"beams": beams,
+		"angle_offset": -55.0 if panel_gate_index % 2 == 0 else 55.0,
 	})
 	_update_panel_gate_for_sun(panel_gates[panel_gates.size() - 1])
 
@@ -312,6 +330,7 @@ func _spawn_terrain_obstacle(start_z: float = -32.0, forced_spec_index: int = -1
 	visual.scale = Vector3.ONE * float(spec["scale"])
 	visual.rotation_degrees.y = rng.randf_range(-18.0, 18.0)
 	obstacle.add_child(visual)
+	VISUAL_STYLE.prepare_imported(visual)
 	var collision_shape := CollisionShape3D.new()
 	var box_shape := BoxShape3D.new()
 	var collision_size: Vector3 = spec["size"]
@@ -333,24 +352,27 @@ func _physics_process(delta: float) -> void:
 		return
 	hit_cooldown = maxf(0.0, hit_cooldown - delta)
 	_update_hero_physics(delta)
+	_update_sun(delta)
 	_update_course(delta)
 	_update_spawning(delta)
 	distance += RUN_SPEED * delta
 	if is_instance_valid(sun):
 		sun.rotation.y += delta * 0.18
-	_update_sun(delta)
+
+var lane_choice_made := false
 
 func _update_hero_physics(delta: float) -> void:
 	var direction := 0.0
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+	if MINIGAME_INPUT.is_pressed(KEY_A) or MINIGAME_INPUT.is_pressed(KEY_LEFT):
 		direction -= 1.0
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+	if MINIGAME_INPUT.is_pressed(KEY_D) or MINIGAME_INPUT.is_pressed(KEY_RIGHT):
 		direction += 1.0
+	lane_choice_made = lane_choice_made or not is_zero_approx(direction)
 	var velocity := hero_body.velocity
 	velocity.x = move_toward(velocity.x, direction * STEER_SPEED, STEER_SPEED * 12.0 * delta)
 	if not hero_body.is_on_floor():
 		velocity.y -= GRAVITY * delta
-	if (Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP)) and hero_body.is_on_floor():
+	if (MINIGAME_INPUT.is_pressed(KEY_SPACE) or MINIGAME_INPUT.is_pressed(KEY_W) or MINIGAME_INPUT.is_pressed(KEY_UP)) and hero_body.is_on_floor():
 		velocity.y = JUMP_FORCE
 	# 충돌로 뒤로 밀린 뒤 감쇠되는 속도와 원래 달리기 위치로 향하는 복원력을 적용합니다.
 	velocity.z += (PLAYER_Z - hero_body.position.z) * FORWARD_SPRING * delta
@@ -383,7 +405,7 @@ func _resolve_hazard_collision(obstacle: Node3D) -> void:
 		hit_cooldown = 0.5
 		var side_direction := signf(hero_body.position.x - obstacle.position.x)
 		if is_zero_approx(side_direction):
-			side_direction = -1.0 if rng.randf() < 0.5 else 1.0
+			side_direction = -1.0 if visual_rng.randf() < 0.5 else 1.0
 		hero_body.velocity.z = KNOCKBACK_SPEED
 		hero_body.velocity.x = side_direction * KNOCKBACK_SIDE_SPEED
 		hero_body.velocity.y = maxf(hero_body.velocity.y, KNOCKBACK_LIFT)
@@ -407,7 +429,7 @@ func _update_course(delta: float) -> void:
 			panel_gates.remove_at(gate_index)
 			continue
 		gate.position.z += RUN_SPEED * delta
-		if not bool(record.get("resolved", false)) and gate.position.z >= PLAYER_Z - 0.2:
+		if not bool(record.get("resolved", false)) and gate.position.z >= hero_body.position.z - 0.2:
 			record["resolved"] = true
 			_resolve_panel_gate(record)
 		if gate.position.z > 8.5:
@@ -438,12 +460,11 @@ func _update_course(delta: float) -> void:
 
 func _update_spawning(delta: float) -> void:
 	spawn_elapsed += delta
-	if spawn_elapsed < 2.15:
-		return
-	spawn_elapsed = 0.0
-	_spawn_panel_gate()
-	if rng.randf() < 0.74:
-		_spawn_terrain_obstacle(-35.0)
+	while spawn_elapsed >= 2.15:
+		spawn_elapsed -= 2.15
+		_spawn_panel_gate(-30.0 + spawn_elapsed * RUN_SPEED)
+		if rng.randf() < 0.74:
+			_spawn_terrain_obstacle(-35.0 + spawn_elapsed * RUN_SPEED)
 
 func _resolve_panel_gate(record: Dictionary) -> void:
 	# 태양 이동 트윈과 게이트 통과가 같은 프레임에 겹쳐도 현재 위치 기준으로 판정합니다.
@@ -451,62 +472,75 @@ func _resolve_panel_gate(record: Dictionary) -> void:
 	var selected_lane := _nearest_lane(hero_body.position.x)
 	var correct_lane := int(record.get("correct_lane", 1))
 	var panels: Array = record.get("meshes", [])
+	var capture := panel_capture_efficiency(panels[selected_lane] as Node3D) if selected_lane < panels.size() else 0.0
 	if selected_lane >= 0 and selected_lane < panels.size():
 		_tint_model(panels[selected_lane] as Node3D, correct_material if selected_lane == correct_lane else wrong_material)
-	if selected_lane == correct_lane:
+	if capture >= 0.95:
+		if not lane_choice_made:
+			arcade_event.emit(0, true, "태양을 보고 패널 길을 골라 보세요. 기다린 기록은 점수가 아니에요.", false)
+			return
 		_spawn_energy_burst(hero_body.position + Vector3(0, 1.1, -0.2))
-		_show_score_popup(100, true, "태양광 발전 성공!")
-		arcade_event.emit(100, true, "햇빛을 향한 패널을 통과해 발전 성공!", true)
+		_show_score_popup(100, true, "햇빛 정면 → 전기 생산!")
+		arcade_event.emit(100, true, "패널이 빛을 정면으로 받아 전기를 만들었어요!", true)
 	else:
 		_show_score_popup(25, false, "햇빛이 부족해요")
-		arcade_event.emit(25, false, "반대쪽 패널은 햇빛을 적게 받아요.", false)
+		arcade_event.emit(25, false, "빛이 비스듬히 닿는 패널은 발전량이 작아요.", false)
 func _update_sun(delta: float) -> void:
 	sun_move_elapsed += delta
+	while sun_move_elapsed + 0.000001 >= SUN_MOVE_INTERVAL:
+		sun_move_elapsed = maxf(0.0, sun_move_elapsed - SUN_MOVE_INTERVAL)
+		sun_position_index = (sun_position_index + 1) % SUN_POSITIONS.size()
+		sun_move_count += 1
+	# The sunlight used for panel capture must follow the same fixed simulation
+	# clock as the course, rather than a separate render-time SceneTree tween.
+	if sun_move_count > 0:
+		var previous := (sun_position_index - 1 + SUN_POSITIONS.size()) % SUN_POSITIONS.size()
+		var transition := clampf(sun_move_elapsed / SUN_TRANSITION_SECONDS, 0.0, 1.0)
+		var eased := 0.5 - 0.5 * cos(PI * transition)
+		sun.position = SUN_POSITIONS[previous].lerp(SUN_POSITIONS[sun_position_index], eased)
 	var seconds_left := ceili(maxf(0.0, SUN_MOVE_INTERVAL - sun_move_elapsed))
 	if is_instance_valid(sun_timer_label):
 		sun_timer_label.text = "태양 이동까지 %d초" % seconds_left
-	if sun_move_elapsed < SUN_MOVE_INTERVAL:
-		return
-	sun_move_elapsed = 0.0
-	sun_position_index = (sun_position_index + 1) % SUN_POSITIONS.size()
-	if sun_move_tween and sun_move_tween.is_valid():
-		sun_move_tween.kill()
-	sun_move_tween = create_tween()
-	sun_move_tween.tween_property(sun, "position", SUN_POSITIONS[sun_position_index], 0.85).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 
 func _update_panel_gate_for_sun(record: Dictionary) -> void:
 	var gate := record.get("node") as Node3D
 	var panels: Array = record.get("meshes", [])
 	if not is_instance_valid(gate):
 		return
-	var correct_lane := _correct_lane_for_current_sun()
-	record["correct_lane"] = correct_lane
+	var correct_lane := int(record.get("correct_lane", 1))
+	var beams: Array = record.get("beams", [])
 	for lane_index in range(panels.size()):
 		var panel := panels[lane_index] as Node3D
 		if not is_instance_valid(panel):
 			continue
-		# 수평 거리와 높이 차로 실제 태양 고도각을 계산합니다. Kenney 모델을
-		# Y축으로 180도 돌린 현재 배치에서는 Z축 +회전이 오른쪽을 향합니다.
-		var horizontal_to_sun := sun.global_position.x - panel.global_position.x
-		var vertical_to_sun := maxf(1.0, sun.global_position.y - panel.global_position.y)
-		var facing_angle := clampf(rad_to_deg(atan2(horizontal_to_sun, vertical_to_sun)), -42.0, 42.0)
-		if lane_index == correct_lane:
-			panel.rotation_degrees.z = facing_angle
-		else:
-			# 오답 패널은 각 패널이 태양을 향할 때 필요한 각도의 반대편으로 둡니다.
-			panel.rotation_degrees.z = -36.0 if facing_angle >= 0.0 else 36.0
+		var ray_direction := (sun.global_position - panel.global_position).normalized()
+		# The Kenney surface is tilted 30 degrees: use its native normal and the
+		# complete light direction, so screen geometry and capture agree.
+		var base := Basis(Vector3.UP, PI)
+		var facing := Basis(Quaternion((base * PANEL_SURFACE_NORMAL).normalized(), ray_direction)) * base
+		if lane_index != correct_lane:
+			var offset := float(record.get("angle_offset", 65.0))
+			# Always turn away from the light, including a ray directly overhead.
+			var miss_axis := ray_direction.cross(Vector3.RIGHT).normalized()
+			facing = Basis(miss_axis, deg_to_rad(offset if lane_index == (correct_lane + 1) % 3 else -offset)) * facing
+		panel.basis = facing.scaled(Vector3.ONE * 1.65)
+		if lane_index < beams.size():
+			var beam := beams[lane_index] as MeshInstance3D
+			beam.global_position = panel.global_position + Vector3.UP * 0.65 + ray_direction * 1.2
+			beam.quaternion = Quaternion(Vector3.UP, ray_direction)
 
-func _correct_lane_for_current_sun() -> int:
-	if not is_instance_valid(sun):
-		return 1
-	var nearest_lane := 0
-	var nearest_distance := INF
-	for lane_index in range(LANES.size()):
-		var lane_distance := absf(sun.global_position.x - LANES[lane_index])
-		if lane_distance < nearest_distance:
-			nearest_distance = lane_distance
-			nearest_lane = lane_index
-	return nearest_lane
+func panel_capture_efficiency(panel: Node3D) -> float:
+	var normal := (panel.global_basis.orthonormalized() * PANEL_SURFACE_NORMAL).normalized()
+	var light_direction := (sun.global_position - panel.global_position).normalized()
+	return clampf(normal.dot(light_direction), 0.0, 1.0)
+
+func _correct_lane_for_current_sun(record: Dictionary = {}) -> int:
+	if not record.is_empty():
+		return int(record.get("correct_lane", 1))
+	for gate in panel_gates:
+		if not bool(gate.get("resolved", false)):
+			return int(gate.get("correct_lane", 1))
+	return 1
 
 func _tint_model(model_root: Node3D, material: StandardMaterial3D) -> void:
 	if model_root is MeshInstance3D:
@@ -534,13 +568,13 @@ func _show_score_popup(points: int, success: bool, message: String) -> void:
 	popup.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	popup.text = "%s%d점  %s" % ["+" if success else "−", points, message]
 	popup.add_theme_font_size_override("font_size", 27)
-	popup.add_theme_color_override("font_color", Color("6effaa") if success else Color("ff766d"))
-	popup.add_theme_color_override("font_outline_color", Color("08202a"))
-	popup.add_theme_constant_override("outline_size", 7)
+	popup.add_theme_color_override("font_color", Color("c2ffdd") if success else Color("ffe0d7"))
+	popup.add_theme_color_override("font_outline_color", Color("041019"))
+	popup.add_theme_constant_override("outline_size", 9)
 	add_child(popup)
 	var tween := create_tween().set_parallel(true)
 	tween.tween_property(popup, "position:y", popup.position.y - 34.0, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(popup, "modulate:a", 0.0, 1.0).set_delay(0.35)
+	tween.tween_property(popup, "modulate:a", 0.0, 0.65).set_delay(0.7)
 	tween.chain().tween_callback(popup.queue_free)
 
 func _nearest_lane(x_position: float) -> int:
@@ -569,11 +603,4 @@ func _spawn_energy_burst(burst_position: Vector3) -> void:
 	tween.chain().tween_callback(burst.queue_free)
 
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.76
-	if glowing:
-		material.emission_enabled = true
-		material.emission = color
-		material.emission_energy_multiplier = 0.7
-	return material
+	return VISUAL_STYLE.material(color, glowing)

@@ -37,7 +37,7 @@ func _run() -> void:
 	modal.round_id = 1001
 	modal.active = true
 	modal.submitted = false
-	modal._register_success(20, "남는 전기 1칸을 배터리에 저장", true)
+	modal._register_success(20, "남는 전기 1칸을 배터리에 저장", false)
 	_check("저장" in modal.lesson_label.text, "플레이 중 저장 행동이 즉시 교육 문구에 반영돼야 합니다.")
 	modal._register_success(80, "저장 전기로 도시의 불을 켰어요", true)
 	_check("도시" in modal.lesson_label.text, "플레이 중 공급 행동이 즉시 교육 문구에 반영돼야 합니다.")
