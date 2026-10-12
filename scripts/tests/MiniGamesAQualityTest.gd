@@ -4,6 +4,7 @@ const WIND = preload("res://scripts/minigames/WindTurbinePilot3D.gd")
 const SOLAR = preload("res://scripts/minigames/SolarPanelDash3D.gd")
 const GRID = preload("res://scripts/minigames/SmartGridBalance3D.gd")
 const STANDBY = preload("res://scripts/minigames/StandbyPowerHunt3D.gd")
+const FEEDBACK = preload("res://scripts/minigames/MiniGameLearningFeedback.gd")
 var failures: Array[String] = []
 var created: Array[Node] = []
 
@@ -28,6 +29,7 @@ func _run() -> void:
 	ProjectSettings.set_setting("network/room_directory_url", "")
 	OS.set_environment("ENERGYGAME_ROOM_DIRECTORY_URL", "")
 	_check_frame_rate_timers()
+	_check_action_feedback()
 	var wa = _arcade(WIND)
 	var wb = _arcade(WIND)
 	wa.phase_index = 3
@@ -116,6 +118,73 @@ func _run() -> void:
 	await process_frame
 	print("Mini-games A quality: %d failures" % failures.size())
 	quit(0 if failures.is_empty() else 1)
+
+func _check_action_feedback() -> void:
+	var solar = _arcade(SOLAR)
+	for sun_position in solar.SUN_POSITIONS:
+		solar.sun.position = sun_position
+		for gate in solar.panel_gates:
+			solar._update_panel_gate_for_sun(gate)
+			_check(gate.front_markers.size() == 3, "Solar: every lane must have a neutral front-direction marker")
+			for lane in range(3):
+				var panel: Node3D = gate.meshes[lane]
+				var marker: Node3D = gate.front_markers[lane]
+				var actual_normal: Vector3 = (panel.global_basis.orthonormalized() * solar.PANEL_SURFACE_NORMAL).normalized()
+				_check(marker.global_basis.y.normalized().dot(actual_normal) > 0.99999, "Solar: visible arrow must describe the actual scored panel front at every sun position")
+				var useful := lane == int(gate.correct_lane)
+				_check(solar.panel_capture_efficiency(panel) > 0.99 if useful else solar.panel_capture_efficiency(panel) < 0.95, "Solar: front-direction cue must agree with sunlight capture without changing the answer")
+				for child in marker.get_children():
+					_check(child.material_override == solar.front_direction_material, "Solar: correct and incorrect panels must share identical neutral marker styling")
+	var wind = _arcade(WIND)
+	wind.wind_angle = 0.0
+	wind.turbine_yaw = 0.0
+	wind.yaw_choice_made = false
+	var wind_events: Array[Dictionary] = []
+	wind.arcade_event.connect(func(points:int,success:bool,_message:String,correct:bool):
+		wind_events.append({"points":points,"success":success,"correct":correct})
+	)
+	wind._process(0.75)
+	_check(wind_events.is_empty() and "예상 발전" in wind.alignment_label.text and "조절해 시작" in wind.instruction_label.text, "Wind: initially aligned idle turbine must explain the zero-score state and first action")
+	wind._apply_yaw_input(1.0,0.01)
+	wind._process(0.35)
+	_check(wind_events.size() == 1 and wind_events[0].success and wind_events[0].correct and "예상" not in wind.alignment_label.text, "Wind: actual yaw choice must start generation and clear the start hint")
+	# Reproduce a capture just before normal phase 3 becomes storm phase 4.
+	wind.phase_index = 3
+	wind.phase_elapsed = wind.WIND_PHASE_SECONDS - 0.01
+	wind._process(0.02)
+	_check(wind.storm_phase and not is_instance_valid(wind.score_popup), "Wind: an old generation popup must disappear at the exact storm boundary")
+	wind._finish_wind_phase()
+	_check(wind_events.back().points == 35 and not wind_events.back().success and is_instance_valid(wind.score_popup), "Wind: missed-brake penalty and failure popup must survive the following normal-phase transition")
+	_check(wind.score_popup.offset_top - 10.0 >= wind.storm_banner.offset_bottom + 8.0, "Wind: score popup must never travel into the reserved storm warning area")
+	var grid = _arcade(GRID)
+	grid.measurement_time = 2.0
+	grid.gap_integral = 20.0
+	grid.demand = 65.0
+	grid.supply = 55.0
+	grid._update_hud(-10.0,false)
+	_check("현재" in grid.demand_label.text and "평균" in grid.average_gap_label.text, "Grid: current demand/supply must be separate from the full-round average gap")
+	var cue := FEEDBACK.live_line("grid_balance",true,0,true,{"grid_gap":0.5})
+	grid.supply = 45.0
+	grid._update_hud(-20.0,false)
+	_check(cue.begins_with("방금") and "0.5 MW" in cue and "20.0 MW" in grid.balance_label.text, "Grid: remembered successful gap must remain explicitly past while the live imbalance changes")
+	var house = _arcade(STANDBY)
+	var house_events: Array[Dictionary] = []
+	house.arcade_event.connect(func(points:int,success:bool,_message:String,correct:bool):
+		house_events.append({"points":points,"success":success,"correct":correct})
+	)
+	var active: Dictionary = house.device_records[0]
+	house.hero.position.x = float(active.x)
+	house._update_hud()
+	_check("사용 중" in house.action_label.text and "유지" in house.action_label.text and "확인" not in house.action_label.text, "Standby: active-device prompt must not invite an inspection that actually disconnects it")
+	house._try_disconnect()
+	_check(active.resolved and not active.powered and house_events.size() == 1 and house_events[0].points == 48 and not house_events[0].success and not house_events[0].correct and house.saved_watts == 0, "Standby: deliberately cutting an active device must retain the exact penalty and never count as a saved-watts goal")
+	var idle: Dictionary = house.device_records[1]
+	house.hero.position.x = float(idle.x)
+	house._update_hud()
+	_check("[SPACE]" in house.action_label.text and "전원 차단" in house.action_label.text, "Standby: nearby wasted-device prompt must describe the real disconnect action")
+	house._try_disconnect()
+	_check(idle.resolved and not idle.powered and house.saved_watts == idle.watt and house_events.back().points == house.score_for_saved_watts(idle.watt) and house_events.back().success and house_events.back().correct, "Standby: correct disconnection must still award measured watts and a goal action")
+	_check(house.action_label.anchor_top == 1.0 and house.saved_label.anchor_top == 1.0, "Standby: action/savings HUD must remain below the upper route at taller arena sizes")
 
 func _check_frame_rate_timers() -> void:
 	var wind_totals: Array[int] = []

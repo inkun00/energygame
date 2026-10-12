@@ -165,7 +165,10 @@ func _build_window(index: int) -> void:
 		particles.append(particle)
 	var reach_marker := _box(world, Vector3(center_x, 0.08, 1.12), Vector3(CLOSE_REACH * 2.0, 0.035, 0.42), Color("88f0b9"), true)
 	reach_marker.visible = false
-	var prompt := _label3d(world, "Space 닫기", Vector3(center_x, 1.45, 1.2), Color("b8ffd4"))
+	var prompt := _label3d(world, "Space 닫기", Vector3(center_x, 2.30, 0.25), Color("b8ffd4"))
+	prompt.font_size = 42
+	prompt.pixel_size = 0.008
+	prompt.outline_size = 5
 	prompt.visible = false
 	windows.append({"x": center_x, "model": model, "pane": window_pane, "pane_base_position": pane_base_position, "status": status, "particles": particles, "reach_marker": reach_marker, "prompt": prompt, "open": false, "closed": true, "since": 0.0, "open_amount": 0.0})
 
@@ -191,8 +194,10 @@ func _build_overlay() -> void:
 	heater_label = _overlay_label(Vector2(655, 9), Vector2(940, 42), "냉방 +1.4/초", Color("ffd2a4"), 20)
 	preview_label = _overlay_label(Vector2(170, 43), Vector2(650, 73), "", Color("fff0bf"), 18)
 	cooling_use_bar = ProgressBar.new()
-	cooling_use_bar.position = Vector2(675, 46)
-	cooling_use_bar.size = Vector2(260, 18)
+	cooling_use_bar.anchor_left = 675.0 / 960.0
+	cooling_use_bar.anchor_right = 935.0 / 960.0
+	cooling_use_bar.offset_top = 46.0
+	cooling_use_bar.offset_bottom = 64.0
 	cooling_use_bar.max_value = BASE_COOLING_USE + OPEN_WINDOW_USE * float(WINDOW_X.size())
 	cooling_use_bar.show_percentage = false
 	var cooling_fill := StyleBoxFlat.new()
@@ -203,6 +208,10 @@ func _build_overlay() -> void:
 	cooling_use_bar.add_theme_stylebox_override("background", cooling_background)
 	add_child(cooling_use_bar)
 	action_label = _overlay_label(Vector2(95, 254), Vector2(865, 283), "A/D 이동 · 열린 창문 앞에서 Space로 닫기", Color("fff0bf"), 17)
+	action_label.anchor_top = 1.0
+	action_label.anchor_bottom = 1.0
+	action_label.offset_top = -36.0
+	action_label.offset_bottom = -7.0
 	flash = ColorRect.new()
 	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	flash.color = Color.TRANSPARENT
@@ -336,8 +345,10 @@ func _update_overlay() -> void:
 	if to_wave >= 0.0 and to_wave <= 2.5 and next_wave < WAVE_COUNT:
 		upcoming_windows = _opening_candidates(next_wave)
 	preview_label.text = "%.1f초 뒤 더운 바람! 창문을 살펴요" % to_wave if to_wave >= 0.0 and to_wave <= 2.5 else ("창문을 닫으면 더운 공기 ↓ · 냉방 전기 ↓" if _open_window_count() > 0 else "더운 공기 차단! 적은 전기로 시원하게 유지해요")
+	var has_reachable_window := false
 	for window in windows:
 		var reachable := bool(window["open"]) and absf(hero_x - float(window["x"])) <= CLOSE_REACH
+		has_reachable_window = has_reachable_window or reachable
 		(window["reach_marker"] as Node3D).visible = reachable
 		(window["prompt"] as Node3D).visible = reachable
 		var upcoming := int(windows.find(window)) in upcoming_windows
@@ -350,6 +361,7 @@ func _update_overlay() -> void:
 			(window["status"] as Label3D).text = "더운 공기 ↑"
 			(window["status"] as Label3D).modulate = Color("ffb16f")
 	action_label.text = notice if notice_remaining > 0.0 else "A/D 이동 · 열린 창문 앞 Space · 닫으면 냉방 효율 상승"
+	action_label.visible = not has_reachable_window
 
 func _box(parent: Node3D, where: Vector3, size_value: Vector3, color: Color, glowing: bool = false) -> MeshInstance3D:
 	var mesh := BoxMesh.new()
@@ -387,8 +399,10 @@ func _label3d(parent: Node3D, content: String, where: Vector3, color: Color) -> 
 
 func _overlay_label(from: Vector2, to: Vector2, content: String, color: Color, font_size: int) -> Label:
 	var label := Label.new()
-	label.position = from
-	label.size = to - from
+	label.anchor_left = from.x / 960.0
+	label.anchor_right = to.x / 960.0
+	label.offset_top = from.y
+	label.offset_bottom = to.y
 	label.text = content
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", font_size)

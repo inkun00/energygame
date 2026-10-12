@@ -195,6 +195,7 @@ func _test_quiz_tile_mapping() -> void:
 	_expect(received["type"] == QUIZ_DATABASE_SCRIPT.QuizType.MULTI_CHOICE, "객관식 타일은 객관식 퀴즈를 요청해야 합니다.")
 
 	game_manager.quiz_requested.disconnect(capture_quiz_type)
+	quiz_database.free()
 	game_manager.stop_game()
 
 func _test_material_bonus_tile() -> void:
@@ -543,8 +544,14 @@ func _test_hud_initialization() -> void:
 	guide_inventory["solar_panel"] = 2
 	guide_inventory["battery"] = 1
 	hud._update_inventory(0, guide_inventory)
-	_expect((hud.guide_recipe_cards[0].find_child("Status", true, false) as Label).text == "재료 준비 완료", "탐험 중에는 재료 준비 상태를 건설 가능 여부와 구분해야 합니다.")
-	_expect((hud.guide_recipe_cards[1].find_child("Status", true, false) as Label).text == "재료 부족", "보유 재료가 부족한 발전소는 부족 상태로 표시되어야 합니다.")
+	_expect((hud.guide_recipe_cards[0].find_child("Status", true, false) as Label).text == "건설 준비 완료", "탐험 중에는 건설 재료가 준비됐지만 아직 건설 단계가 아니라는 상태를 표시해야 합니다.")
+	var wind_missing := 0
+	for amount in hud.adventure_planner.missing_materials(1).values(): wind_missing += int(amount)
+	_expect(wind_missing == 3 and (hud.guide_recipe_cards[1].find_child("Status", true, false) as Label).text == "재료 3개 더 모아요", "보유 재료가 부족한 발전소는 필요한 추가 재료 개수를 정확히 표시해야 합니다.")
+	hud._refresh_open_market_recipe_popover()
+	for recipe_index in range(game_manager.CONSTRUCTION_PROJECTS.size()):
+		var recipe_effect = hud.open_market_recipe_grid.get_child(recipe_index).find_child("RecipeEffect", true, false)
+		_expect(recipe_effect != null and recipe_effect.text == "마을 친환경 지수 +%d" % int(game_manager.CONSTRUCTION_PROJECTS[recipe_index]["health"]), "시장 건설도감은 존재하지 않는 energy/eco 필드의 +0 대신 실제 시설 효과를 표시해야 합니다.")
 	_expect(hud.village_map != null, "왕국 완성도 화면에는 직접 시설을 놓을 수 있는 마을 지도가 있어야 합니다.")
 	_expect(hud.village_map.BUILDING_SIZE.x < 100.0 and hud.village_map.BUILDING_SIZE.y < 82.0, "지도에 배치되는 발전소 이미지는 기존보다 작아야 합니다.")
 	var placement_cell_total := 0
@@ -582,9 +589,14 @@ func _test_hud_initialization() -> void:
 		game_manager.players[0]["inventory"][item_id] = 2
 	game_manager._start_village_construction_phase()
 	_expect(hud.construction_list.get_child_count() == game_manager.CONSTRUCTION_PROJECTS.size(), "건설 가능한 모든 시설을 이미지 카드로 표시해야 합니다.")
+	await process_frame
 	for construction_card in hud.construction_list.get_children():
 		var image_nodes: Array[Node] = construction_card.find_children("*", "TextureRect", true, false)
 		_expect(image_nodes.size() >= 2, "각 건설 카드에는 시설 이미지와 필요한 재료 이미지가 함께 보여야 합니다.")
+		var project_name = construction_card.find_child("ProjectName", true, false)
+		var project_effect = construction_card.find_child("ProjectEffect", true, false)
+		_expect(project_name != null and project_name.size.y >= 27.0 and project_name.text_overrun_behavior != TextServer.OVERRUN_TRIM_ELLIPSIS, "시설 이름은 1px로 접히거나 말줄임되지 않고 실제 한 줄 높이를 확보해야 합니다.")
+		_expect(project_effect != null and project_effect.text.begins_with("마을 친환경 지수 +") and not project_effect.text.contains("%"), "시설 효과는 이름과 별도 줄에 마을 친환경 지수로 표시해야 합니다.")
 	var solar_card = hud.construction_list.get_child(0)
 	var drag_payload: Dictionary = solar_card.create_drag_payload()
 	var solar_position: Vector2 = hud.village_map.get_terrain_build_cell_center("solar_field")
@@ -618,6 +630,21 @@ func _test_hud_initialization() -> void:
 	_expect(game_manager.built_project_owners.get(1, -1) == 1, "풍력 발전소를 건설한 다른 플레이어도 기록해야 합니다.")
 	_expect(hud.village_map.get_placed_project_count() == 2, "서로 다른 플레이어의 시설은 한 마을 지도에 함께 보여야 합니다.")
 	_expect("에너지 문제 해결 완료" in hud.energy_resolution_label.text, "친환경 에너지 지수가 목표에 도달하면 요정마을 문제 해결 상태를 보여야 합니다.")
+	var result_fixture: Array = game_manager.players.duplicate(true)
+	for player in result_fixture:
+		player["energy"] = 9999
+		player["movement_reward_energy"] = 20
+		player["quiz_correct"] = 20
+		player["construction_contribution"] = 98
+		player["project_completion_bonus"] = 9
+	hud._set_village_construction_controls(false)
+	hud._refresh_ranking_cards(result_fixture)
+	await process_frame
+	_expect(hud.rankings_container.get_child_count() == 4 and hud.rankings_container.get_combined_minimum_size().y <= hud.rankings_container.size.y, "결과 카드 네 개가 한 화면에 들어가야 합니다.")
+	for ranking_card in hud.rankings_container.get_children():
+		for label_name in ["EnergyTotal", "MovementReward", "SessionContribution"]:
+			var result_label = ranking_card.find_child(label_name, true, false)
+			_expect(result_label != null and result_label.size.x >= result_label.get_minimum_size().x and result_label.text_overrun_behavior != TextServer.OVERRUN_TRIM_ELLIPSIS, "에너지 9999와 이동·이번 판 공헌 숫자는 잘리거나 말줄임되지 않아야 합니다: %s" % label_name)
 
 	game_manager.stop_game()
 	hud.queue_free()
@@ -629,7 +656,8 @@ func _test_quiz_popup_text_integrity() -> void:
 	root.add_child(quiz_modal)
 	await process_frame
 
-	for quiz in QUIZ_DATABASE_SCRIPT.new().quizzes:
+	var popup_database = QUIZ_DATABASE_SCRIPT.new()
+	for quiz in popup_database.quizzes:
 		quiz_modal.display_quiz(0, quiz)
 		await process_frame
 		_expect(quiz_modal.visible, "퀴즈 팝업은 콘텐츠가 준비된 뒤 표시되어야 합니다.")
@@ -638,6 +666,7 @@ func _test_quiz_popup_text_integrity() -> void:
 		_expect(not quiz_modal.question_label.text.strip_edges().is_empty(), "퀴즈 팝업에 문제 텍스트가 표시되어야 합니다.")
 		quiz_modal.cancel_quiz()
 
+	popup_database.free()
 	game_manager.stop_game()
 	quiz_modal.queue_free()
 	await process_frame
@@ -659,6 +688,7 @@ func _test_other_player_quiz_observation() -> void:
 		"reward_energy": 2
 	}
 	game_manager.current_state = game_manager.TurnState.RESOLVING_QUIZ
+	game_manager.current_turn_idx = 1
 	game_manager.active_quiz_player_idx = 1
 	game_manager.active_quiz_data = quiz
 	game_manager.active_quiz_time_remaining = 30.0
@@ -669,7 +699,7 @@ func _test_other_player_quiz_observation() -> void:
 		if child is Button:
 			_expect(not child.disabled, "다른 플레이어가 답하기 전에는 관전자가 보너스 답안을 선택할 수 있어야 합니다.")
 	await create_timer(0.7).timeout
-	_expect("단서" in quiz_modal.explanation_label.text, "다른 플레이어의 문제 풀이 단계가 표시되어야 합니다.")
+	_expect("질문과 보기를 읽고 내 답을 골라요" in quiz_modal.explanation_label.text, "관전 화면은 실제 추론인 척하는 연출 대신 관전자의 선택 행동을 안내해야 합니다.")
 	_expect("AI 답변까지" in quiz_modal.timer_label.text and quiz_modal.timer_bar.visible, "AI 퀴즈 관전 중 남은 시간과 진행 막대가 표시되어야 합니다.")
 
 	var energy_before: int = game_manager.players[0].get("energy", 0)
@@ -682,7 +712,7 @@ func _test_other_player_quiz_observation() -> void:
 	_expect(game_manager.players[0].get("bonus_quiz_score", 0) == game_manager.SPECTATOR_QUIZ_BONUS_SCORE, "선행 정답 보너스는 자기 차례 정답 점수의 절반이어야 합니다.")
 	_expect(game_manager.SPECTATOR_QUIZ_BONUS_SCORE * 2 == game_manager.QUIZ_CORRECT_SCORE, "관전 보너스 점수 비율은 정확히 1/2이어야 합니다.")
 	_expect(game_manager.players[0].get("energy", 0) == energy_before and game_manager.players[0].get("skill_energy", 0) == skill_energy_before, "관전 보너스는 에너지나 특수기술 게이지를 지급하지 않아야 합니다.")
-	_expect("+5점" in quiz_modal.explanation_label.text, "선행 정답 직후 획득한 보너스 점수가 안내되어야 합니다.")
+	_expect("동점 비교 점수 +5" in quiz_modal.explanation_label.text and "에너지는 그대로" in quiz_modal.explanation_label.text, "관전 정답 직후 동점 점수 +5와 에너지 보상 없음이 구분되어야 합니다.")
 	for child in quiz_modal.choice_container.get_children():
 		if child is Button:
 			_expect(child.disabled, "관전 보너스 답안은 한 문제에 한 번만 제출할 수 있어야 합니다.")
@@ -696,10 +726,14 @@ func _test_other_player_quiz_observation() -> void:
 	game_manager.on_network_quiz_resolved(1, true)
 	await process_frame
 	_expect("선택: 에너지" in quiz_modal.explanation_label.text, "다른 플레이어가 선택한 객관식 답안이 표시되어야 합니다.")
-	_expect("내 선행 도전: 정답 (+5점)" in quiz_modal.explanation_label.text, "대상 플레이어 결과와 함께 내 선행 도전 결과가 표시되어야 합니다.")
-	_expect("정답입니다" in quiz_modal.explanation_label.text, "다른 플레이어의 퀴즈 결과가 표시되어야 합니다.")
+	_expect("내 관전 도전: 정답 · 동점 비교 점수 +5" in quiz_modal.explanation_label.text, "대상 플레이어 결과와 함께 내 관전 도전 결과가 표시되어야 합니다.")
+	_expect("테스트 1님 정답 보상: 에너지 +2" in quiz_modal.explanation_label.text, "대상 플레이어의 정답 에너지 보상 주체가 명확히 표시되어야 합니다.")
+	var reading_delay: float = game_manager.quiz_result_reading_seconds(quiz, game_manager.learning_grade)
+	_expect(quiz_modal.result_visible and quiz_modal.next_button.visible and reading_delay >= 7.0 and is_equal_approx(quiz_modal.result_duration_seconds, reading_delay), "관전 결과에 다음 버튼과 7~12초 공통 해설 시간이 제공되어야 합니다.")
 	await create_timer(1.3).timeout
-	_expect(not quiz_modal.visible, "관전 퀴즈 결과를 보여준 뒤 창이 닫혀야 합니다.")
+	_expect(quiz_modal.visible and game_manager.current_turn_idx == 1, "1.3초 만에 해설을 닫거나 다음 턴으로 넘어가면 안 됩니다.")
+	await create_timer(reading_delay - 1.3 + 0.2).timeout
+	_expect(not quiz_modal.visible and game_manager.current_turn_idx == 2, "관전 해설 시간이 끝나면 창을 닫고 다음 플레이어 턴을 이어가야 합니다.")
 
 	game_manager.stop_game()
 	quiz_modal.queue_free()
@@ -726,7 +760,7 @@ func _test_ai_quiz_failsafe() -> void:
 	quiz_modal.display_quiz(1, quiz)
 	var previous_time_scale := Engine.time_scale
 	Engine.time_scale = 20.0
-	await create_timer(game_manager.AI_QUIZ_THINK_SECONDS + quiz_modal.SPECTATOR_FAILSAFE_GRACE_SECONDS + 2.0).timeout
+	await create_timer(game_manager.AI_QUIZ_THINK_SECONDS + quiz_modal.SPECTATOR_FAILSAFE_GRACE_SECONDS + game_manager.quiz_result_reading_seconds(quiz, game_manager.learning_grade) + 0.2).timeout
 	Engine.time_scale = previous_time_scale
 	_expect(game_manager.active_quiz_player_idx == -1, "AI 답변 예약이 누락돼도 관전 안전장치가 퀴즈를 자동 확정해야 합니다.")
 	_expect(game_manager.current_state != game_manager.TurnState.RESOLVING_QUIZ, "AI 퀴즈 안전장치 이후 다음 턴으로 진행해야 합니다.")
@@ -785,6 +819,14 @@ func _test_local_game_start() -> void:
 	await process_frame
 	await process_frame
 	var game_board = main.get_node("GameBoard")
+	var start_manager = root.get_node("GameManager")
+	var preparation_time: float = start_manager.game_time_remaining
+	_expect(start_manager.adventure_waiting_for_start and game_board.hud.adventure_planner.tutorial.visible, "첫 안내를 확인하는 동안 모험 준비 단계여야 합니다.")
+	await create_timer(0.3).timeout
+	_expect(is_equal_approx(start_manager.game_time_remaining, preparation_time) and start_manager.dice_input_time_remaining == 0.0, "준비 안내를 읽는 동안 탐험 시계와 주사위 20초 시계가 시작되면 안 됩니다.")
+	game_board.hud.adventure_planner.dismiss_tutorial()
+	await process_frame
+	_expect(not start_manager.adventure_waiting_for_start and start_manager.dice_input_time_remaining > 0.0, "로컬 플레이어가 준비 완료를 누르면 첫 턴과 주사위 선택 시간이 시작되어야 합니다.")
 	_expect(game_board.visible, "로컬 게임 시작 후 보드가 표시되어야 합니다.")
 	_expect(game_board.player_pawns.size() == 4, "로컬 게임 시작 시 플레이어 말 4개를 생성해야 합니다.")
 	_expect(game_board.item_pickups.size() == BoardGrid.LAST_TILE_INDEX - 1, "1~98번 게임 칸마다 3D 건설 재료가 하나씩 표시되어야 합니다.")

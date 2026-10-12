@@ -62,6 +62,9 @@ var storm_banner: Panel
 var storm_warning_label: Label
 var storm_border_style: StyleBoxFlat
 var storm_banner_style: StyleBoxFlat
+var score_popup: Label
+var score_popup_tween: Tween
+var score_popup_success := false
 
 func _ready() -> void:
 	stretch = true
@@ -500,6 +503,10 @@ func _finish_wind_phase() -> void:
 	_start_next_wind_phase()
 
 func _start_next_wind_phase() -> void:
+	# A previous phase's generation message must not cover a new storm alert
+	# or claim that generation is still running after the situation changes.
+	if score_popup_success:
+		_clear_score_popup()
 	phase_index += 1
 	phase_elapsed = 0.0
 	score_tick = 0.0
@@ -598,8 +605,19 @@ func _update_hud(alignment: float, power_percent: float) -> void:
 	if is_instance_valid(alignment_label):
 		if storm_phase:
 			alignment_label.text = "SPACE 브레이크  %s" % ("안전 정지 완료" if brake_active else "지금 누르세요!")
+		elif not yaw_choice_made:
+			alignment_label.text = "정렬도 %d%% · 예상 발전 %d%%" % [roundi(alignment * 100.0), roundi(power_percent)]
 		else:
 			alignment_label.text = "정렬도 %d%%  ·  발전 %d%%" % [roundi(alignment * 100.0), roundi(power_percent)]
+	if is_instance_valid(instruction_label) and not storm_phase:
+		if rotor_broken:
+			instruction_label.text = "터빈 수리 중 · 잠깐 뒤 A/D로 풍향을 맞춰요"
+		elif brake_active:
+			instruction_label.text = "보통 바람에는 SPACE를 놓아 발전을 이어가요"
+		elif not yaw_choice_made:
+			instruction_label.text = "A/D로 한 번 조절해 시작 · 풍향에 맞추면 점수가 쌓여요"
+		else:
+			instruction_label.text = "A/D 터빈 회전 · 풍향에 맞춘 동안 점수가 쌓여요"
 	if storm_phase and is_instance_valid(storm_warning_label):
 		if brake_active:
 			storm_warning_label.text = "안전! 브레이크 성공 · 터빈 정지"
@@ -635,12 +653,13 @@ func _set_wind_visual_color(color: Color) -> void:
 	wind_material.emission = color
 
 func _show_score_popup(points: int, success: bool, message: String) -> void:
+	_clear_score_popup()
 	var popup := Label.new()
 	popup.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	popup.offset_left = -280.0
-	popup.offset_top = 64.0
+	popup.offset_top = 158.0
 	popup.offset_right = 280.0
-	popup.offset_bottom = 112.0
+	popup.offset_bottom = 206.0
 	popup.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	popup.text = "%s%d점  %s" % ["+" if success else "−", points, message]
 	popup.add_theme_font_size_override("font_size", 25)
@@ -648,10 +667,23 @@ func _show_score_popup(points: int, success: bool, message: String) -> void:
 	popup.add_theme_color_override("font_outline_color", Color("041019"))
 	popup.add_theme_constant_override("outline_size", 9)
 	add_child(popup)
-	var tween := create_tween().set_parallel(true)
-	tween.tween_property(popup, "position:y", popup.position.y - 30.0, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	score_popup = popup
+	score_popup_success = success
+	var tween := create_tween().bind_node(popup).set_parallel(true)
+	score_popup_tween = tween
+	tween.tween_property(popup, "position:y", popup.position.y - 10.0, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tween.tween_property(popup, "modulate:a", 0.0, 0.65).set_delay(0.7)
 	tween.chain().tween_callback(popup.queue_free)
+
+func _clear_score_popup() -> void:
+	if is_instance_valid(score_popup_tween):
+		score_popup_tween.kill()
+	if is_instance_valid(score_popup):
+		score_popup.visible = false
+		score_popup.queue_free()
+	score_popup = null
+	score_popup_tween = null
+	score_popup_success = false
 
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:
 	return VISUAL_STYLE.material(color, glowing)

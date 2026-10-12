@@ -19,9 +19,21 @@ func _run() -> void:
 	main._on_start_game_requested(configs)
 	gm.set_process(false)
 	check(planner.tutorial.visible, "First session should show the guide")
+	check(gm.adventure_waiting_for_start, "Board preparation must hold the first turn")
+	var starting_time: float = gm.game_time_remaining
+	gm._process(21.0)
+	check(gm.game_time_remaining == starting_time and gm.dice_input_time_remaining == 0.0, "Reading the first guide cannot spend time or auto-roll")
+	planner.dismiss_tutorial()
+	check(not gm.adventure_waiting_for_start, "Shared-laptop confirmation must release preparation")
 	var original: Array = gm.players.duplicate(true)
 	planner.open_catalog()
 	check(planner.catalog.visible and not planner.tutorial.visible, "Catalog should replace guide without overlapping")
+	var escape := InputEventKey.new()
+	escape.keycode = KEY_ESCAPE
+	escape.pressed = true
+	main._input(escape)
+	check(not planner.catalog.visible and not main.exit_confirmation.visible, "Escape must close the catalog before the game exit dialog")
+	planner.open_catalog()
 	planner.select_goal(0)
 	check(planner.missing_materials(0) == {"solar_panel": 2, "battery": 1}, "Goal should show exact missing materials")
 	check(gm.players == original, "Goal selection must not mutate authoritative player state")

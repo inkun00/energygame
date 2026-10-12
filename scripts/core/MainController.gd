@@ -39,7 +39,15 @@ func request_game_exit() -> void:
 
 func _input(event: InputEvent) -> void:
 	if session_open and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		if is_instance_valid(game_board) and is_instance_valid(game_board.minigame_modal) and game_board.minigame_modal.practice_active:
+		if exit_confirmation.visible:
+			exit_confirmation.hide()
+		elif is_instance_valid(game_board) and is_instance_valid(game_board.hud) and game_board.hud.adventure_planner.close_top_overlay():
+			pass
+		elif is_instance_valid(game_board) and is_instance_valid(game_board.hud) and game_board.hud.has_method("close_top_overlay") and game_board.hud.close_top_overlay():
+			pass
+		elif is_instance_valid(game_board) and is_instance_valid(game_board.quiz_modal) and game_board.quiz_modal.close_top_overlay():
+			pass
+		elif is_instance_valid(game_board) and is_instance_valid(game_board.minigame_modal) and game_board.minigame_modal.practice_active:
 			game_board.minigame_modal._finish_hydro_practice()
 		else:
 			request_game_exit()

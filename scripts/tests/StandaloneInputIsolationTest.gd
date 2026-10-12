@@ -82,6 +82,7 @@ func _run() -> void:
 		{"name": "AI 3", "is_ai": true},
 	]
 	main._on_start_game_requested(players, 600)
+	manager.confirm_adventure_ready(0)
 	await create_timer(0.15).timeout
 	_check(board.visible and board.modals_layer.visible and board_modal.surface_enabled, "Normal board start must re-enable its minigame surface")
 	_check(main.session_open and board.viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS, "An active board session must resume its 3D viewport")

@@ -253,7 +253,7 @@ func _create_player_panel(p_data: Dictionary) -> Control:
 	name_lbl.text = p_data.get("name", "")
 	name_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	name_lbl.custom_minimum_size = Vector2(155, 0)
-	name_lbl.add_theme_font_size_override("font_size", 16)
+	name_lbl.add_theme_font_size_override("font_size", 17)
 	name_lbl.add_theme_color_override("font_color", Color(1, 1, 1))
 	name_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.95))
 	name_lbl.add_theme_constant_override("outline_size", 3)
@@ -262,7 +262,7 @@ func _create_player_panel(p_data: Dictionary) -> Control:
 	var stat_lbl = Label.new()
 	stat_lbl.name = "StatLabel"
 	stat_lbl.text = "에너지 %d  ·  SP %d" % [p_data.get("energy", 0), p_data.get("skill_energy", 0)]
-	stat_lbl.add_theme_font_size_override("font_size", 12)
+	stat_lbl.add_theme_font_size_override("font_size", 14)
 	stat_lbl.add_theme_color_override("font_color", Color(0.48, 0.98, 0.90))
 	stat_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	stat_lbl.add_theme_constant_override("outline_size", 2)
@@ -428,7 +428,7 @@ func _on_lap_reward_requested(player_idx: int, rank: int, reward_count: int) -> 
 		return
 	if player_idx != _local_player_index():
 		return
-	lap_reward_title_label.text = "🏁 %d등 완주 보상" % rank
+	lap_reward_title_label.text = "%d등 완주 보상" % rank
 	lap_reward_remaining_label.text = "%s님, 원하는 발전소 부품을 고르세요  ·  남은 선택 %d개" % [GameManager.players[player_idx]["name"], reward_count]
 	lap_reward_dimmer.visible = true
 	lap_reward_panel.visible = true
@@ -696,7 +696,7 @@ func _create_open_market_recipe_popover() -> void:
 	top_bar.add_child(title)
 
 	var close_btn := Button.new()
-	close_btn.text = "✕ 닫기"
+	close_btn.text = "닫기"
 	close_btn.custom_minimum_size = Vector2(80, 32)
 	close_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	UI.apply_secondary_button(close_btn, UI.DANGER)
@@ -736,7 +736,7 @@ func _refresh_open_market_recipe_popover() -> void:
 
 	for project in GameManager.CONSTRUCTION_PROJECTS:
 		var card := PanelContainer.new()
-		card.custom_minimum_size = Vector2(450, 86)
+		card.custom_minimum_size = Vector2(450, 112)
 		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 		var reqs: Dictionary = project["requirements"]
@@ -777,7 +777,7 @@ func _refresh_open_market_recipe_popover() -> void:
 
 		var name_lbl := Label.new()
 		name_lbl.text = str(project["name"])
-		name_lbl.add_theme_font_size_override("font_size", 15)
+		name_lbl.add_theme_font_size_override("font_size", 17)
 		name_lbl.add_theme_color_override("font_color", UI.GOLD if can_build else UI.TEXT_BRIGHT)
 		name_row.add_child(name_lbl)
 
@@ -788,7 +788,10 @@ func _refresh_open_market_recipe_popover() -> void:
 		elif missing_count == 1:
 			status_badge.text = " [1개 부족!]"
 			status_badge.add_theme_color_override("font_color", Color("f1c40f"))
-		status_badge.add_theme_font_size_override("font_size", 13)
+		else:
+			status_badge.text = " [%d개 부족]" % missing_count
+			status_badge.add_theme_color_override("font_color", UI.TEXT_MUTED)
+		status_badge.add_theme_font_size_override("font_size", 14)
 		name_row.add_child(status_badge)
 
 		var spacer := Control.new()
@@ -796,14 +799,17 @@ func _refresh_open_market_recipe_popover() -> void:
 		name_row.add_child(spacer)
 
 		var stat_lbl := Label.new()
-		stat_lbl.text = "발전량 +%d  친환경 +%d" % [int(project.get("energy", 0)), int(project.get("eco", 0))]
-		stat_lbl.add_theme_font_size_override("font_size", 12)
-		stat_lbl.add_theme_color_override("font_color", UI.TEXT_MUTED)
-		name_row.add_child(stat_lbl)
+		stat_lbl.name = "RecipeEffect"
+		stat_lbl.text = "마을 친환경 지수 +%d" % int(project["health"])
+		stat_lbl.add_theme_font_size_override("font_size", 15)
+		stat_lbl.add_theme_color_override("font_color", UI.TEXT)
+		c_vbox.add_child(stat_lbl)
 
 		var req_lbl := Label.new()
 		req_lbl.text = "필요 재료: " + ", ".join(req_texts)
-		req_lbl.add_theme_font_size_override("font_size", 13)
+		req_lbl.add_theme_font_size_override("font_size", 14)
+		req_lbl.custom_minimum_size.y = 40.0
+		req_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		req_lbl.add_theme_color_override("font_color", Color("a8c0d8") if can_build else UI.TEXT_MUTED)
 		c_vbox.add_child(req_lbl)
 
@@ -1190,6 +1196,16 @@ func _cancel_special_skill_targeting() -> void:
 	_refresh_primary_action_controls()
 
 
+func close_top_overlay() -> bool:
+	if open_market_recipe_popover and open_market_recipe_popover.visible:
+		open_market_recipe_popover.visible = false
+		return true
+	if special_skill_target_panel and special_skill_target_panel.visible:
+		_cancel_special_skill_targeting()
+		return true
+	return false
+
+
 func _refresh_primary_action_controls() -> void:
 	var action_ready := false
 	var is_local_turn := false
@@ -1373,10 +1389,10 @@ func _on_turn_changed(turn_idx: int) -> void:
 	var is_my_turn = (turn_idx == local_idx and not cur_p["is_ai"])
 	if turn_prompt_label:
 		if is_my_turn:
-			turn_prompt_label.text = "내 턴  •  오른쪽 주사위 또는 특수기술을 선택하세요"
+			turn_prompt_label.text = "내 턴 · 주사위 또는 특수기술 선택"
 			turn_prompt_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.32))
 		else:
-			turn_prompt_label.text = "%s의 턴  ·  주사위를 굴리고 있습니다" % cur_p["name"]
+			turn_prompt_label.text = "%s의 턴 · 진행을 지켜봐요" % cur_p["name"]
 			turn_prompt_label.add_theme_color_override("font_color", Color(0.48, 0.9, 0.86))
 		_animate_turn_prompt()
 	_refresh_primary_action_controls()
@@ -1455,7 +1471,13 @@ func _set_center_dice_visible(should_show: bool, clickable: bool) -> void:
 
 func _on_status_message_posted(msg: String) -> void:
 	if status_ticker_label:
-		status_ticker_label.text = msg
+		status_ticker_label.text = _readable_status(msg)
+	# 턴 안내는 하단 행동 안내와 상단 상태줄만 사용합니다. 매 턴 같은 내용을
+	# 중앙 배너로 한 번 더 띄우면 게임판과 이동 경로가 가려집니다.
+	if msg.contains("턴입니다") or msg.contains("주사위") or msg.contains("생각 중"):
+		return
+	if GameManager.adventure_waiting_for_start:
+		return
 	_show_event_banner(msg)
 
 func _on_game_over(rankings: Array) -> void:
@@ -1471,7 +1493,7 @@ func _on_game_over(rankings: Array) -> void:
 	if victory_dimmer:
 		victory_dimmer.visible = false
 	if victory_title:
-		victory_title.text = "왕국 복원 성공!" if GameManager.kingdom_recovered else "왕국 복원 미달 · 다음 도전 준비"
+		victory_title.text = "이번 모험 · 마을 복원 성공!" if GameManager.kingdom_recovered else "이번 모험 · 마을 복원 결과"
 	if rescue_story_label:
 		rescue_story_label.visible = false
 	if victory_rankings_label:
@@ -1565,14 +1587,11 @@ func _refresh_construction_choices() -> void:
 	for child in construction_list.get_children():
 		construction_list.remove_child(child)
 		child.queue_free()
-	var very_compact_cards := false
-	var ultra_compact_cards := false
 	construction_list.add_theme_constant_override("separation", 10)
 	for project_index in range(GameManager.CONSTRUCTION_PROJECTS.size()):
 		var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[project_index]
 		var build_button: Button = VILLAGE_DRAG_CARD.new()
-		var compact_cards := false
-		build_button.custom_minimum_size = Vector2(300, 120)
+		build_button.custom_minimum_size = Vector2(300, 162)
 		build_button.text = ""
 		build_button.clip_contents = true
 		var already_built := project_index in GameManager.built_project_ids
@@ -1591,11 +1610,10 @@ func _refresh_construction_choices() -> void:
 
 		var margin := MarginContainer.new()
 		margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		var card_margin := 2 if ultra_compact_cards else (4 if compact_cards else 8)
-		margin.add_theme_constant_override("margin_left", card_margin)
-		margin.add_theme_constant_override("margin_top", 3 if compact_cards else 7)
-		margin.add_theme_constant_override("margin_right", card_margin)
-		margin.add_theme_constant_override("margin_bottom", 3 if compact_cards else 7)
+		margin.add_theme_constant_override("margin_left", 8)
+		margin.add_theme_constant_override("margin_top", 8)
+		margin.add_theme_constant_override("margin_right", 8)
+		margin.add_theme_constant_override("margin_bottom", 8)
 		build_button.add_child(margin)
 		var content := HBoxContainer.new()
 		content.add_theme_constant_override("separation", 7)
@@ -1604,11 +1622,10 @@ func _refresh_construction_choices() -> void:
 		# 각 시설은 투명 PNG를 같은 크기의 전용 프레임 안에 넣어, 원본 이미지의 여백이 달라도
 		# 카드 왼쪽에서 흔들리거나 제목 줄과 겹치지 않도록 한다.
 		var thumbnail_center := CenterContainer.new()
-		thumbnail_center.custom_minimum_size = Vector2(42, 38) if ultra_compact_cards else (Vector2(56, 50) if very_compact_cards else Vector2(64, 58))
+		thumbnail_center.custom_minimum_size = Vector2(76, 76)
 		thumbnail_center.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		content.add_child(thumbnail_center)
-		var compact_image_size := Vector2(38, 36) if ultra_compact_cards else (Vector2(48, 46) if very_compact_cards else Vector2(54, 52))
-		var building_image := _create_asset_texture_rect(str(project.get("image", "")), compact_image_size if compact_cards else Vector2(92, 92))
+		var building_image := _create_asset_texture_rect(str(project.get("image", "")), Vector2(76, 76))
 		building_image.tooltip_text = project["name"]
 		building_image.modulate = Color(0.55, 0.62, 0.62, 0.72) if builder_idx < 0 and not already_built else Color.WHITE
 		thumbnail_center.add_child(building_image)
@@ -1618,33 +1635,43 @@ func _refresh_construction_choices() -> void:
 		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		info.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		info.alignment = BoxContainer.ALIGNMENT_CENTER
+		info.add_theme_constant_override("separation", 4)
 		content.add_child(info)
 		var project_label := Label.new()
-		var category_prefix := "%s · " % str(project.get("category", "")) if project.has("category") else ""
-		project_label.text = ("완공 · " if already_built else "") + category_prefix + str(project["name"]) + "  +%d%%" % int(project["health"])
-		project_label.add_theme_font_size_override("font_size", 17)
+		project_label.name = "ProjectName"
+		project_label.text = str(project["name"])
+		# AUTOWRAP labels otherwise report a 1px minimum height before width is
+		# assigned by the nested containers. Reserve a real line for the title.
+		project_label.custom_minimum_size = Vector2(0, 27)
+		project_label.add_theme_font_size_override("font_size", 18)
 		project_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		project_label.add_theme_color_override("font_color", UI.GOLD if builder_idx >= 0 or already_built else UI.TEXT_MUTED)
-		project_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		info.add_child(project_label)
+		var effect_label := Label.new()
+		effect_label.name = "ProjectEffect"
+		effect_label.text = "마을 친환경 지수 +%d" % int(project["health"])
+		effect_label.custom_minimum_size.y = 23
+		effect_label.add_theme_font_size_override("font_size", 15)
+		effect_label.add_theme_color_override("font_color", UI.TEXT)
+		info.add_child(effect_label)
 
 		var requirements_row := HBoxContainer.new()
-		requirements_row.add_theme_constant_override("separation", 4 if ultra_compact_cards else 7)
+		requirements_row.add_theme_constant_override("separation", 7)
 		requirements_row.alignment = BoxContainer.ALIGNMENT_CENTER
 		info.add_child(requirements_row)
 		for requirement_item_id in project["requirements"]:
 			var item_id := str(requirement_item_id)
 			var item: Dictionary = GameManager.ITEM_DEFINITIONS[item_id]
 			var requirement_box := VBoxContainer.new()
-			requirement_box.custom_minimum_size = Vector2(24 if ultra_compact_cards else (30 if compact_cards else 42), 0)
+			requirement_box.custom_minimum_size = Vector2(42, 0)
 			requirement_box.tooltip_text = item["name"]
 			requirements_row.add_child(requirement_box)
-			requirement_box.add_child(_create_asset_texture_rect(str(item["asset"]), Vector2(34, 34)))
+			requirement_box.add_child(_create_asset_texture_rect(str(item["asset"]), Vector2(28, 28)))
 			var amount_label := Label.new()
 			amount_label.text = "%d/%d" % [int(GameManager.get_team_inventory().get(item_id, 0)), int(project["requirements"][item_id])]
 			amount_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			amount_label.add_theme_font_size_override("font_size", 15)
-			amount_label.add_theme_color_override("font_color", UI.TEXT_MUTED)
+			amount_label.add_theme_color_override("font_color", UI.TEXT)
 			requirement_box.add_child(amount_label)
 
 		var completed_owner_idx := int(GameManager.built_project_owners.get(project_index, -1))
@@ -1652,16 +1679,17 @@ func _refresh_construction_choices() -> void:
 		if already_built and completed_owner_idx >= 0 and completed_owner_idx < GameManager.players.size():
 			owner_label.text = "완공 · " + str(GameManager.players[completed_owner_idx]["name"])
 		else:
-			owner_label.text = str(GameManager.players[builder_idx]["name"]) if builder_idx >= 0 else ("완공" if already_built else "재료 부족")
+			owner_label.text = "지도에 끌어 놓기" if builder_idx >= 0 else ("완공" if already_built else "팀 재료가 부족해요")
 		owner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		owner_label.add_theme_font_size_override("font_size", 14)
+		owner_label.add_theme_font_size_override("font_size", 15)
 		owner_label.add_theme_color_override("font_color", UI.SUCCESS if builder_idx >= 0 or already_built else UI.DANGER)
-		owner_label.visible = not ultra_compact_cards
 		info.add_child(owner_label)
 		_set_descendant_mouse_filter_ignore(margin)
 		construction_list.add_child(build_button)
 	if build_instruction_label:
-		build_instruction_label.text = "팀 재료로 함께 건설해요. 카드 목록은 아래로 스크롤해요.\n모두 ‘내 건설 마침’을 눌러야 결과로 넘어가요."
+		build_instruction_label.text = "시설 카드를 지도의 빛나는 칸으로 끌어 놓으세요."
+		build_instruction_label.add_theme_font_size_override("font_size", 17)
+		build_instruction_label.tooltip_text = "오른쪽 목록을 스크롤해서 시설을 골라요. 팀 재료로 함께 건설하고, 모두 ‘내 건설 마침’을 누르면 결과를 확인해요."
 	if evaluate_button:
 		evaluate_button.disabled = GameManager.village_finished_players.has(_local_player_index())
 		evaluate_button.text = "친구 건설 기다리는 중" if evaluate_button.disabled else "내 건설 마침 · 결과 확인"
@@ -1709,40 +1737,57 @@ func _refresh_ranking_cards(rankings: Array) -> void:
 		var panel := PanelContainer.new()
 		panel.custom_minimum_size = Vector2(322, 112)
 		var rank_color: Color = rank_colors[min(rank_index, rank_colors.size() - 1)]
-		var panel_style := UI.padded_panel(Color("112c36"), rank_color, 8.0, 12)
+		var panel_style := UI.padded_panel(Color("112c36"), rank_color, 6.0, 12)
 		panel_style.shadow_size = 5
 		panel.add_theme_stylebox_override("panel", panel_style)
 		rankings_container.add_child(panel)
-		var margin := MarginContainer.new()
-		margin.add_theme_constant_override("margin_left", 8)
-		margin.add_theme_constant_override("margin_top", 7)
-		margin.add_theme_constant_override("margin_right", 8)
-		margin.add_theme_constant_override("margin_bottom", 7)
-		panel.add_child(margin)
+		var content := VBoxContainer.new()
+		content.add_theme_constant_override("separation", 3)
+		panel.add_child(content)
 		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 9)
-		margin.add_child(row)
-		var portrait := _create_asset_texture_rect(str(player.get("char_icon", "")), Vector2(78, 78))
+		row.add_theme_constant_override("separation", 8)
+		content.add_child(row)
+		var portrait := _create_asset_texture_rect(str(player.get("char_icon", "")), Vector2(38, 38))
 		portrait.tooltip_text = player.get("name", "플레이어")
 		row.add_child(portrait)
 		var rank_badge := Label.new()
-		rank_badge.custom_minimum_size = Vector2(32, 0)
-		rank_badge.text = str(rank_index + 1)
+		rank_badge.custom_minimum_size = Vector2(30, 0)
+		rank_badge.text = "%d위" % (rank_index + 1)
 		rank_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		rank_badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		rank_badge.add_theme_font_size_override("font_size", 28)
+		rank_badge.add_theme_font_size_override("font_size", 17)
 		rank_badge.add_theme_color_override("font_color", rank_color.lightened(0.28))
 		row.add_child(rank_badge)
-		var score_label := Label.new()
-		score_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		# 재료 획득 공헌과 실제 발전소 완공 수를 분리해, BUILD가 완공 수로 오해되지 않게 합니다.
-		score_label.text = "%s\n⚡ 순위 에너지 %d  •  이동 %d칸 (+%d)\n퀴즈 %d  •  재료 %d  •  완공 %d" % [player.get("name", "플레이어"), player.get("energy", 0), player.get("total_tiles_moved", 0), player.get("movement_reward_energy", 0), player.get("quiz_correct", 0), player.get("construction_contribution", 0), player.get("project_completion_bonus", 0)]
-		score_label.tooltip_text = "이동 보상은 20·15·10·5. 건설자 +5, 부품 제공자 1개당 +2. 최종 순위는 일반 에너지 순서이며 관전 퀴즈 점수는 동점 판정에 사용됩니다."
-		score_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		score_label.add_theme_font_size_override("font_size", 14)
-		score_label.add_theme_color_override("font_color", Color("effff9"))
-		score_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		row.add_child(score_label)
+		var name_label := Label.new()
+		name_label.text = str(player.get("name", "플레이어"))
+		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		name_label.add_theme_font_size_override("font_size", 17)
+		name_label.add_theme_color_override("font_color", UI.TEXT)
+		row.add_child(name_label)
+		var score_row := HBoxContainer.new()
+		content.add_child(score_row)
+		var energy_label := Label.new()
+		energy_label.name = "EnergyTotal"
+		energy_label.text = "에너지 %d" % int(player.get("energy", 0))
+		energy_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		energy_label.add_theme_font_size_override("font_size", 20)
+		energy_label.add_theme_color_override("font_color", UI.GOLD)
+		score_row.add_child(energy_label)
+		var movement_label := Label.new()
+		movement_label.name = "MovementReward"
+		movement_label.text = "이동 보상 +%d" % int(player.get("movement_reward_energy", 0))
+		movement_label.tooltip_text = "이번 판 총 %d칸 이동. 이동 보상은 20·15·10·5입니다." % int(player.get("total_tiles_moved", 0))
+		movement_label.add_theme_font_size_override("font_size", 15)
+		movement_label.add_theme_color_override("font_color", UI.TEXT)
+		score_row.add_child(movement_label)
+		var contribution_label := Label.new()
+		contribution_label.name = "SessionContribution"
+		contribution_label.text = "이번 판: 퀴즈 %d · 재료 %d · 완공 %d" % [int(player.get("quiz_correct", 0)), int(player.get("construction_contribution", 0)), int(player.get("project_completion_bonus", 0))]
+		contribution_label.tooltip_text = "이번 모험에서 정답을 맞힌 횟수 · 얻은 재료 개수 · 완공한 시설 수입니다. 건설자 +5, 실제 부품 제공자 1개당 +2. 에너지 동점이면 이동·퀴즈·재료 공헌 점수로 비교합니다. 기록을 저장하지 않습니다."
+		contribution_label.add_theme_font_size_override("font_size", 15)
+		contribution_label.add_theme_color_override("font_color", UI.TEXT)
+		content.add_child(contribution_label)
 
 func _on_build_project_pressed(project_index: int, player_idx: int) -> void:
 	if NetworkManager.is_online:
@@ -1823,6 +1868,11 @@ func _apply_commercial_ui() -> void:
 		dice_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("122f3b"), Color("4d7280"), 8.0, 11))
 	if event_banner:
 		event_banner.add_theme_stylebox_override("panel", UI.padded_panel(Color(0.05, 0.19, 0.24, 0.98), UI.TEAL, 12.0, 12))
+	if event_banner_label:
+		event_banner_label.add_theme_font_size_override("font_size", 19)
+	if turn_prompt_label:
+		turn_prompt_label.add_theme_font_size_override("font_size", 21)
+		turn_prompt_label.add_theme_constant_override("outline_size", 3)
 	if victory_modal:
 		victory_modal.add_theme_stylebox_override("panel", UI.padded_panel(Color("102d37"), UI.TEAL_DARK, 18.0, 18))
 	var preview_frame := get_node_or_null("VictoryModal/KingdomPreviewFrame") as Panel
@@ -1864,7 +1914,7 @@ func _show_event_banner(message: String) -> void:
 	if event_banner_tween and event_banner_tween.is_valid():
 		event_banner_tween.kill()
 	event_banner.visible = true
-	event_banner_label.text = message
+	event_banner_label.text = _readable_status(message)
 	event_banner.modulate = Color(1, 1, 1, 0)
 	event_banner.scale = Vector2(0.9, 0.9)
 	event_banner.pivot_offset = event_banner.size / 2.0
@@ -1875,6 +1925,18 @@ func _show_event_banner(message: String) -> void:
 	event_banner_tween.chain().tween_interval(1.25)
 	event_banner_tween.chain().tween_property(event_banner, "modulate", Color(1, 1, 1, 0), 0.24)
 	event_banner_tween.chain().tween_callback(func(): event_banner.visible = false)
+
+
+func _readable_status(message: String) -> String:
+	# The web font has no color-emoji fallback. Use readable words rather than
+	# exposing missing-glyph boxes from local or network status messages.
+	var plain := ""
+	for index in range(message.length()):
+		var codepoint := message.unicode_at(index)
+		if codepoint >= 0x1f000 or codepoint == 0xfe0f or codepoint == 0x200d or (codepoint >= 0x2600 and codepoint <= 0x27bf):
+			continue
+		plain += message[index]
+	return plain.strip_edges()
 
 func _animate_turn_prompt() -> void:
 	if not turn_prompt_label:
@@ -1894,7 +1956,7 @@ func _on_sound_pressed() -> void:
 	_show_event_banner("효과음을 껐습니다." if sound_muted else "효과음을 켰습니다.")
 
 func _on_info_pressed() -> void:
-	_show_event_banner("🏗️ 공동 건설 %d / %d  •  친환경 에너지 지수 %d / %d  •  ROUND %d" % [GameManager.projects_built, GameManager.CONSTRUCTION_PROJECTS.size(), GameManager.kingdom_health, GameManager.VILLAGE_RECOVERY_TARGET, GameManager.total_turns / 4 + 1])
+	_show_event_banner("공동 건설 %d / %d · 친환경 지수 %d / %d · %d라운드" % [GameManager.projects_built, GameManager.CONSTRUCTION_PROJECTS.size(), GameManager.kingdom_health, GameManager.VILLAGE_RECOVERY_TARGET, GameManager.total_turns / 4 + 1])
 
 func _on_zoom_in_pressed() -> void:
 	board_zoom_requested.emit(1.0)

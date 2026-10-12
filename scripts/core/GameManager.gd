@@ -27,6 +27,7 @@ signal open_market_state_changed(state)
 signal minigame_started(game_data)
 signal minigame_submission_changed(state)
 signal minigame_finished(results)
+signal adventure_preparation_changed(state)
 
 enum TurnState {
 	WAIT_ACTION,
@@ -69,7 +70,7 @@ const SPECTATOR_QUIZ_BONUS_SCORE := QUIZ_CORRECT_SCORE / 2
 const MINIGAME_DURATION_SECONDS := 30.0
 const MINIGAME_SUBMISSION_GRACE_SECONDS := 1.0
 const MINIGAME_READY_COUNTDOWN_SECONDS := 3.0
-const MINIGAME_RESULTS_SECONDS := 5.0
+const MINIGAME_RESULTS_SECONDS := 8.0
 const MINIGAME_SCORE_LIMIT := 5000
 const MINIGAME_NETWORK_CLOCK_TOLERANCE_SECONDS := 0.5
 const MINIGAME_NETWORK_EVENT_LIMIT := 4096
@@ -240,6 +241,9 @@ var players: Array[Dictionary] = []
 var current_turn_idx: int = 0
 var total_turns: int = 0
 var is_game_active: bool = false
+var adventure_waiting_for_start := false
+var adventure_ready_players: Dictionary = {}
+var _first_turn_requested := false
 var active_quiz_data: Dictionary = {}
 var active_quiz_player_idx: int = -1
 var active_quiz_time_remaining := 0.0
@@ -319,6 +323,8 @@ func _process(delta: float) -> void:
 	# 참가자는 방장이 전송한 상태를 표시하므로 프레임 차이로 게임이 갈라지지 않습니다.
 	if NetworkManager.is_online and not NetworkManager.is_host:
 		return
+	if adventure_waiting_for_start:
+		return
 	_update_ai_progress_watchdog(delta)
 	if not active_minigame.is_empty():
 		_update_minigame(delta)
@@ -346,6 +352,9 @@ func _process(delta: float) -> void:
 # 게임 초기화 (로비에서 호출)
 func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAULT_GAME_DURATION_SECONDS) -> void:
 	game_session_id += 1
+	adventure_waiting_for_start = false
+	adventure_ready_players.clear()
+	_first_turn_requested = false
 	players.clear()
 	total_turns = 0
 	current_turn_idx = 0
@@ -482,6 +491,9 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 
 func stop_game() -> void:
 	game_session_id += 1
+	adventure_waiting_for_start = false
+	adventure_ready_players.clear()
+	_first_turn_requested = false
 	is_game_active = false
 	current_state = TurnState.WAIT_ACTION
 	active_quiz_data.clear()
@@ -532,6 +544,7 @@ func apply_network_patch(patch: Dictionary, event_name: String, event_args: Arra
 
 
 func _apply_network_values(values: Dictionary) -> void:
+	var old_preparation := [adventure_waiting_for_start, adventure_ready_players.duplicate(true)]
 	if values.has("players"):
 		players.clear()
 		for player_value in values["players"]:
@@ -550,6 +563,10 @@ func _apply_network_values(values: Dictionary) -> void:
 		total_turns = int(values["total_turns"])
 	if values.has("is_game_active"):
 		is_game_active = bool(values["is_game_active"])
+	if values.has("adventure_waiting_for_start"):
+		adventure_waiting_for_start = bool(values["adventure_waiting_for_start"])
+	if values.has("adventure_ready_players"):
+		adventure_ready_players = (values["adventure_ready_players"] as Dictionary).duplicate(true)
 	if values.has("active_quiz_data"):
 		active_quiz_data = (values["active_quiz_data"] as Dictionary).duplicate(true)
 	if values.has("active_quiz_player_idx"):
@@ -638,6 +655,8 @@ func _apply_network_values(values: Dictionary) -> void:
 		completed_minigame_ids.clear()
 		for game_id_variant in values["completed_minigame_ids"]:
 			completed_minigame_ids.append(str(game_id_variant))
+	if old_preparation != [adventure_waiting_for_start, adventure_ready_players]:
+		adventure_preparation_changed.emit(get_adventure_preparation_state())
 
 
 func _replay_network_event(event_name: String, event_args: Array) -> void:
@@ -661,11 +680,45 @@ func _replay_network_event(event_name: String, event_args: Array) -> void:
 	callv("emit_signal", signal_call)
 
 func start_first_turn() -> void:
+	_first_turn_requested = true
+	if adventure_waiting_for_start:
+		return
 	current_turn_idx = 0
 	start_turn()
 
+func begin_adventure_preparation() -> void:
+	adventure_ready_players.clear()
+	adventure_waiting_for_start = false
+	for idx in range(players.size()):
+		if bool(players[idx].get("is_ai", false)):
+			adventure_ready_players[idx] = true
+		else:
+			adventure_waiting_for_start = true
+	adventure_preparation_changed.emit(get_adventure_preparation_state())
+
+func get_adventure_preparation_state() -> Dictionary:
+	return {"waiting": adventure_waiting_for_start, "ready_count": adventure_ready_players.size(), "player_count": players.size()}
+
+func confirm_adventure_ready(player_idx: int) -> bool:
+	if not is_game_active or not adventure_waiting_for_start or player_idx < 0 or player_idx >= players.size():
+		return false
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		NetworkManager.request_adventure_ready(player_idx)
+		return true
+	if NetworkManager.is_online:
+		adventure_ready_players[player_idx] = true
+	else:
+		# One laptop shares the board and its guide; one confirmation readies the group.
+		for idx in range(players.size()):
+			adventure_ready_players[idx] = true
+	adventure_waiting_for_start = adventure_ready_players.size() < players.size()
+	adventure_preparation_changed.emit(get_adventure_preparation_state())
+	if not adventure_waiting_for_start and _first_turn_requested:
+		start_first_turn()
+	return true
+
 func start_turn() -> void:
-	if not is_game_active:
+	if not is_game_active or adventure_waiting_for_start:
 		return
 		
 	var cur_p = players[current_turn_idx]
@@ -775,7 +828,7 @@ func _ai_roll_after_special(player_idx: int) -> void:
 
 # 주사위 굴리기 실행
 func execute_roll_dice(player_idx: int) -> void:
-	if current_state != TurnState.WAIT_ACTION or player_idx != current_turn_idx:
+	if adventure_waiting_for_start or current_state != TurnState.WAIT_ACTION or player_idx != current_turn_idx:
 		return
 	if NetworkManager.is_online and not NetworkManager.is_host:
 		NetworkManager.request_roll_dice(player_idx)
@@ -786,7 +839,7 @@ func execute_roll_dice(player_idx: int) -> void:
 	on_network_dice_rolled(player_idx, roll_val)
 
 func on_network_dice_rolled(player_idx: int, dice_val: int) -> void:
-	if not is_game_active or player_idx != current_turn_idx or current_state != TurnState.WAIT_ACTION:
+	if not is_game_active or adventure_waiting_for_start or player_idx != current_turn_idx or current_state != TurnState.WAIT_ACTION:
 		return
 	dice_input_time_remaining = 0.0
 	_last_emitted_dice_input_seconds = -1
@@ -884,7 +937,7 @@ func _resolve_tile_event(player_idx: int, tile_idx: int, shortcut_history: Array
 			var quiz = QuizDatabase.get_random_quiz()
 			active_quiz_data = quiz
 			active_quiz_player_idx = player_idx
-			active_quiz_time_remaining = float(quiz.get("time_limit", 25.0)) + QuizUIController.PLAYER_RESULT_SECONDS + 1.0
+			active_quiz_time_remaining = float(quiz.get("time_limit", 25.0)) + 1.0
 			last_quiz_choice = ""
 			active_spectator_quiz_attempts.clear()
 			quiz_requested.emit(player_idx, quiz)
@@ -1629,6 +1682,7 @@ func on_network_quiz_resolved(player_idx: int, is_correct: bool, selected_choice
 	if not is_game_active or current_state != TurnState.RESOLVING_QUIZ or player_idx != active_quiz_player_idx:
 		return
 	var cur_p = players[player_idx]
+	var resolved_quiz := active_quiz_data.duplicate(true)
 	last_quiz_choice = selected_choice
 	quiz_resolved.emit(player_idx, is_correct)
 	if is_correct:
@@ -1639,7 +1693,7 @@ func on_network_quiz_resolved(player_idx: int, is_correct: bool, selected_choice
 		team_quiz_correct += 1
 		kingdom_progress_changed.emit(projects_built, CONSTRUCTION_PROJECTS.size(), kingdom_health)
 		AudioManager.play_correct_sfx()
-		status_message_posted.emit("✨ 정답입니다! 에너지 보상과 개인 퀴즈 점수를 획득했습니다. (개인 퀴즈 점수 +%d)" % QUIZ_CORRECT_SCORE)
+		status_message_posted.emit("정답! 에너지 +%d · 특수기술 SP +%d · 동점 점수 +%d" % [reward_energy, reward_energy, QUIZ_CORRECT_SCORE])
 	else:
 		AudioManager.play_wrong_sfx()
 		if cur_p["shield"]:
@@ -1657,7 +1711,16 @@ func on_network_quiz_resolved(player_idx: int, is_correct: bool, selected_choice
 	active_quiz_player_idx = -1
 	active_quiz_time_remaining = 0.0
 	active_spectator_quiz_attempts.clear()
-	_schedule_game_action(1.0, end_turn)
+	var review_turn := total_turns
+	_schedule_game_action(quiz_result_reading_seconds(resolved_quiz, learning_grade), func():
+		if total_turns == review_turn and current_turn_idx == player_idx and current_state == TurnState.RESOLVING_QUIZ and not open_market_active and not village_construction_active:
+			end_turn()
+	)
+
+static func quiz_result_reading_seconds(quiz: Dictionary, grade: int = 5) -> float:
+	var reading_characters := str(quiz.get("explanation", "")).length() + str(quiz.get("answer", "")).length()
+	var characters_per_second := 8.0 if grade <= 4 else 10.0
+	return clampf(3.0 + float(reading_characters) / characters_per_second, 7.0, 12.0)
 
 # 턴 종료 및 다음 플레이어 전환
 func end_turn() -> void:
@@ -1768,7 +1831,9 @@ func take_over_disconnected_player(player_idx: int) -> void:
 	players[player_idx]["is_ai"] = true
 	player_state_changed.emit(player_idx)
 	status_message_posted.emit("%s님이 돌아오지 않아 AI가 이어서 플레이합니다." % players[player_idx]["name"])
-	if int(pending_lap_reward.get("player_idx", -1)) == player_idx:
+	if adventure_waiting_for_start:
+		confirm_adventure_ready(player_idx)
+	elif int(pending_lap_reward.get("player_idx", -1)) == player_idx:
 		var rewards_left := int(pending_lap_reward.get("remaining", 0))
 		for _item in range(rewards_left):
 			claim_lap_reward(player_idx, _choose_ai_lap_reward_item(player_idx))
@@ -1799,7 +1864,7 @@ func get_player_special_skill(player_idx: int) -> Dictionary:
 	return (SPECIAL_SKILLS_BY_ICON.get(icon_path, DEFAULT_SPECIAL_SKILL) as Dictionary).duplicate(true)
 
 func can_use_special_skill(player_idx: int) -> bool:
-	if not is_game_active or village_construction_active or player_idx < 0 or player_idx >= players.size():
+	if not is_game_active or adventure_waiting_for_start or village_construction_active or player_idx < 0 or player_idx >= players.size():
 		return false
 	if current_state != TurnState.WAIT_ACTION or current_turn_idx != player_idx:
 		return false

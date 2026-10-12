@@ -68,6 +68,7 @@ var overload_window_material: StandardMaterial3D
 
 var event_label: Label
 var demand_label: Label
+var average_gap_label: Label
 var balance_label: Label
 var help_label: Label
 var supply_bar: ProgressBar
@@ -258,6 +259,18 @@ func _build_overlay() -> void:
 	demand_label.add_theme_color_override("font_outline_color", Color("071c28"))
 	demand_label.add_theme_constant_override("outline_size", 5)
 	add_child(demand_label)
+	average_gap_label = Label.new()
+	average_gap_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	average_gap_label.offset_left = -390.0
+	average_gap_label.offset_top = 38.0
+	average_gap_label.offset_right = -14.0
+	average_gap_label.offset_bottom = 62.0
+	average_gap_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	average_gap_label.add_theme_font_size_override("font_size", 16)
+	average_gap_label.add_theme_color_override("font_color", Color("c7f4ff"))
+	average_gap_label.add_theme_color_override("font_outline_color", Color("071c28"))
+	average_gap_label.add_theme_constant_override("outline_size", 5)
+	add_child(average_gap_label)
 
 	balance_label = Label.new()
 	balance_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
@@ -462,7 +475,8 @@ func _update_hud(difference: float, balanced: bool) -> void:
 	var gap := absf(difference)
 	var synchronization := clampf(1.0 - gap / 60.0, 0.0, 1.0) * 100.0
 	var average_gap := gap_integral / maxf(measurement_time, 0.001)
-	demand_label.text = "수요 %d · 공급 %d MW · 평균 차이 %.1f" % [roundi(demand), roundi(supply), average_gap]
+	demand_label.text = "현재 수요 %d · 공급 %d MW" % [roundi(demand), roundi(supply)]
+	average_gap_label.text = "지금까지 평균 차이 %.1f MW" % average_gap
 	if balanced:
 		balance_label.text = "균형 유지 · 동기화 %d%%  ·  간격 %.1f MW" % [roundi(synchronization), gap]
 		balance_label.add_theme_color_override("font_color", Color("65f2b3"))

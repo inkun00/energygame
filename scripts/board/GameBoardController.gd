@@ -572,6 +572,7 @@ func start_board_game(player_configs: Array[Dictionary], duration_seconds: int =
 	
 	# 게임 매니저 세팅
 	GameManager.setup_game(player_configs, duration_seconds)
+	GameManager.begin_adventure_preparation()
 	_refresh_random_shortcut_visuals()
 	_reset_tile_item_pickups()
 	
@@ -586,9 +587,10 @@ func start_board_game(player_configs: Array[Dictionary], duration_seconds: int =
 	if hud and hud.has_method("initialize_hud"):
 		hud.initialize_hud()
 		
+	var started_session := GameManager.game_session_id
 	get_tree().create_timer(0.1, false).timeout.connect(func():
 		# 온라인 참가자는 방장이 전송하는 첫 턴 상태를 기다립니다.
-		if not NetworkManager.is_online or NetworkManager.is_host:
+		if GameManager.is_game_active and GameManager.game_session_id == started_session and (not NetworkManager.is_online or NetworkManager.is_host):
 			GameManager.start_first_turn()
 	)
 

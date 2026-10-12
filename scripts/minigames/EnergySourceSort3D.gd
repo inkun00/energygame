@@ -39,6 +39,7 @@ var hero_x := 0.0
 var visual_time := 0.0
 var cooldown := 0.0
 var waiting_for_release := false
+var waiting_direction := 0
 var returning_to_center := false
 var answer_labels: Array[Label] = []
 var retrying_item := false
@@ -65,6 +66,7 @@ func setup(player_data: Dictionary, game_seed: int) -> void:
 	visual_time = 0.0
 	cooldown = 0.0
 	waiting_for_release = false
+	waiting_direction = 0
 	returning_to_center = false
 	retrying_item = false
 	flash_remaining = 0.0
@@ -135,7 +137,7 @@ func _make_bin(x: float, color: Color, index: int) -> void:
 		right_light = lamp
 	var label := Label3D.new()
 	label.position = Vector3(x, 1.18, 0.17)
-	label.text = "다시 얻어요" if index == 0 else "곧 다시 없어요"
+	label.text = "다시 얻어요" if index == 0 else "곧 다시 안 생겨요"
 	label.font_size = 44
 	label.pixel_size = 0.009
 	label.outline_size = 9
@@ -166,6 +168,10 @@ func _build_overlay() -> void:
 	_overlay_label(Vector2(615, 96), Vector2(950, 127), "곧 다시 생기지 않아요 →", Color("ffe0b2"), 20)
 	answer_labels.append(_overlay_label(Vector2(622, 124), Vector2(942, 148), "석탄 · 석유 · 천연가스", Color("fff1dc"), 16))
 	hint_label = _overlay_label(Vector2(145, 259), Vector2(815, 285), "A/← 왼쪽  ·  D/→ 오른쪽  ·  중앙에서 다음 물건 받기", Color("fff1a5"), 16)
+	hint_label.anchor_top = 1.0
+	hint_label.anchor_bottom = 1.0
+	hint_label.offset_top = -34.0
+	hint_label.offset_bottom = -8.0
 	flash = ColorRect.new()
 	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	flash.color = Color.TRANSPARENT
@@ -224,7 +230,15 @@ func _process(delta: float) -> void:
 	icon_anchor.rotation.y += delta * 0.7
 	if not running:
 		return
+	var left_down := MINIGAME_INPUT.is_pressed(KEY_A) or MINIGAME_INPUT.is_pressed(KEY_LEFT)
+	var right_down := MINIGAME_INPUT.is_pressed(KEY_D) or MINIGAME_INPUT.is_pressed(KEY_RIGHT)
+	var axis := float(int(right_down) - int(left_down))
+	# Observe releases during the automatic run back, not just after arrival.
+	# Switching to the opposite direction is also a new deliberate choice.
+	if waiting_for_release and ((not left_down and not right_down) or (axis != 0.0 and int(axis) != waiting_direction)):
+		waiting_for_release = false
 	if returning_to_center:
+		hint_label.text = "중앙으로 돌아가요 · 다음 물건을 살펴요"
 		var return_axis := -signf(hero_x)
 		hero_x = move_toward(hero_x, 0.0, RUN_SPEED * delta)
 		if is_instance_valid(hero):
@@ -240,13 +254,10 @@ func _process(delta: float) -> void:
 	if cooldown > 0.0:
 		cooldown -= delta
 		return
-	var left_down := MINIGAME_INPUT.is_pressed(KEY_A) or MINIGAME_INPUT.is_pressed(KEY_LEFT)
-	var right_down := MINIGAME_INPUT.is_pressed(KEY_D) or MINIGAME_INPUT.is_pressed(KEY_RIGHT)
 	if waiting_for_release:
-		if not left_down and not right_down:
-			waiting_for_release = false
+		hint_label.text = "키를 떼고 다시 누르거나, 반대 방향을 눌러요"
 		return
-	var axis := float(int(right_down) - int(left_down))
+	hint_label.text = "금방 다시 얻을 수 있나요? · A/← 왼쪽  D/→ 오른쪽"
 	hero_x = clampf(hero_x + axis * RUN_SPEED * delta, -DELIVERY_X, DELIVERY_X)
 	if is_instance_valid(hero):
 		hero.position.x = hero_x
@@ -278,6 +289,7 @@ func _deliver(bin_kind: int) -> void:
 	item_label.text = "배송 완료 · 중앙으로 돌아가요" if correct else "다시 생각하며 중앙으로 돌아가요"
 	cooldown = 0.20
 	waiting_for_release = true
+	waiting_direction = -1 if bin_kind == 0 else 1
 
 func _box(node_name: String, parent: Node3D, where: Vector3, dimensions: Vector3, color: Color, glowing: bool = false) -> MeshInstance3D:
 	var mesh := BoxMesh.new()
@@ -322,8 +334,10 @@ func _material(color: Color, glowing: bool = false) -> StandardMaterial3D:
 
 func _overlay_label(from: Vector2, to: Vector2, content: String, color: Color, font_size: int) -> Label:
 	var label := Label.new()
-	label.position = from
-	label.size = to - from
+	label.anchor_left = from.x / 960.0
+	label.anchor_right = to.x / 960.0
+	label.offset_top = from.y
+	label.offset_bottom = to.y
 	label.text = content
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", font_size)

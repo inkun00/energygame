@@ -93,6 +93,7 @@ jobs:
             OpenMarketCraftAssistTest \
             TimedLapRewardTest \
             AdventurePresentationTest \
+            UiFlowRegressionTest \
             FullGameSimulation; do
             godot --headless --path . --script "scripts/tests/${test}.gd" 2>&1 | tee "${test}.log"
             if grep -Eq 'SCRIPT ERROR|Parse Error|\[FAIL\]' "${test}.log"; then exit 1; fi

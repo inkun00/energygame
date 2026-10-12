@@ -67,6 +67,7 @@ var correct_material: StandardMaterial3D
 var wrong_material: StandardMaterial3D
 var panel_material: StandardMaterial3D
 var energy_material: StandardMaterial3D
+var front_direction_material: StandardMaterial3D
 var overlay_label: Label
 var score_rule_label: Label
 var sun_timer_label: Label
@@ -214,11 +215,15 @@ func _create_materials() -> void:
 	wrong_material.emission_energy_multiplier = 0.62
 	energy_material = _material(Color("ffe66b"), true)
 	energy_material.emission_energy_multiplier = 0.55
+	# Every panel gets the same neutral marker: it describes the real front
+	# normal, not whether this lane is the answer. The camera sees panel backs.
+	front_direction_material = _material(Color("73e5ff"), false)
+	front_direction_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
 func _build_overlay() -> void:
 	overlay_label = Label.new()
 	overlay_label.position = Vector2(14, 12)
-	overlay_label.text = "A/D 이동 · SPACE 점프 · 햇빛을 정면으로 받는 패널을 찾아요"
+	overlay_label.text = "A/D 이동 · SPACE 점프 · 태양을 향한 패널 앞면을 찾아요"
 	overlay_label.add_theme_font_size_override("font_size", 16)
 	overlay_label.add_theme_color_override("font_color", Color("fff7c2"))
 	overlay_label.add_theme_color_override("font_outline_color", Color("12313b"))
@@ -227,7 +232,7 @@ func _build_overlay() -> void:
 
 	score_rule_label = Label.new()
 	score_rule_label.position = Vector2(14, 40)
-	score_rule_label.text = "패널 각도를 보세요 · 태양과 같은 차선이 정답은 아니에요"
+	score_rule_label.text = "파란 화살표 = 앞면 방향 · 노란 선 = 햇빛 방향"
 	score_rule_label.add_theme_font_size_override("font_size", 15)
 	score_rule_label.add_theme_color_override("font_color", Color("ffe66b"))
 	score_rule_label.add_theme_color_override("font_outline_color", Color("12313b"))
@@ -284,6 +289,7 @@ func _spawn_panel_gate(start_z: float = -30.0) -> void:
 	panel_gate_index += 1
 	var panels: Array[Node3D] = []
 	var beams: Array[MeshInstance3D] = []
+	var front_markers: Array[Node3D] = []
 	for lane_index in range(3):
 		var station := Node3D.new()
 		station.position.x = LANES[lane_index]
@@ -299,23 +305,51 @@ func _spawn_panel_gate(start_z: float = -30.0) -> void:
 		panels.append(panel)
 		var beam := MeshInstance3D.new()
 		var ray := CylinderMesh.new()
-		ray.top_radius = 0.014
-		ray.bottom_radius = 0.014
+		ray.top_radius = 0.028
+		ray.bottom_radius = 0.028
 		ray.height = 2.0
 		ray.radial_segments = 6
 		beam.mesh = ray
 		beam.material_override = energy_material
 		station.add_child(beam)
 		beams.append(beam)
+		front_markers.append(_build_front_direction_marker(station))
 	panel_gates.append({
 		"node": gate,
 		"correct_lane": correct_lane,
 		"resolved": false,
 		"meshes": panels,
 		"beams": beams,
+		"front_markers": front_markers,
 		"angle_offset": -55.0 if panel_gate_index % 2 == 0 else 55.0,
 	})
 	_update_panel_gate_for_sun(panel_gates[panel_gates.size() - 1])
+
+func _build_front_direction_marker(station: Node3D) -> Node3D:
+	var marker := Node3D.new()
+	marker.name = "PanelFrontDirection"
+	station.add_child(marker)
+	var shaft := MeshInstance3D.new()
+	var shaft_mesh := CylinderMesh.new()
+	shaft_mesh.top_radius = 0.045
+	shaft_mesh.bottom_radius = 0.045
+	shaft_mesh.height = 1.15
+	shaft_mesh.radial_segments = 8
+	shaft.mesh = shaft_mesh
+	shaft.position.y = 0.575
+	shaft.material_override = front_direction_material
+	marker.add_child(shaft)
+	var tip := MeshInstance3D.new()
+	var tip_mesh := CylinderMesh.new()
+	tip_mesh.top_radius = 0.0
+	tip_mesh.bottom_radius = 0.16
+	tip_mesh.height = 0.38
+	tip_mesh.radial_segments = 8
+	tip.mesh = tip_mesh
+	tip.position.y = 1.34
+	tip.material_override = front_direction_material
+	marker.add_child(tip)
+	return marker
 
 func _spawn_terrain_obstacle(start_z: float = -32.0, forced_spec_index: int = -1) -> void:
 	var spec_index := forced_spec_index if forced_spec_index >= 0 else rng.randi_range(0, TERRAIN_MODEL_SPECS.size() - 1)
@@ -509,6 +543,7 @@ func _update_panel_gate_for_sun(record: Dictionary) -> void:
 		return
 	var correct_lane := int(record.get("correct_lane", 1))
 	var beams: Array = record.get("beams", [])
+	var front_markers: Array = record.get("front_markers", [])
 	for lane_index in range(panels.size()):
 		var panel := panels[lane_index] as Node3D
 		if not is_instance_valid(panel):
@@ -528,6 +563,13 @@ func _update_panel_gate_for_sun(record: Dictionary) -> void:
 			var beam := beams[lane_index] as MeshInstance3D
 			beam.global_position = panel.global_position + Vector3.UP * 0.65 + ray_direction * 1.2
 			beam.quaternion = Quaternion(Vector3.UP, ray_direction)
+		if lane_index < front_markers.size():
+			var marker := front_markers[lane_index] as Node3D
+			var front_normal := (panel.global_basis.orthonormalized() * PANEL_SURFACE_NORMAL).normalized()
+			# A small offset separates the blue normal and yellow incoming-light
+			# line even when they agree, without changing the panel or scoring.
+			marker.global_position = panel.global_position + Vector3.UP * 0.85 + Vector3.RIGHT * 0.3
+			marker.quaternion = Quaternion(Vector3.UP, front_normal)
 
 func panel_capture_efficiency(panel: Node3D) -> float:
 	var normal := (panel.global_basis.orthonormalized() * PANEL_SURFACE_NORMAL).normalized()

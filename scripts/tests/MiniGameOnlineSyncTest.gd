@@ -59,9 +59,28 @@ func _run() -> void:
 
 func _on_game_started(configs: Array[Dictionary], duration_seconds: int) -> void:
 	game_manager.setup_game(configs, duration_seconds)
+	game_manager.begin_adventure_preparation()
 	if role == "host":
+		game_manager.start_first_turn()
+		game_manager.confirm_adventure_ready(network_manager.get_local_player_index())
 		await create_timer(0.4).timeout
+		if not game_manager.adventure_waiting_for_start or game_manager.game_time_remaining != float(duration_seconds) or game_manager.dice_input_time_remaining != 0.0:
+			_fail("친구 준비 전에 첫 안내 시간이 소모되거나 첫 턴이 시작됨")
+			return
+		for _attempt in range(30):
+			if not game_manager.adventure_waiting_for_start: break
+			await create_timer(0.1).timeout
+		if game_manager.adventure_waiting_for_start:
+			_fail("참가자 준비 RPC가 첫 턴을 시작하지 못함")
+			return
+		print("[PASS] Online adventure preparation host · clocks held until both humans ready")
 		game_manager._start_minigame(0, "solar_align")
+	else:
+		await create_timer(0.7).timeout
+		if not game_manager.adventure_waiting_for_start or game_manager.dice_input_time_remaining != 0.0:
+			_fail("참가자 준비 화면 상태가 방장과 다름")
+			return
+		game_manager.confirm_adventure_ready(network_manager.get_local_player_index())
 
 func _on_minigame_started(data: Dictionary) -> void:
 	round_id = int(data.get("round_id", -1))

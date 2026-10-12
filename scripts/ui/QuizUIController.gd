@@ -10,8 +10,8 @@ const SPECTATOR_CLUE_SECONDS := 0.65
 const SPECTATOR_COMPARE_SECONDS := 1.365
 const SPECTATOR_CHOOSE_SECONDS := 2.015
 const SPECTATOR_FAILSAFE_GRACE_SECONDS := 1.5
-const PLAYER_RESULT_SECONDS := 2.86
-const SPECTATOR_RESULT_SECONDS := 1.17
+const PLAYER_RESULT_SECONDS := 12.0
+const SPECTATOR_RESULT_SECONDS := 7.0
 const OPTION_LINE_CHAR_LIMIT := 46
 const OPTION_MARKS := ["①", "②", "③", "④"]
 const UI = preload("res://scripts/ui/CommercialUI.gd")
@@ -29,6 +29,10 @@ var spectator_guess_correct := false
 var spectator_bonus_score := 0
 var quiz_display_token: int = 0
 var submitted_choice := ""
+var answer_sent := false
+var result_visible := false
+var result_seconds_remaining := 0.0
+var result_duration_seconds := 0.0
 
 @onready var panel: Panel = $Panel
 @onready var title_label: Label = $Panel/TitleLabel
@@ -39,6 +43,8 @@ var submitted_choice := ""
 @onready var choice_container: VBoxContainer = $Panel/ChoiceContainer
 @onready var explanation_label: Label = $Panel/ExplanationLabel
 var timer_bar: ProgressBar
+var result_scroll: ScrollContainer
+var next_button: Button
 
 
 func _local_player_index() -> int:
@@ -68,6 +74,16 @@ func _process(delta: float) -> void:
 	if visible and _exploration_has_ended():
 		cancel_quiz()
 		return
+	if result_visible and visible:
+		# The shared review SceneTreeTimer stops during network recovery pause.
+		# Use the same active-play delta so reconnecting never consumes reading
+		# time while the result is inaccessible behind the recovery overlay.
+		result_seconds_remaining = maxf(0.0, result_seconds_remaining - delta)
+		if timer_label:
+			timer_label.text = "해설 읽기 · %d초 뒤 보드로" % maxi(0, ceili(result_seconds_remaining))
+		if result_seconds_remaining <= 0.0:
+			_dismiss_result()
+		return
 	if spectator_mode and visible:
 		spectator_elapsed += delta
 		_update_spectator_progress()
@@ -89,6 +105,20 @@ func _process(delta: float) -> void:
 
 
 func restore_online_quiz() -> void:
+	if _exploration_has_ended():
+		cancel_quiz()
+		return
+	if answer_sent and GameManager.current_state == GameManager.TurnState.RESOLVING_QUIZ and target_player_idx == GameManager.active_quiz_player_idx and current_quiz == GameManager.active_quiz_data:
+		# An acknowledgement may be lost during reconnect. Retry the same answer
+		# idempotently without reopening a locally dismissed explanation.
+		NetworkManager.request_quiz_answer(target_player_idx, submitted_choice)
+		return
+	# A resolved result is a local reading overlay, not an unanswered server quiz.
+	# Reconnection snapshots must not reopen an already-resolved answer.
+	if result_visible:
+		if GameManager.current_state == GameManager.TurnState.RESOLVING_QUIZ and not GameManager.active_quiz_data.is_empty() and (target_player_idx != GameManager.active_quiz_player_idx or current_quiz != GameManager.active_quiz_data):
+			display_quiz(GameManager.active_quiz_player_idx, GameManager.active_quiz_data)
+		return
 	if GameManager.current_state != GameManager.TurnState.RESOLVING_QUIZ or GameManager.active_quiz_data.is_empty():
 		cancel_quiz()
 	elif current_quiz != GameManager.active_quiz_data or target_player_idx != GameManager.active_quiz_player_idx or not visible:
@@ -103,6 +133,10 @@ func display_quiz(player_idx: int, quiz_data: Dictionary) -> void:
 		cancel_quiz()
 		return
 	quiz_display_token += 1
+	result_visible = false
+	next_button.visible = false
+	choice_container.visible = true
+	_set_result_layout(false)
 	# 결과 처리 중 원본 데이터가 비워져도 화면 문구가 유지되도록 깊은 복사를 사용합니다.
 	current_quiz = quiz_data.duplicate(true)
 	if current_quiz.is_empty():
@@ -110,7 +144,7 @@ func display_quiz(player_idx: int, quiz_data: Dictionary) -> void:
 	target_player_idx = player_idx
 	timer_seconds = float(current_quiz.get("time_limit", PLAYER_QUIZ_SECONDS))
 	if NetworkManager.is_online and GameManager.active_quiz_time_remaining > 0.0:
-		timer_seconds = minf(timer_seconds, maxf(0.0, GameManager.active_quiz_time_remaining - PLAYER_RESULT_SECONDS - 1.0))
+		timer_seconds = minf(timer_seconds, maxf(0.0, GameManager.active_quiz_time_remaining - 1.0))
 	spectator_elapsed = 0.0
 	spectator_stage = -1
 	spectator_failsafe_requested = false
@@ -118,6 +152,7 @@ func display_quiz(player_idx: int, quiz_data: Dictionary) -> void:
 	spectator_guess_correct = false
 	spectator_bonus_score = 0
 	submitted_choice = ""
+	answer_sent = false
 	var player_is_ai := false
 	var player_name := "플레이어 %d" % (player_idx + 1)
 	if GameManager and player_idx >= 0 and player_idx < GameManager.players.size():
@@ -131,8 +166,8 @@ func display_quiz(player_idx: int, quiz_data: Dictionary) -> void:
 	question_label.text = str(current_quiz.get("question", "문제를 불러오지 못했습니다. 다시 시도해 주세요."))
 	if question_label.text.strip_edges().is_empty():
 		question_label.text = "문제를 불러오지 못했습니다. 다시 시도해 주세요."
-	hint_label.text = ("선행 정답 +%d점은 에너지가 같을 때 순위를 결정해요. 한 번만 선택하세요!" % GameManager.SPECTATOR_QUIZ_BONUS_SCORE) if _can_submit_spectator_guess() else "정답이라고 생각하는 보기를 하나 선택하세요."
-	explanation_label.text = ("👀 %s님이 문제를 읽고 있습니다..." % player_name) if spectator_mode else ""
+	hint_label.text = ("관전 정답 +%d점 · 에너지 동점 비교에 사용 · 한 번만 선택" % GameManager.SPECTATOR_QUIZ_BONUS_SCORE) if _can_submit_spectator_guess() else "정답 보기를 하나 선택해요. 정답이면 에너지와 SP를 받아요."
+	explanation_label.text = ("%s님이 문제를 읽고 있습니다..." % player_name) if spectator_mode else ""
 	explanation_label.remove_theme_color_override("font_color")
 	timer_label.text = "AI 답변까지 약 %d초" % ceili(_get_ai_think_seconds()) if player_is_ai else "답변 남은 시간  %d초" % ceili(timer_seconds)
 	timer_label.visible = true
@@ -172,7 +207,7 @@ func _build_choice_buttons(disabled: bool) -> void:
 		button.set_meta("answer_value", option_value)
 		button.custom_minimum_size = Vector2(0, 50 + display_text.count("\n") * 20)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.add_theme_font_size_override("font_size", 17)
+		button.add_theme_font_size_override("font_size", 18)
 		button.add_theme_constant_override("outline_size", 2)
 		button.disabled = disabled
 		UI.apply_secondary_button(button, choice_accents[option_index])
@@ -224,6 +259,10 @@ func cancel_quiz() -> void:
 	spectator_guess_submitted = false
 	spectator_guess_correct = false
 	spectator_bonus_score = 0
+	answer_sent = false
+	result_visible = false
+	if next_button:
+		next_button.visible = false
 	current_quiz.clear()
 	visible = false
 
@@ -235,7 +274,7 @@ func _update_spectator_progress() -> void:
 	var expected_duration := _get_ai_think_seconds() if observing_ai else float(current_quiz.get("time_limit", PLAYER_QUIZ_SECONDS))
 	var remaining := maxf(0.0, expected_duration - spectator_elapsed)
 	if not observing_ai and GameManager.active_quiz_time_remaining > 0.0:
-		remaining = maxf(0.0, GameManager.active_quiz_time_remaining - PLAYER_RESULT_SECONDS - 1.0)
+		remaining = minf(expected_duration, maxf(0.0, GameManager.active_quiz_time_remaining - 1.0))
 	if timer_label:
 		timer_label.text = ("AI 답변까지 약 %d초" if observing_ai else "답변 남은 시간  %d초") % ceili(remaining)
 	if timer_bar:
@@ -244,7 +283,7 @@ func _update_spectator_progress() -> void:
 	if spectator_guess_submitted:
 		return
 	if not observing_ai:
-		explanation_label.text = "👀 %s님이 답을 고르는 동안, 나도 보기에서 답을 찾아보세요.\n선행 정답 +5점은 최종 에너지가 같을 때 사용해요." % str(GameManager.players[target_player_idx].get("name", "친구"))
+		explanation_label.text = "%s님이 답을 고르는 동안 나도 답을 찾아봐요.\n관전 정답 +5점은 에너지 동점 비교에 사용해요." % str(GameManager.players[target_player_idx].get("name", "친구"))
 		return
 	var next_stage := 0
 	if spectator_elapsed >= SPECTATOR_CHOOSE_SECONDS:
@@ -255,19 +294,19 @@ func _update_spectator_progress() -> void:
 		next_stage = 1
 	if next_stage == spectator_stage:
 		if spectator_stage == 3:
-			explanation_label.text = "✅ 가장 가능성 높은 답을 검토하는 중...  (%d초 남음)" % ceili(remaining)
+			explanation_label.text = "AI가 답을 고르고 있어요. 나도 한 번 도전해요. (%d초 남음)" % ceili(remaining)
 		return
 	spectator_stage = next_stage
 	var player_name: String = str(GameManager.players[target_player_idx].get("name", "다른 플레이어")) if GameManager and target_player_idx < GameManager.players.size() else "다른 플레이어"
 	match spectator_stage:
 		0:
-			explanation_label.text = "👀 %s님이 문제를 차근차근 읽고 있습니다..." % player_name
+			explanation_label.text = "%s님이 답을 고르고 있어요. 나도 한 번 도전해요." % player_name
 		1:
-			explanation_label.text = "🔎 질문의 핵심 단서를 찾는 중..."
+			explanation_label.text = "질문과 보기를 읽고 내 답을 골라요."
 		2:
-			explanation_label.text = "🧩 발견한 단서와 보기를 비교하는 중..."
+			explanation_label.text = "관전 도전은 한 번만 선택할 수 있어요."
 		3:
-			explanation_label.text = "✅ 가장 가능성 높은 답을 검토하는 중...  (%d초 남음)" % ceili(remaining)
+			explanation_label.text = "AI 답변까지 %d초 · 아직 도전하지 않았다면 답을 골라요." % ceili(remaining)
 
 func _get_ai_think_seconds() -> float:
 	if current_quiz.has("ai_think_seconds"):
@@ -278,15 +317,22 @@ func _get_ai_think_seconds() -> float:
 
 
 func _on_game_quiz_resolved(player_idx: int, is_correct: bool) -> void:
-	if not spectator_mode or not visible or player_idx != target_player_idx:
+	if not visible or player_idx != target_player_idx:
+		return
+	if not spectator_mode:
+		# In an online game the host can time out a slow client first. Always
+		# show the authoritative result, not a stale local answer timer.
+		if is_active or result_visible:
+			submitted_choice = GameManager.last_quiz_choice
+			_show_result(is_correct, "시간 초과 · 답변 없음" if submitted_choice.is_empty() else "", false)
 		return
 	var selected_answer := _get_observed_answer(is_correct)
 	_reveal_selected_answer(selected_answer)
 	var player_name: String = str(GameManager.players[player_idx].get("name", "다른 플레이어")) if GameManager and player_idx < GameManager.players.size() else "다른 플레이어"
 	var result_lines: Array[String] = []
 	if spectator_guess_submitted:
-		result_lines.append(("⚡ 내 선행 도전: 정답 (+%d점)" % spectator_bonus_score) if spectator_guess_correct else "💭 내 선행 도전: 오답 (+0점)")
-	result_lines.append("👉 %s님의 선택: %s" % [player_name, selected_answer])
+		result_lines.append(("내 관전 도전: 정답 · 동점 비교 점수 +%d" % spectator_bonus_score) if spectator_guess_correct else "내 관전 도전: 오답 · 동점 비교 점수 +0")
+	result_lines.append("%s님의 선택: %s" % [player_name, selected_answer])
 	_show_result(is_correct, "\n".join(result_lines), false)
 
 
@@ -360,10 +406,10 @@ func _on_spectator_choice_pressed(choice: String) -> void:
 	_reveal_selected_answer(choice)
 	var player_name: String = str(GameManager.players[target_player_idx].get("name", "다른 플레이어")) if target_player_idx < GameManager.players.size() else "다른 플레이어"
 	if spectator_guess_correct:
-		explanation_label.text = "⚡ 선행 정답 성공! 보너스 +%d점\n이제 %s님의 답을 지켜보세요." % [spectator_bonus_score, player_name]
+		explanation_label.text = "관전 정답! 동점 비교 점수 +%d (에너지는 그대로)\n이제 %s님의 답을 지켜봐요." % [spectator_bonus_score, player_name]
 		explanation_label.add_theme_color_override("font_color", UI.SUCCESS)
 	else:
-		explanation_label.text = "💭 선행 답안은 오답입니다. 보너스 점수는 없어요.\n이제 %s님의 답을 지켜보세요." % player_name
+		explanation_label.text = "관전 답안은 오답입니다. 추가 점수는 없어요.\n이제 %s님의 답을 지켜봐요." % player_name
 		explanation_label.add_theme_color_override("font_color", UI.DANGER)
 	hint_label.text = "보너스 도전 완료 · 대상 플레이어의 답변을 기다리는 중"
 
@@ -372,25 +418,35 @@ func _on_time_out() -> void:
 	if not is_active:
 		return
 	submitted_choice = ""
-	_show_result(false, "⏰ 시간 초과!")
+	_show_result(false, "시간 초과 · 답변 없음")
 
 
 func _show_result(is_correct: bool, prefix: String = "", should_submit_result: bool = true) -> void:
 	is_active = false
 	spectator_mode = false
+	result_visible = true
+	choice_container.visible = false
+	_set_result_layout(true)
 	for child in choice_container.get_children():
 		if child is Button:
 			child.disabled = true
 	var explanation := str(current_quiz.get("explanation", ""))
 	var prefix_line := (prefix + "\n") if not prefix.is_empty() else ""
+	var answer := str(current_quiz.get("answer", ""))
+	var local_result := target_player_idx == _local_player_index() and target_player_idx < GameManager.players.size() and not bool(GameManager.players[target_player_idx].get("is_ai", false))
+	var selection_line := "내 선택: %s\n" % submitted_choice if local_result and not submitted_choice.is_empty() else ""
+	var result_owner := "내" if local_result else "%s님" % str(GameManager.players[target_player_idx].get("name", "친구"))
 	if is_correct:
 		var reward_energy: int = current_quiz.get("reward_energy", 2)
-		explanation_label.text = "%s🎉 정답입니다! (+%d 에너지)\n%s" % [prefix_line, reward_energy, explanation]
-		explanation_label.add_theme_color_override("font_color", Color(0.3, 0.9, 0.4))
+		explanation_label.text = "%s%s%s 정답 보상: 에너지 +%d · 특수 에너지(SP) +%d\n동점 비교용 퀴즈 점수 +%d\n정답: %s\n\n%s" % [prefix_line, selection_line, result_owner, reward_energy, reward_energy, GameManager.QUIZ_CORRECT_SCORE, answer, explanation]
 	else:
-		var answer := str(current_quiz.get("answer", ""))
-		explanation_label.text = "%s❌ 오답입니다! (정답: %s)\n%s" % [prefix_line, answer, explanation]
-		explanation_label.add_theme_color_override("font_color", Color(0.95, 0.4, 0.4))
+		var shielded := target_player_idx >= 0 and target_player_idx < GameManager.players.size() and bool(GameManager.players[target_player_idx].get("shield", false))
+		var penalty := "방패를 사용해 후퇴를 막았어요." if shielded else "게임판에서 1칸 뒤로 이동해요."
+		explanation_label.text = "%s%s오답 · 정답: %s\n%s 에너지와 SP 보상 +0 · %s\n\n%s" % [prefix_line, selection_line, answer, result_owner, penalty, explanation]
+	# Reward/result words remain distinguishable, while the longer explanation
+	# stays high contrast instead of a red/green block of small body text.
+	explanation_label.add_theme_color_override("font_color", UI.TEXT)
+	hint_label.text = "이유를 읽고 ‘다음 · 보드로’를 눌러요. 게임 진행은 함께 이어져요."
 	var correct_answer := str(current_quiz.get("answer", ""))
 	for child in choice_container.get_children():
 		if child is Button:
@@ -404,21 +460,54 @@ func _show_result(is_correct: bool, prefix: String = "", should_submit_result: b
 	if timer_bar:
 		timer_bar.visible = false
 	if timer_label:
-		timer_label.visible = false
+		timer_label.visible = true
+	result_duration_seconds = result_reading_seconds(current_quiz, GameManager.learning_grade)
+	result_seconds_remaining = result_duration_seconds
+	timer_label.text = "해설 읽기 · %d초 뒤 보드로" % ceili(result_seconds_remaining)
+	next_button.visible = true
+	# Submit once, now. Reading/dismissing this overlay must never delay a
+	# network answer or resubmit one after market/construction has started.
+	if should_submit_result and not _exploration_has_ended() and GameManager.current_state == GameManager.TurnState.RESOLVING_QUIZ and GameManager.active_quiz_player_idx == target_player_idx:
+		answer_sent = true
+		quiz_completed.emit(is_correct)
+		if NetworkManager.is_online:
+			NetworkManager.request_quiz_answer(target_player_idx, submitted_choice)
+		else:
+			GameManager.on_network_quiz_resolved(target_player_idx, is_correct, submitted_choice)
 
-	var result_token := quiz_display_token
-	var result_delay := PLAYER_RESULT_SECONDS if should_submit_result else SPECTATOR_RESULT_SECONDS
-	get_tree().create_timer(result_delay, false).timeout.connect(func():
-		if result_token != quiz_display_token or _exploration_has_ended():
-			return
-		visible = false
-		if should_submit_result:
-			quiz_completed.emit(is_correct)
-			if NetworkManager.is_online:
-				NetworkManager.request_quiz_answer(target_player_idx, submitted_choice)
-			elif GameManager:
-				GameManager.on_network_quiz_resolved(target_player_idx, is_correct, submitted_choice)
-	)
+
+static func result_reading_seconds(quiz: Dictionary, grade: int = 5) -> float:
+	return GameManager.quiz_result_reading_seconds(quiz, grade)
+
+
+func _dismiss_result() -> void:
+	if not result_visible:
+		return
+	result_visible = false
+	next_button.visible = false
+	visible = false
+
+
+func close_top_overlay() -> bool:
+	if result_visible and visible:
+		_dismiss_result()
+		return true
+	return false
+
+
+func _set_result_layout(show_result: bool) -> void:
+	if not result_scroll:
+		return
+	result_scroll.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	result_scroll.offset_left = 50.0
+	result_scroll.offset_top = 266.0 if show_result else 528.0
+	result_scroll.offset_right = -50.0
+	result_scroll.offset_bottom = 564.0 if show_result else 602.0
+	result_scroll.scroll_vertical = 0
+	explanation_label.custom_minimum_size.y = 60.0
+	explanation_label.add_theme_font_size_override("font_size", 21 if show_result else 18)
+	timer_label.offset_top = -36.0 if show_result else -48.0
+	timer_label.offset_bottom = -8.0 if show_result else -20.0
 
 func _apply_commercial_ui() -> void:
 	var dimmer := get_node_or_null("Dimmer") as ColorRect
@@ -432,6 +521,7 @@ func _apply_commercial_ui() -> void:
 		category_badge.add_theme_color_override("font_color", UI.TEAL)
 	if question_label:
 		question_label.add_theme_color_override("font_color", UI.TEXT)
+		question_label.add_theme_font_size_override("font_size", 24)
 	if hint_label:
 		hint_label.add_theme_color_override("font_color", UI.TEXT_MUTED)
 	if timer_label:
@@ -448,3 +538,27 @@ func _apply_commercial_ui() -> void:
 	timer_bar.add_theme_stylebox_override("background", UI.progress_background())
 	timer_bar.add_theme_stylebox_override("fill", UI.progress_fill(UI.GOLD))
 	panel.add_child(timer_bar)
+	result_scroll = ScrollContainer.new()
+	result_scroll.name = "ExplanationScroll"
+	result_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	result_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	panel.add_child(result_scroll)
+	explanation_label.reparent(result_scroll)
+	explanation_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	explanation_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	explanation_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	explanation_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	_set_result_layout(false)
+	next_button = Button.new()
+	next_button.name = "NextButton"
+	next_button.text = "다음 · 보드로"
+	next_button.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	next_button.offset_left = 270.0
+	next_button.offset_top = -86.0
+	next_button.offset_right = -270.0
+	next_button.offset_bottom = -44.0
+	next_button.add_theme_font_size_override("font_size", 19)
+	UI.apply_primary_button(next_button)
+	next_button.pressed.connect(_dismiss_result)
+	next_button.visible = false
+	panel.add_child(next_button)

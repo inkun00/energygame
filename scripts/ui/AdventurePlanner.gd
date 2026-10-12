@@ -16,9 +16,15 @@ var goal_progress: ProgressBar
 var catalog: Control
 var catalog_open_button: Button
 var catalog_close_button: Button
+var summary_details: VBoxContainer
+var summary_toggle: Button
+var summary_spacer: Control
+var summary_expanded := false
 var tutorial: PanelContainer
 var tutorial_title: Label
 var tutorial_body: Label
+var tutorial_button: Button
+var preparation_dimmer: ColorRect
 var tutorial_steps := {"dice": false, "pickup": false, "goal": false, "skill": false}
 var tutorial_active := false
 var exploration_active := false
@@ -30,6 +36,8 @@ func _ready() -> void:
 	_build_summary()
 	_build_catalog()
 	_build_tutorial()
+	GameManager.adventure_preparation_changed.connect(func(_state: Dictionary): _refresh_tutorial())
+	GameManager.turn_changed.connect(func(_idx: int): _refresh_visibility())
 	GameManager.dice_rolled.connect(func(idx: int, _value: int): record_step("dice", idx))
 	GameManager.tile_item_collected.connect(func(_tile: int, idx: int, _item: String): record_step("pickup", idx))
 	GameManager.special_skill_completed.connect(func(idx: int): record_step("skill", idx))
@@ -72,9 +80,9 @@ func _image(path: String, dimensions: Vector2) -> TextureRect:
 
 func _build_summary() -> void:
 	summary = PanelContainer.new()
-	summary.position = Vector2(12, 612)
-	summary.size = Vector2(1256, 96)
-	summary.add_theme_stylebox_override("panel", UI.padded_panel(UI.INK, UI.TEAL_DARK, 12))
+	summary.position = Vector2(12, 648)
+	summary.size = Vector2(1256, 60)
+	summary.add_theme_stylebox_override("panel", UI.padded_panel(UI.INK, UI.TEAL_DARK, 8))
 	add_child(summary)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 24)
@@ -82,10 +90,11 @@ func _build_summary() -> void:
 	var heading := VBoxContainer.new()
 	heading.custom_minimum_size.x = 250
 	row.add_child(heading)
-	heading.add_child(_label("건설 도감 & 보유 재료", 13, UI.TEAL))
-	goal_name = _label("재료를 모아보세요", 20)
+	heading.add_child(_label("팀 마을에 쓸 내 재료", 14, UI.TEAL))
+	goal_name = _label("재료를 모아보세요", 18)
 	heading.add_child(goal_name)
 	var materials := VBoxContainer.new()
+	summary_details = materials
 	materials.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	materials.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_child(materials)
@@ -97,10 +106,30 @@ func _build_summary() -> void:
 	goal_progress.add_theme_stylebox_override("background", UI.panel(UI.PANEL_SOFT, UI.PANEL_SOFT, 4, 0, 0))
 	goal_progress.add_theme_stylebox_override("fill", UI.panel(UI.TEAL, UI.TEAL, 4, 0, 0))
 	materials.add_child(goal_progress)
+	summary_spacer = Control.new()
+	summary_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(summary_spacer)
+	summary_toggle = _button("재료 펼치기", toggle_summary)
+	summary_toggle.custom_minimum_size = Vector2(140, 40)
+	summary_toggle.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(summary_toggle)
 	catalog_open_button = _button("재료 가방 & 건설 도감", open_catalog)
-	catalog_open_button.custom_minimum_size = Vector2(220, 48)
+	catalog_open_button.custom_minimum_size = Vector2(220, 40)
 	catalog_open_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(catalog_open_button)
+	_apply_summary_layout()
+
+func toggle_summary() -> void:
+	summary_expanded = not summary_expanded
+	_apply_summary_layout()
+
+func _apply_summary_layout() -> void:
+	summary_details.visible = summary_expanded
+	summary.position.y = 612 if summary_expanded else 648
+	summary.size.y = 96 if summary_expanded else 60
+	summary_toggle.text = "재료 접기" if summary_expanded else "재료 펼치기"
+	# Keep the bag button on the right when the detail column is collapsed.
+	summary_spacer.visible = not summary_expanded
 
 func _build_catalog() -> void:
 	catalog = Control.new()
@@ -126,9 +155,10 @@ func _build_catalog() -> void:
 	header.add_child(title)
 	catalog_close_button = _button("닫기  ×", close_catalog)
 	header.add_child(catalog_close_button)
-	content.add_child(_label("모험 시간은 계속 흐릅니다. 재료를 자유롭게 모아, 모험과 교환이 끝난 뒤 원하는 시설을 건설해요.", 14, UI.TEXT_MUTED))
+	content.add_child(_label("재료를 모아 탐험과 교환이 끝난 뒤 함께 건설해요. 준비 완료 시설부터 확인하세요.", 16, UI.TEXT_MUTED))
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 22)
+	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(columns)
 	var bag := VBoxContainer.new()
 	bag.custom_minimum_size.x = 250
@@ -139,22 +169,27 @@ func _build_catalog() -> void:
 		var row := HBoxContainer.new()
 		bag.add_child(row)
 		row.add_child(_image(str(data["asset"]), Vector2(28, 28)))
-		var name_label := _label(str(data["name"]), 13)
+		var name_label := _label(str(data["name"]), 15)
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(name_label)
 		var count := _label("0개", 15, UI.GOLD)
 		row.add_child(count)
 		inventory_labels[id] = count
+	var recipe_scroll := ScrollContainer.new()
+	recipe_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	recipe_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	recipe_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	columns.add_child(recipe_scroll)
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.add_theme_constant_override("h_separation", 10)
 	grid.add_theme_constant_override("v_separation", 8)
-	columns.add_child(grid)
+	recipe_scroll.add_child(grid)
 	for index in range(GameManager.CONSTRUCTION_PROJECTS.size()):
 		var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[index]
 		var card := PanelContainer.new()
-		card.custom_minimum_size = Vector2(350, 68)
+		card.custom_minimum_size = Vector2(350, 108)
 		card.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL_RAISED, UI.PANEL_SOFT, 6, 8))
 		grid.add_child(card)
 		recipe_cards.append(card)
@@ -164,11 +199,11 @@ func _build_catalog() -> void:
 		var details := VBoxContainer.new()
 		details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(details)
-		details.add_child(_label(str(project["name"]), 14))
-		var counts := _label("", 11, UI.TEXT_MUTED)
+		details.add_child(_label(str(project["name"]), 16))
+		var counts := _label("", 14, UI.TEXT_MUTED)
 		details.add_child(counts)
 		recipe_labels.append(counts)
-		var status := _label("재료 부족", 11, UI.TEXT_MUTED)
+		var status := _label("재료 부족", 14, UI.TEXT_MUTED)
 		status.name = "Status"
 		details.add_child(status)
 		var choose := _button("선택", select_goal.bind(index))
@@ -182,6 +217,8 @@ func _build_catalog() -> void:
 func begin_exploration(index: int) -> void:
 	local_index = index
 	selected_goal = -1
+	summary_expanded = false
+	_apply_summary_layout()
 	exploration_active = true
 	quiz_open = false
 	for step in tutorial_steps: tutorial_steps[step] = false
@@ -214,9 +251,14 @@ func close_catalog() -> void:
 	if was_open and exploration_active: catalog_open_button.grab_focus()
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	if catalog.visible and event.is_action_pressed("ui_cancel"):
-		close_catalog()
+	if event.is_action_pressed("ui_cancel") and close_top_overlay():
 		get_viewport().set_input_as_handled()
+
+func close_top_overlay() -> bool:
+	if catalog.visible:
+		close_catalog()
+		return true
+	return false
 
 func select_goal(index: int) -> void:
 	if index < 0 or index >= GameManager.CONSTRUCTION_PROJECTS.size(): return
@@ -242,9 +284,28 @@ func refresh(new_inventory: Dictionary) -> void:
 		recipe_labels[index].text = "\n".join(counts)
 		var ready := missing_materials(index).is_empty()
 		var status := recipe_cards[index].find_child("Status", true, false) as Label
-		status.text = "재료 준비 완료" if ready else "재료 부족"
+		var missing := missing_materials(index)
+		var missing_count := 0
+		for amount in missing.values(): missing_count += int(amount)
+		status.text = "건설 준비 완료" if ready else "재료 %d개 더 모아요" % missing_count
 		status.add_theme_color_override("font_color", UI.SUCCESS if ready else UI.TEXT_MUTED)
+		recipe_cards[index].add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL_RAISED, UI.SUCCESS if ready else UI.PANEL_SOFT, 6, 8))
 		goal_buttons[index].text = "목표 ✓" if index == selected_goal else "선택"
+	# Stable ordering keeps matching labels/cards while making ready recipes easy to find.
+	var recipe_grid := recipe_cards[0].get_parent() if not recipe_cards.is_empty() else null
+	if recipe_grid:
+		var ordered := recipe_cards.duplicate()
+		ordered.sort_custom(func(a: PanelContainer, b: PanelContainer):
+			var a_idx := recipe_cards.find(a)
+			var b_idx := recipe_cards.find(b)
+			var a_missing := missing_materials(a_idx)
+			var b_missing := missing_materials(b_idx)
+			var a_total := 0
+			var b_total := 0
+			for amount in a_missing.values(): a_total += int(amount)
+			for amount in b_missing.values(): b_total += int(amount)
+			return a_total < b_total if a_total != b_total else a_idx < b_idx)
+		for position in range(ordered.size()): recipe_grid.move_child(ordered[position], position)
 	if selected_goal < 0:
 		var ready_count := 0
 		var ready_names: Array[String] = []
@@ -289,7 +350,14 @@ func refresh(new_inventory: Dictionary) -> void:
 	goal_progress.value = owned
 
 func _build_tutorial() -> void:
+	preparation_dimmer = ColorRect.new()
+	preparation_dimmer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	preparation_dimmer.color = Color("03151fcc")
+	preparation_dimmer.z_index = 14
+	preparation_dimmer.hide()
+	add_child(preparation_dimmer)
 	tutorial = PanelContainer.new()
+	tutorial.z_index = 15
 	tutorial.position = Vector2(18, 150)
 	tutorial.custom_minimum_size = Vector2(322, 0)
 	tutorial.add_theme_stylebox_override("panel", UI.padded_panel(UI.INK, UI.TEAL_DARK, 14))
@@ -303,7 +371,8 @@ func _build_tutorial() -> void:
 	tutorial_body.custom_minimum_size.x = 290
 	tutorial_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(tutorial_body)
-	content.add_child(_button("안내 그만 보기", dismiss_tutorial))
+	tutorial_button = _button("안내 그만 보기", dismiss_tutorial)
+	content.add_child(tutorial_button)
 	tutorial.hide()
 
 func record_step(step: String, index: int) -> void:
@@ -319,10 +388,31 @@ func replay_tutorial() -> void:
 	_refresh_tutorial()
 
 func dismiss_tutorial() -> void:
+	if GameManager.adventure_waiting_for_start:
+		GameManager.confirm_adventure_ready(local_index)
+		_refresh_tutorial()
+		return
 	tutorial_active = false
 	_refresh_visibility()
 
 func _refresh_tutorial() -> void:
+	if exploration_active and GameManager.adventure_waiting_for_start:
+		tutorial.position = Vector2(340, 170)
+		tutorial.custom_minimum_size.x = 600
+		tutorial_body.custom_minimum_size = Vector2(568, 168)
+		tutorial_body.text = "내 차례에는 주사위를 굴려 재료를 모아요.\n퀴즈를 맞히면 에너지와 특수기술 SP를 받아요.\n미니게임에서는 모두 동시에 도전하고 보너스를 받아요.\n탐험 뒤에는 재료를 나눠 마을에 시설을 지어요.\n\n안내를 보는 동안 탐험 시간은 줄어들지 않아요."
+		var state := GameManager.get_adventure_preparation_state()
+		tutorial_title.text = "모험 시작 전  ·  준비 %d / %d명" % [state["ready_count"], state["player_count"]]
+		tutorial_button.disabled = GameManager.adventure_ready_players.has(local_index)
+		tutorial_button.text = "친구 준비 기다리는 중" if tutorial_button.disabled else "준비 완료 · 모험 시작"
+		_refresh_visibility()
+		return
+	tutorial.position = Vector2(18, 150)
+	tutorial.custom_minimum_size.x = 322
+	tutorial_body.custom_minimum_size = Vector2(290, 0)
+	tutorial.size = Vector2(322, 0)
+	tutorial_button.disabled = false
+	tutorial_button.text = "안내 그만 보기"
 	var descriptions := ["내 턴에 오른쪽 주사위를 눌러 이동해 보세요.", "도착한 칸의 재료를 모아보세요. 재료는 자동으로 가방에 들어와요.", "하단 ‘건설 도감’을 눌러 필요한 재료와 시설 목록을 확인해 보세요.", "퀴즈 정답으로 SP를 모으고, 내 턴에 특수기술 버튼을 눌러보세요."]
 	var index := 0
 	for step in tutorial_steps:
@@ -333,9 +423,19 @@ func _refresh_tutorial() -> void:
 		return
 	tutorial_title.text = "첫 모험 안내  %d / 4" % (index + 1)
 	tutorial_body.text = descriptions[index]
+	_fit_compact_tutorial.call_deferred()
 	_refresh_visibility()
+
+func _fit_compact_tutorial() -> void:
+	# Wrapped text invalidates container minimum sizes on the next layout pass.
+	# Shrink after that pass so the preparation card does not leave a blank sidebar.
+	await get_tree().process_frame
+	if is_inside_tree() and not GameManager.adventure_waiting_for_start:
+		tutorial.size = Vector2(322, 0)
 
 func _refresh_visibility() -> void:
 	if not is_instance_valid(tutorial): return
 	summary.visible = exploration_active and not quiz_open
-	tutorial.visible = exploration_active and tutorial_active and not quiz_open and not catalog.visible
+	var preparing := exploration_active and GameManager.adventure_waiting_for_start
+	preparation_dimmer.visible = preparing and not catalog.visible
+	tutorial.visible = exploration_active and (preparing or (tutorial_active and GameManager.current_turn_idx == local_index)) and not quiz_open and not catalog.visible

@@ -32,7 +32,7 @@ static func live_line(game_id: String, success: bool, points: int, count_correct
 				return "풍향에 맞춰 돌린 동안 전기를 만들었어요."
 		"grid_balance":
 			if success:
-				return "지금 수요·공급 차이 %.1f MW · 가까울수록 유리해요." % absf(float(metrics.get("grid_gap", 0.0)))
+				return "방금 수요·공급 차이 %.1f MW를 유지했어요. 계속 가깝게 맞춰요." % absf(float(metrics.get("grid_gap", 0.0)))
 		"standby_hunt":
 			if success and count_correct:
 				return "사용하지 않는 기기의 대기전력을 %d W 줄였어요." % int(metrics.get("saved_watts", 0))

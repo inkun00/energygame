@@ -1304,6 +1304,9 @@ func request_open_market_take(player_idx: int, item_id: String) -> void:
 func request_minigame_ready(player_idx: int, round_id: int) -> void:
 	_request_game_action("minigame_ready", {"player_idx": player_idx, "round_id": round_id})
 
+func request_adventure_ready(player_idx: int) -> void:
+	_request_game_action("adventure_ready", {"player_idx": player_idx})
+
 
 func request_minigame_score(player_idx: int, score: int, learning_stats: Dictionary = {}, round_id: int = -1) -> void:
 	_request_game_action("minigame_score", {"player_idx": player_idx, "round_id": round_id, "score": score, "stats": learning_stats.duplicate(true)})
@@ -1455,6 +1458,9 @@ func _handle_game_action(sender_peer_id: int, action: String, payload: Dictionar
 	if player_idx < 0 or player_idx >= GameManager.players.size():
 		return
 	match action:
+		"adventure_ready":
+			if int(payload.get("player_idx", -1)) == player_idx:
+				GameManager.confirm_adventure_ready(player_idx)
 		"roll_dice":
 			if int(payload.get("player_idx", -1)) == player_idx:
 				GameManager.execute_roll_dice(player_idx)
@@ -1500,6 +1506,7 @@ func _connect_game_signals() -> void:
 	if _game_signals_connected:
 		return
 	_game_signals_connected = true
+	GameManager.adventure_preparation_changed.connect(func(state): _broadcast_game_event("adventure_preparation_changed", [state]))
 	GameManager.turn_changed.connect(func(idx): _broadcast_game_event("turn_changed", [idx]))
 	GameManager.player_moved.connect(func(idx, from_tile, to_tile): _broadcast_game_event("player_moved", [idx, from_tile, to_tile]))
 	GameManager.player_state_changed.connect(func(idx): _broadcast_game_event("player_state_changed", [idx]))
@@ -1597,7 +1604,9 @@ func _capture_game_state_patch(event_name: String, event_args: Array) -> Diction
 		"current_state": int(GameManager.current_state),
 		"current_turn_idx": GameManager.current_turn_idx,
 		"total_turns": GameManager.total_turns,
-		"is_game_active": GameManager.is_game_active
+		"is_game_active": GameManager.is_game_active,
+		"adventure_waiting_for_start": GameManager.adventure_waiting_for_start,
+		"adventure_ready_players": GameManager.adventure_ready_players.duplicate(true)
 	}
 	match event_name:
 		"turn_changed":
@@ -1707,6 +1716,8 @@ func _capture_game_state() -> Dictionary:
 		"current_turn_idx": GameManager.current_turn_idx,
 		"total_turns": GameManager.total_turns,
 		"is_game_active": GameManager.is_game_active,
+		"adventure_waiting_for_start": GameManager.adventure_waiting_for_start,
+		"adventure_ready_players": GameManager.adventure_ready_players.duplicate(true),
 		"active_quiz_data": GameManager.active_quiz_data.duplicate(true),
 		"active_quiz_player_idx": GameManager.active_quiz_player_idx,
 		"active_quiz_time_remaining": GameManager.active_quiz_time_remaining,

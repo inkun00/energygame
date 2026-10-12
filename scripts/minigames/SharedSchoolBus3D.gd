@@ -42,6 +42,9 @@ var passenger_label: Label
 var efficiency_label: Label
 var route_label: Label
 var action_label: Label
+var next_stop_label: Label
+var service_label: Label
+var finish_animation_active := false
 var flash: ColorRect
 var rng := RandomNumberGenerator.new()
 var bus_x := 0.0
@@ -96,10 +99,43 @@ func setup(_player_data: Dictionary, game_seed: int) -> void:
 	_animate_students(0.0)
 	_update_visuals()
 	running = true
+	finish_animation_active = false
 
 func set_running(value: bool) -> void:
 	running = value
-	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if value else SubViewport.UPDATE_DISABLED
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if value or (finish_animation_active and has_pending_finish_animation()) else SubViewport.UPDATE_DISABLED
+
+func has_pending_finish_animation() -> bool:
+	return not boarding_students.is_empty() or not dropped_students.is_empty()
+
+func get_finish_animation_seconds() -> float:
+	var remaining := 0.0
+	for entry in dropped_students:
+		remaining = maxf(remaining, float(entry["delay"]) + 1.8 - float(entry["age"]))
+	for entry in boarding_students:
+		remaining = maxf(remaining, float(entry["delay"]) + 0.75 - float(entry["age"]))
+	return maxf(0.0, remaining)
+
+func begin_finish_animation() -> bool:
+	running = false
+	finish_animation_active = has_pending_finish_animation()
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if finish_animation_active else SubViewport.UPDATE_DISABLED
+	return finish_animation_active
+
+func advance_finish_animation(delta: float) -> void:
+	# Cosmetic only: do not drive, collect passengers, award points or advance
+	# elapsed/route/learning state after the competitive clock has stopped.
+	if not finish_animation_active:
+		return
+	_animate_boarding_students(delta)
+	_animate_dropoff_students(delta)
+	_animate_school_doors(delta)
+	_animate_bus_door(delta)
+	_update_camera_and_bus()
+	_update_visuals()
+	if not has_pending_finish_animation():
+		finish_animation_active = false
+		viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
 static func route_energy(distance: float) -> float:
 	# 실제 kWh가 아닌 게임 수치: 운행 고정 비용 + 이동 거리 비용.
@@ -193,6 +229,9 @@ func _build_segment(index: int) -> Dictionary:
 	world.add_child(group)
 	_box(group, Vector3(start_x + SEGMENT_LENGTH * 0.5, -0.22, -1.1), Vector3(SEGMENT_LENGTH, 0.34, 6.0), VISUAL_STYLE.FIELD)
 	_box(group, Vector3(start_x + SEGMENT_LENGTH * 0.5, -0.03, 1.1), Vector3(SEGMENT_LENGTH, 0.10, 2.45), VISUAL_STYLE.ROAD)
+	# The waiting/running pupils share a continuous raised pavement. It also
+	# provides visible grounding for pupils outside the small stop platform.
+	_box(group, Vector3(start_x + SEGMENT_LENGTH * 0.5, 0.125, -1.0), Vector3(SEGMENT_LENGTH, 0.25, 1.9), VISUAL_STYLE.CREAM)
 	if index == 0:
 		# 시작 위치 뒤쪽도 같은 길로 채워 첫 화면에서 도로가 끊겨 보이지 않게 합니다.
 		_box(group, Vector3(-10.0, -0.22, -1.1), Vector3(20.0, 0.34, 6.0), VISUAL_STYLE.FIELD)
@@ -211,6 +250,7 @@ func _build_segment(index: int) -> Dictionary:
 		_box(stop_root, Vector3(stop_x, 0.13, -1.0), Vector3(4.8, 0.25, 1.7), Color("e2e3b0"))
 		_box(stop_root, Vector3(stop_x, 1.22, -1.4), Vector3(0.12, 1.9, 0.12), Color("739094"))
 		_box(stop_root, Vector3(stop_x, 2.14, -1.4), Vector3(4.7, 0.16, 1.6), Color("6fb5c9"))
+		var stop_marker := _box(group, Vector3(stop_x, 0.055, 1.1), Vector3(PICKUP_REACH * 2.0, 0.07, 2.45), Color("e5d98c"), true)
 		var student_nodes: Array[Node3D] = []
 		var student_states: Array[Dictionary] = []
 		for student_index in range(count):
@@ -222,8 +262,8 @@ func _build_segment(index: int) -> Dictionary:
 			var late_order: int = student_index - (count - late_count) if is_late else -1
 			student_states.append({"node": null, "animator": null, "base_x": base_x, "base_z": base_z, "late": is_late, "late_order": late_order, "approaching": false, "arrived": not is_late, "boarded": false, "phase": rng.randf_range(0.0, TAU), "run_speed": 1.4 + float(late_order % 4) * 0.30 if is_late else 0.0, "variant": (stop_index + student_index) % 2})
 		var ready_count: int = count - late_count
-		var label := _label3d(group, "대기 %d명 · 뛰는 중 %d명" % [ready_count, late_count], Vector3(stop_x, 2.72, -0.45), Color("ffc288"))
-		stops.append({"x": stop_x, "waiting": ready_count, "students": student_nodes, "states": student_states, "label": label, "root": stop_root, "active": false, "retired": false})
+		var label := _label3d(group, "정류장", Vector3(stop_x, 2.72, -0.45), Color("ffc288"))
+		stops.append({"x": stop_x, "waiting": ready_count, "students": student_nodes, "states": student_states, "label": label, "marker": stop_marker, "root": stop_root, "active": false, "retired": false})
 	var school_x := start_x + SCHOOL_OFFSET
 	var entrance_x := school_x + SCHOOL_ENTRANCE_OFFSET
 	_box(group, Vector3(entrance_x, 1.10, -2.0), Vector3(2.35, 2.18, 1.55), Color("ead5b1"))
@@ -232,7 +272,7 @@ func _build_segment(index: int) -> Dictionary:
 	var school_door_left := _box(group, Vector3(entrance_x - 0.13, 0.58, -1.10), Vector3(0.25, 1.08, 0.045), Color("c4e6d8"))
 	var school_door_right := _box(group, Vector3(entrance_x + 0.13, 0.58, -1.10), Vector3(0.25, 1.08, 0.045), Color("c4e6d8"))
 	_label3d(group, "학교 · 노란 구역에 정차", Vector3(entrance_x, 2.95, -0.8), Color("fff2c6"))
-	_box(group, Vector3(school_x, 0.055, 1.1), Vector3(2.0, 0.07, 2.45), Color("e5d98c"), true)
+	_box(group, Vector3(school_x, 0.055, 1.1), Vector3(SCHOOL_REACH * 2.0, 0.07, 2.45), Color("e5d98c"), true)
 	return {"root": group, "stops": stops, "school_x": school_x, "entrance_x": entrance_x, "school_served": false, "school_missed_notice": false, "school_door_left": school_door_left, "school_door_right": school_door_right, "school_door_open": 0.0}
 
 func _build_overlay() -> void:
@@ -240,6 +280,13 @@ func _build_overlay() -> void:
 	efficiency_label = _overlay_label(Vector2(305, 8), Vector2(655, 39), "1인당 에너지 --", Color("d7ffed"), 20)
 	route_label = _overlay_label(Vector2(668, 8), Vector2(935, 39), "속도 0 · 에너지 3.0", Color("fff0b7"), 17)
 	action_label = _overlay_label(Vector2(85, 255), Vector2(875, 282), "D/A 길게 가속 · S 정차 · 정류장에서 Space", Color("fff4bd"), 17)
+	action_label.anchor_top = 1.0
+	action_label.anchor_bottom = 1.0
+	action_label.offset_top = -34.0
+	action_label.offset_bottom = -7.0
+	next_stop_label = _overlay_label(Vector2(24, 44), Vector2(690, 76), "", Color("fff2b8"), 19)
+	next_stop_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	service_label = _overlay_label(Vector2(710, 44), Vector2(935, 76), "", Color("a8ffe0"), 18)
 	flash = ColorRect.new()
 	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	flash.color = Color.TRANSPARENT
@@ -360,7 +407,7 @@ func _animate_students(delta: float) -> void:
 					if animator and animator.current_animation != "idle":
 						animator.play("idle")
 			stop["waiting"] = ready_count
-			(stop["label"] as Label3D).text = "대기 %d명%s" % [ready_count, " · 뛰는 중 %d명" % running_count if running_count > 0 else ""]
+			(stop["label"] as Label3D).text = "정류장 · Space" if absf(bus_x - stop_x) <= PICKUP_REACH and absf(bus_speed) <= STOP_SPEED_LIMIT else "정류장"
 			(stop["label"] as Label3D).modulate = Color("ffc288") if running_count > 0 else Color("fff3c4")
 
 func _attempt_pickup() -> void:
@@ -492,7 +539,7 @@ func _animate_dropoff_students(delta: float) -> void:
 		var progress := clampf((float(record["age"]) - float(record["delay"])) / 1.8, 0.0, 1.0)
 		student.position.z = lerpf(1.98, -1.36, progress)
 		student.position.x = lerpf(float(record["start_x"]), float(record["entrance_x"]), progress)
-		student.position.y = lerpf(0.335, 0.02, minf(1.0, progress * 5.0))
+		student.position.y = lerpf(0.335, 0.255, minf(1.0, progress * 5.0))
 		_face_student(student, Vector3(float(record["entrance_x"]) - float(record["start_x"]), 0.0, -3.34))
 		if progress >= 1.0:
 			student.queue_free()
@@ -520,9 +567,54 @@ func _notice(message: String) -> void:
 func _update_visuals() -> void:
 	passenger_label.text = "승객  %d / %d명" % [passengers, BUS_CAPACITY]
 	efficiency_label.text = "1인당 에너지  %.1f" % energy_per_person(passengers, route_distance) if passengers > 0 else "1인당 에너지  --"
+	if not dropped_students.is_empty():
+		efficiency_label.text = "도착 · 1인당 %.1f" % last_trip_per_person
 	var direction := "후진" if bus_speed < -STOP_SPEED_LIMIT else "전진" if bus_speed > STOP_SPEED_LIMIT else "정차"
 	route_label.text = "%s %.1f · 에너지 %.1f" % [direction, absf(bus_speed), route_energy(route_distance)]
 	action_label.text = "학생 %d명이 학교로 들어가는 중 · 안전하게 기다려요" % dropped_students.size() if not dropped_students.is_empty() else ("학생 %d명 승차 중 · 문 앞을 비우면 출발해요" % boarding_students.size() if not boarding_students.is_empty() else (notice if notice_remaining > 0.0 else "D/A 길게 가속 · S 정차 · 정류장 Space · 학교 정차 시 하차"))
+	var next := get_next_service_point()
+	if not dropped_students.is_empty():
+		next_stop_label.text = "학교 입장 마무리 · 남은 %d명" % dropped_students.size()
+		service_label.text = "잠시 기다려요"
+	elif not boarding_students.is_empty():
+		next_stop_label.text = "승차 마무리 · 남은 %d명" % boarding_students.size()
+		service_label.text = "문 앞 비우는 중"
+	elif not next.is_empty():
+		var distance := float(next["x"]) - bus_x
+		var where := "후진 %.1f칸" % absf(distance) if distance < -float(next["reach"]) else "앞으로 %.1f칸" % maxf(0.0, distance)
+		next_stop_label.text = "학교 · " + where if bool(next["school"]) else "다음 정류장 · %s · 대기 %d명 / 뛰는 중 %d명" % [where, int(next["waiting"]), int(next["late"])]
+		service_label.text = "학교 자동 하차" if absf(distance) <= SCHOOL_REACH and bool(next["school"]) else ("S 정차 → Space" if absf(distance) <= float(next["reach"]) else "노란 정차선 확인")
+	else:
+		next_stop_label.text = "앞으로 달려 다음 구간으로 가요"
+		service_label.text = "D 전진"
+
+func get_next_service_point() -> Dictionary:
+	var nearest: Dictionary = {}
+	var nearest_gap := INF
+	for segment in segments.values():
+		var route: Dictionary = segment
+		var school_x := float(route["school_x"])
+		if not bool(route["school_served"]) and school_x >= bus_x - MAX_REVERSE_DISTANCE:
+			var gap := absf(school_x - bus_x)
+			if gap < nearest_gap:
+				nearest_gap = gap
+				nearest = {"x": school_x, "reach": SCHOOL_REACH, "school": true}
+		if passengers >= BUS_CAPACITY:
+			continue
+		for stop in route["stops"]:
+			if bool(stop["retired"]) or float(stop["x"]) < bus_x - PICKUP_REACH:
+				continue
+			var waiting := 0
+			var late := 0
+			for state in stop["states"]:
+				if not bool(state["boarded"]):
+					if bool(state["arrived"]): waiting += 1
+					else: late += 1
+			var gap := absf(float(stop["x"]) - bus_x)
+			if waiting + late > 0 and gap < nearest_gap:
+				nearest_gap = gap
+				nearest = {"x": float(stop["x"]), "reach": PICKUP_REACH, "school": false, "waiting": waiting, "late": late}
+	return nearest
 
 func _update_camera_and_bus() -> void:
 	bus.position = Vector3(bus_x, 0.12, 1.1)
@@ -553,8 +645,10 @@ func _label3d(parent: Node3D, content: String, where: Vector3, color: Color) -> 
 
 func _overlay_label(from: Vector2, to: Vector2, content: String, color: Color, font_size: int) -> Label:
 	var label := Label.new()
-	label.position = from
-	label.size = to - from
+	label.anchor_left = from.x / 960.0
+	label.anchor_right = to.x / 960.0
+	label.offset_top = from.y
+	label.offset_bottom = to.y
 	label.text = content
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", font_size)

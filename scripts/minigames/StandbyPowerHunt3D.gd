@@ -489,26 +489,31 @@ func _update_hud() -> void:
 	room_label.text = "현재 위치  %s" % ["거실", "주방", "침실", "세탁실"][room_index]
 	progress_label.text = "집 %d  ·  %d%%" % [lap_index, int(hero.position.x / COURSE_END * 100.0)]
 	saved_label.text = "차단한 대기전력  %d W" % saved_watts
+	action_label.modulate.a = 1.0
+	var nearest := _nearest_unresolved_device()
+	# Prioritize the device that SPACE would really act on. An approaching
+	# table must not hide its prompt while the player is standing at the TV.
+	if not nearest.is_empty():
+		if bool(nearest["waste"]):
+			action_label.text = "[SPACE] %s 전원 차단" % str(nearest["name"])
+		else:
+			action_label.text = "사용 중인 %s · 전원을 유지하고 지나가세요" % str(nearest["name"])
+		return
 	for barrier in barrier_records:
 		if hero.position.x < float(barrier["x"]) and float(barrier["x"]) - hero.position.x <= 2.0 and hero.position.y < float(barrier["clearance"]):
 			action_label.text = "[W/↑] %s 넘기" % str(barrier["name"])
 			return
-	var nearest := _nearest_unresolved_device()
-	if nearest.is_empty():
-		for record in device_records:
-			var deadline := float(record.get("miss_deadline", -1.0))
-			if not bool(record["resolved"]) and deadline > play_elapsed:
-				action_label.text = "← %s 돌아가서 차단 · %.1f초" % [str(record["name"]), deadline - play_elapsed]
-				return
-		action_label.text = "A/D로 집 안을 이동하세요"
-	else:
-		action_label.text = "[SPACE] %s 플러그 확인" % str(nearest["name"])
-		action_label.modulate.a = 0.78 + sin(visual_time * 7.0) * 0.20
+	for record in device_records:
+		var deadline := float(record.get("miss_deadline", -1.0))
+		if not bool(record["resolved"]) and deadline > play_elapsed:
+			action_label.text = "← %s 돌아가서 차단 · %.1f초" % [str(record["name"]), deadline - play_elapsed]
+			return
+	action_label.text = "A/D로 집 안을 이동하세요"
 
 func _build_overlay() -> void:
 	var help := Label.new()
 	help.position = Vector2(14, 9)
-	help.text = "A/D 이동 · W/↑ 점프 · SPACE 꺼진 기기 차단 · 놓치면 잠깐 돌아갈 수 있어요"
+	help.text = "A/D 이동 · W/↑ 점프 · SPACE 전원 차단 · 사용 중 기기는 유지"
 	help.add_theme_font_size_override("font_size", 16)
 	help.add_theme_color_override("font_color", Color("fff0b3"))
 	help.add_theme_color_override("font_outline_color", Color("18343d"))
@@ -516,8 +521,23 @@ func _build_overlay() -> void:
 	add_child(help)
 	room_label = _overlay_label(Vector2(14, 39), Vector2(300, 70), "현재 위치  거실", HORIZONTAL_ALIGNMENT_LEFT, Color("8bf2d1"))
 	progress_label = _overlay_label(Vector2(740, 9), Vector2(946, 40), "집 1", HORIZONTAL_ALIGNMENT_RIGHT, Color("fff0b3"))
+	progress_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	progress_label.offset_left = -200.0
+	progress_label.offset_top = 9.0
+	progress_label.offset_right = -14.0
+	progress_label.offset_bottom = 40.0
 	saved_label = _overlay_label(Vector2(14, 210), Vector2(380, 242), "차단한 대기전력  0 W", HORIZONTAL_ALIGNMENT_LEFT, Color("8bf2d1"))
+	saved_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	saved_label.offset_left = 14.0
+	saved_label.offset_top = -75.0
+	saved_label.offset_right = 380.0
+	saved_label.offset_bottom = -43.0
 	action_label = _overlay_label(Vector2(320, 246), Vector2(640, 278), "A/D로 집 안을 이동하세요", HORIZONTAL_ALIGNMENT_CENTER, Color("ffd367"))
+	action_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	action_label.offset_left = -340.0
+	action_label.offset_top = -40.0
+	action_label.offset_right = 340.0
+	action_label.offset_bottom = -8.0
 	flash = ColorRect.new()
 	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	flash.color = Color.TRANSPARENT

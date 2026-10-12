@@ -23,6 +23,8 @@ func _run() -> void:
 	var hud = main.get_node("GameBoard/UILayer/HUD")
 	_expect(game_manager.game_duration_seconds == 300, "선택한 5분이 실제 게임 세션에 적용되어야 합니다.")
 	_expect(hud.game_time_label.text == "05:00", "HUD에 선택한 게임 시간이 표시되어야 합니다.")
+	_expect(game_manager.adventure_waiting_for_start, "첫 안내 동안 탐험 시간을 시작하면 안 됩니다.")
+	hud.adventure_planner.dismiss_tutorial()
 
 	game_manager.players[0]["position"] = BoardGrid.LAST_TILE_INDEX
 	game_manager._handle_lap_completion(0)

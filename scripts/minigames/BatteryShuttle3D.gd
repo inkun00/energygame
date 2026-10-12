@@ -32,6 +32,7 @@ var city_windows: Array[MeshInstance3D] = []
 var solar_light: MeshInstance3D
 var battery_light: MeshInstance3D
 var city_light: MeshInstance3D
+var transfer_pulses: Array[MeshInstance3D] = []
 var city_label: Label3D
 var phase_label: Label
 var phase_timer_label: Label
@@ -142,6 +143,10 @@ func _build_world() -> void:
 	_build_city_station()
 	cargo_orb = _sphere("CarriedElectricity", world, Vector3(0, 2.5, 1.75), 0.25, Color("ffe477"), true)
 	cargo_orb.visible = false
+	for index in range(4):
+		var pulse := _sphere("TransportPulse%d" % index, world, Vector3.ZERO, 0.06, Color("ffe477"), true)
+		pulse.visible = false
+		transfer_pulses.append(pulse)
 
 func _build_solar_station() -> void:
 	_box("SolarBase", world, Vector3(SOLAR_X, 0.35, -0.8), Vector3(2.45, 0.7, 1.9), Color("66a778"))
@@ -169,6 +174,9 @@ func _build_battery_station() -> void:
 		battery_cells.append(cell)
 	battery_light = _sphere("BatteryIndicator", world, Vector3(0, 2.56, -0.50), 0.16, Color("8ee8ff"), true)
 	_box("StoragePad", world, Vector3(0, 0.06, 1.65), Vector3(1.45, 0.12, 1.20), Color("c7e2bf"), true)
+	var name_label := _label3d("배터리", Vector3(0, 2.98, 0.30), Color("c4ffe1"))
+	name_label.font_size = 34
+	name_label.pixel_size = 0.007
 
 func _build_city_station() -> void:
 	_box("CityBase", world, Vector3(CITY_X, 0.32, -0.8), Vector3(2.55, 0.65, 1.9), Color("a4b4aa"))
@@ -203,11 +211,15 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	VISUAL_STYLE.style_hero(hero)
 
 func _build_overlay() -> void:
-	phase_label = _overlay_label(Vector2(290, 7), Vector2(670, 40), "햇빛 많음 · 남는 전기", Color("ffe386"), 23)
+	phase_label = _overlay_label(Vector2(290, 7), Vector2(670, 40), "햇빛 많음 · 남는 전기", Color("ffe386"), 21)
 	phase_timer_label = _overlay_label(Vector2(352, 40), Vector2(608, 68), "구름까지 5초", Color("effff7"), 17)
-	charge_label = _overlay_label(Vector2(348, 79), Vector2(612, 109), "배터리 1/4칸", Color("a4ffe0"), 18)
-	cargo_label = _overlay_label(Vector2(30, 204), Vector2(320, 233), "운반 중: 없음", Color("fff3bc"), 17)
+	charge_label = _overlay_label(Vector2(680, 7), Vector2(945, 40), "배터리 1/4칸", Color("a4ffe0"), 20)
+	cargo_label = _overlay_label(Vector2(14, 7), Vector2(280, 40), "운반: 없음", Color("fff3bc"), 18)
 	instruction_label = _overlay_label(Vector2(90, 260), Vector2(870, 285), "A/D로 달리기 · 태양광 → 배터리 → 도시", Color("fff1ac"), 16)
+	instruction_label.anchor_top = 1.0
+	instruction_label.anchor_bottom = 1.0
+	instruction_label.offset_top = -34.0
+	instruction_label.offset_bottom = -7.0
 	flash = ColorRect.new()
 	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	flash.color = Color.TRANSPARENT
@@ -294,7 +306,9 @@ func _update_visuals() -> void:
 		return
 	var phase_info := phase_for_time(elapsed, game_seed)
 	var sunny := bool(phase_info["sunny"])
-	city_label.text = "도시\n햇빛으로 충분" if sunny else "도시\n필요량 %d · 불빛 %d%%" % [int(phase_info["demand"]), roundi(clampf(city_energy_remaining, 0.0, 1.0) * 100.0)]
+	city_label.text = "도시\n태양광 직접 공급" if sunny else "도시 저장 %.1f칸\n약 %.1f초 유지" % [city_energy_remaining, get_city_supply_seconds()]
+	city_label.font_size = 34
+	city_label.pixel_size = 0.007
 	sun.visible = sunny
 	cloud.visible = not sunny
 	solar_light.visible = sunny and battery_units < BATTERY_CAPACITY
@@ -308,11 +322,18 @@ func _update_visuals() -> void:
 	cargo_orb.visible = cargo != 0
 	if cargo != 0:
 		cargo_orb.material_override = solar_material if cargo == 1 else stored_material
-	phase_label.text = "햇빛 많음 · 남는 전기" if sunny else "구름 많음 · 전기 부족"
+	for index in range(transfer_pulses.size()):
+		var pulse := transfer_pulses[index]
+		pulse.visible = cargo != 0
+		if cargo != 0:
+			var progress := fposmod(visual_time * 1.2 + float(index) / 4.0, 1.0)
+			pulse.position = Vector3(lerpf(SOLAR_X if cargo == 1 else BATTERY_X, BATTERY_X if cargo == 1 else CITY_X, progress), 0.16, 2.05)
+			pulse.material_override = solar_material if cargo == 1 else stored_material
+	phase_label.text = "햇빛 · 태양광 발전 충분" if sunny else "구름 · 태양광 발전 부족"
 	phase_label.add_theme_color_override("font_color", Color("ffe386") if sunny else Color("b8ecff"))
 	phase_timer_label.text = "%s까지 %.1f초" % ["구름" if sunny else "햇빛", float(phase_info["remaining"])]
 	charge_label.text = "배터리  %d / %d칸" % [battery_units, BATTERY_CAPACITY]
-	cargo_label.text = "운반 중: %s" % ("남는 전기 → 배터리" if cargo == 1 else ("저장 전기 → 도시" if cargo == 2 else "없음"))
+	cargo_label.text = "운반: %s" % ("남는 전기 → 배터리" if cargo == 1 else ("저장 전기 → 도시" if cargo == 2 else "없음"))
 	if notice_remaining > 0.0:
 		instruction_label.text = notice
 	elif cargo == 1:
@@ -323,6 +344,10 @@ func _update_visuals() -> void:
 		instruction_label.text = "배터리가 가득 찼어요. 구름이 올 때까지 기다리세요" if battery_units >= BATTERY_CAPACITY else "A/D 이동 · 왼쪽 태양광에서 남는 전기를 가져오세요"
 	else:
 		instruction_label.text = "배터리가 비었어요. 다음 햇빛 때 전기를 저장하세요" if battery_units <= 0 else "A/D 이동 · 가운데 배터리에서 전기를 꺼내세요"
+
+func get_city_supply_seconds() -> float:
+	var current_demand := float(phase_for_time(elapsed, game_seed)["demand"]) * 0.22
+	return city_energy_remaining / maxf(0.001, current_demand)
 
 func _box(node_name: String, parent: Node3D, where: Vector3, dimensions: Vector3, color: Color, glowing: bool = false) -> MeshInstance3D:
 	var mesh := BoxMesh.new()
@@ -365,8 +390,10 @@ func _material(color: Color, glowing: bool) -> StandardMaterial3D:
 
 func _overlay_label(from: Vector2, to: Vector2, content: String, color: Color, font_size: int) -> Label:
 	var label := Label.new()
-	label.position = from
-	label.size = to - from
+	label.anchor_left = from.x / 960.0
+	label.anchor_right = to.x / 960.0
+	label.offset_top = from.y
+	label.offset_bottom = to.y
 	label.text = content
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", font_size)

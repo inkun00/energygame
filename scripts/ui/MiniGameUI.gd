@@ -67,7 +67,10 @@ var guide_practice_button: Button
 var practice_actions: HBoxContainer
 var practice_active := false
 var practice_elapsed := 0.0
-const HYDRO_PRACTICE_SECONDS := 12.0
+var practice_completed_at := -1.0
+const HYDRO_PRACTICE_SECONDS := 30.0
+var finishing_animation := false
+var pending_results: Array = []
 
 var active := false
 var surface_enabled := true
@@ -180,7 +183,7 @@ func _build_ui() -> void:
 	timer_bar.add_theme_stylebox_override("fill", UI.progress_fill(UI.TEAL))
 	status_row.add_child(timer_bar)
 	score_label = Label.new()
-	score_label.custom_minimum_size = Vector2(180, 34)
+	score_label.custom_minimum_size = Vector2(210, 34)
 	score_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	score_label.add_theme_font_size_override("font_size", 23)
 	score_label.add_theme_color_override("font_color", Color("ffe06b"))
@@ -356,9 +359,31 @@ func _exit_tree() -> void:
 func _process(delta: float) -> void:
 	if not surface_enabled:
 		return
+	if finishing_animation:
+		if is_instance_valid(commute_arcade):
+			commute_arcade.call("advance_finish_animation", delta)
+			if bool(commute_arcade.call("has_pending_finish_animation")):
+				return
+		finishing_animation = false
+		if not pending_results.is_empty():
+			var results := pending_results.duplicate(true)
+			pending_results.clear()
+			_on_minigame_finished(results)
+		else:
+			feedback_label.text = "모든 학생이 학교에 들어갔어요. 점수 제출 완료!"
+		return
 	if practice_active:
 		practice_elapsed += delta
 		_advance_arcade_simulation(minf(HYDRO_PRACTICE_SECONDS, practice_elapsed))
+		var progress: Dictionary = hydro_arcade.call("get_practice_progress")
+		goal_label.text = "조작 연습  |  " + str(progress.get("hint", "레버로 이동해요"))
+		if bool(progress.get("complete", false)):
+			if practice_completed_at < 0.0:
+				practice_completed_at = practice_elapsed
+			feedback_label.text = "수문 열기 → 물의 낙차로 발전 → 닫고 물 모으기 완료!"
+			if practice_elapsed - practice_completed_at >= 2.0:
+				_finish_hydro_practice()
+				return
 		timer_label.text = "연습 %02d초" % ceili(maxf(0.0, HYDRO_PRACTICE_SECONDS - practice_elapsed))
 		timer_bar.value = maxf(0.0, HYDRO_PRACTICE_SECONDS - practice_elapsed)
 		if practice_elapsed >= HYDRO_PRACTICE_SECONDS:
@@ -413,6 +438,8 @@ func _on_minigame_started(data: Dictionary) -> void:
 	if not surface_enabled:
 		return
 	MINIGAME_INPUT.release_all()
+	finishing_animation = false
+	pending_results.clear()
 	practice_active = false
 	practice_actions.visible = false
 	game_data = data.duplicate(true)
@@ -518,6 +545,31 @@ func _begin_local_round() -> void:
 func _on_minigame_finished(results: Array) -> void:
 	if not visible:
 		return
+	if finishing_animation:
+		pending_results = results.duplicate(true)
+		return
+	# A delayed browser can receive the host's final results before its own
+	# score callback. Finish the already-started entrance even in that order.
+	if is_instance_valid(commute_arcade) and bool(commute_arcade.call("has_pending_finish_animation")):
+		if learning_snapshot.is_empty():
+			learning_snapshot = _learning_metrics_snapshot()
+		for entry_variant in results:
+			var entry: Dictionary = entry_variant
+			if int(entry.get("player_idx", -1)) == _local_player_index():
+				score = int(entry.get("score", 0))
+				_refresh_score()
+				break
+		active = false
+		submitted = true
+		round_started_locally = false
+		_set_arcades_running(false)
+		finishing_animation = bool(commute_arcade.call("begin_finish_animation"))
+		if finishing_animation:
+			pending_results = results.duplicate(true)
+			timer_label.text = "하차 중"
+			timer_bar.value = 0
+			feedback_label.text = "점수 집계 완료! 학생들이 학교에 들어가는 중이에요."
+			return
 	if practice_active:
 		_finish_hydro_practice(false)
 	if is_instance_valid(guide_panel):
@@ -565,6 +617,8 @@ func _on_turn_changed(_player_idx: int) -> void:
 		visible = false
 
 func cancel_minigame() -> void:
+	finishing_animation = false
+	pending_results.clear()
 	practice_active = false
 	practice_actions.visible = false
 	_set_arcades_running(false)
@@ -879,13 +933,14 @@ func _start_hydro_practice() -> void:
 		return
 	practice_active = true
 	practice_elapsed = 0.0
+	practice_completed_at = -1.0
 	simulation_elapsed = 0.0
 	guide_panel.visible = false
 	card.find_child("ContentBox", false, false).visible = true
 	objective_label.visible = false
 	lesson_label.visible = false
 	goal_label.visible = true
-	goal_label.text = "연습: A/D 이동 · W 점프 · 레버 앞 Space 3번 → 물·터빈 확인 → E 닫기"
+	goal_label.text = "조작 연습  |  1. A/D로 가까운 수문 레버에 이동해요."
 	practice_actions.visible = true
 	timer_bar.max_value = HYDRO_PRACTICE_SECONDS
 	timer_bar.value = HYDRO_PRACTICE_SECONDS
@@ -899,6 +954,7 @@ func _finish_hydro_practice(show_guide: bool = true) -> void:
 	if not practice_active:
 		return
 	practice_active = false
+	practice_completed_at = -1.0
 	practice_actions.visible = false
 	_set_arcades_running(false)
 	var local_idx := _local_player_index()
@@ -930,6 +986,8 @@ func _build_mode() -> void:
 		_: _build_solar_align()
 
 func _clear_arena() -> void:
+	finishing_animation = false
+	pending_results.clear()
 	if is_instance_valid(solar_arcade) and solar_arcade.has_method("set_running"):
 		solar_arcade.call("set_running", false)
 	if is_instance_valid(wind_arcade) and wind_arcade.has_method("set_running"):
@@ -1340,9 +1398,16 @@ func _submit_score() -> void:
 	submitted = true
 	active = false
 	_set_arcades_running(false)
+	timer_label.text = "종료"
+	timer_bar.value = 0
 	feedback_label.text = "도전 종료! 점수를 제출했습니다."
 	feedback_label.add_theme_color_override("font_color", Color("ffe083"))
 	submission_label.text = "다른 플레이어의 도전이 끝나기를 기다리는 중…"
+	if is_instance_valid(commute_arcade):
+		finishing_animation = bool(commute_arcade.call("begin_finish_animation"))
+		if finishing_animation:
+			timer_label.text = "하차 중"
+			feedback_label.text = "점수 집계 완료! 학생들이 학교에 들어가는 중이에요."
 	GameManager.submit_minigame_score(_local_player_index(), score, _submission_stats(), round_id)
 
 func _submission_stats() -> Dictionary:
@@ -1373,7 +1438,7 @@ func _submission_stats() -> Dictionary:
 
 func _build_results(results: Array) -> void:
 	_clear_arena()
-	var heading := _arena_label("경쟁 순위 · 목표 행동 기록은 따로 확인해요", 24, Color("ffe06b"))
+	var heading := _arena_label("미니게임 순위 · 에너지 보너스", 24, Color("ffe06b"))
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	for result_variant in results:
 		var result: Dictionary = result_variant
@@ -1400,7 +1465,7 @@ func _build_results(results: Array) -> void:
 		var score_column := _result_column("%d점" % int(result["score"]), 140, rank_color)
 		score_column.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		columns.add_child(score_column)
-		var reward_label := _result_column("확인 · +%d" % int(result["reward"]) if bool(result.get("goal_checked", false)) else "다시 연습 · +0", 165, rank_color)
+		var reward_label := _result_column("에너지 +%d" % int(result["reward"]) if bool(result.get("goal_checked", false)) else "목표 미달 · +0", 180, rank_color)
 		reward_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		columns.add_child(reward_label)
 

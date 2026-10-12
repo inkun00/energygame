@@ -81,6 +81,10 @@ var score_elapsed := 0.0
 var visual_time := 0.0
 var running := false
 var practice_mode := false
+var practice_reached_lever := false
+var practice_opened_gate := false
+var practice_generated_power := false
+var practice_closed_gate := false
 var overflowed := false
 var jump_was_down := false
 var space_was_down := false
@@ -119,6 +123,10 @@ func _ready() -> void:
 
 func setup(player_data: Dictionary, game_seed: int) -> void:
 	practice_mode = false
+	practice_reached_lever = false
+	practice_opened_gate = false
+	practice_generated_power = false
+	practice_closed_gate = false
 	rain_seed = game_seed
 	elapsed = 0.0
 	selected_gate = -1
@@ -160,11 +168,23 @@ func set_running(value: bool) -> void:
 func set_practice_mode(value: bool) -> void:
 	practice_mode = value
 	if value:
+		practice_reached_lever = false
+		practice_opened_gate = false
+		practice_generated_power = false
+		practice_closed_gate = false
 		# Same movement, jumping and tap/close mechanics; no overflow or score.
 		water_level = 78.0
 		notice = "A/D로 레버에 접근 · W 점프 · Space 3번 열기 · E 닫기"
 		notice_remaining = 4.0
 	_update_visuals()
+
+func get_practice_progress() -> Dictionary:
+	var checks := [practice_reached_lever, practice_opened_gate, practice_generated_power, practice_closed_gate]
+	var step := 0
+	while step < checks.size() and checks[step]:
+		step += 1
+	var hints := ["A/D로 레버까지 이동해요", "레버 앞에서 Space를 3번 눌러요", "흐르는 물과 돌아가는 터빈을 확인해요", "같은 레버에서 E로 수문을 닫아요", "열기·발전·닫기 연습 완료!"]
+	return {"reached_lever": practice_reached_lever, "opened_gate": practice_opened_gate, "generated_power": practice_generated_power, "closed_gate": practice_closed_gate, "complete": step == 4, "step": step, "hint": hints[step]}
 
 func finalize_generation_score() -> void:
 	_flush_generation_score()
@@ -333,18 +353,32 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	VISUAL_STYLE.style_hero(hero)
 
 func _build_overlay() -> void:
+	var header_background := ColorRect.new()
+	header_background.anchor_right = 1.0
+	header_background.offset_bottom = 64.0
+	header_background.color = Color("092732ed")
+	header_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(header_background)
 	level_label = _overlay_label(Vector2(14, 7), Vector2(330, 36), "저수위 34%", Color("fff0b4"), HORIZONTAL_ALIGNMENT_LEFT, 20)
 	energy_label = _overlay_label(Vector2(600, 7), Vector2(945, 36), "누적 생산 0.0 kWh", Color("ffe381"), HORIZONTAL_ALIGNMENT_RIGHT, 20)
-	head_label = _overlay_label(Vector2(14, 38), Vector2(320, 67), "수면 → 터빈 낙차 39m", Color("aeebfa"), HORIZONTAL_ALIGNMENT_LEFT, 17)
-	output_label = _overlay_label(Vector2(610, 38), Vector2(945, 67), "현재 발전 0.0 MW", Color("9af5d0"), HORIZONTAL_ALIGNMENT_RIGHT, 18)
-	choice_label = _overlay_label(Vector2(245, 37), Vector2(735, 69), "레버 앞에서 수문을 열 수 있어요", Color("fff0b4"), HORIZONTAL_ALIGNMENT_CENTER, 17)
+	head_label = _overlay_label(Vector2(14, 36), Vector2(270, 62), "낙차 39m", Color("aeebfa"), HORIZONTAL_ALIGNMENT_LEFT, 17)
+	output_label = _overlay_label(Vector2(690, 36), Vector2(945, 62), "발전 0.0 MW", Color("9af5d0"), HORIZONTAL_ALIGNMENT_RIGHT, 18)
+	choice_label = _overlay_label(Vector2.ZERO, Vector2(240, 26), "", Color("fff0b4"), HORIZONTAL_ALIGNMENT_CENTER, 17)
+	choice_label.anchor_right = 0.0
+	choice_label.size = Vector2(240, 26)
+	choice_label.clip_text = true
 	warning_label = _overlay_label(Vector2(283, 7), Vector2(680, 35), "넘침까지 남은 시간", Color("ffca7e"), HORIZONTAL_ALIGNMENT_CENTER, 19)
-	forecast_label = _overlay_label(Vector2(170, 72), Vector2(790, 104), "", Color("eafaff"), HORIZONTAL_ALIGNMENT_CENTER, 20)
-	control_label = _overlay_label(Vector2(70, 213), Vector2(890, 242), "A/D 이동 · W 점프 · SPACE 연타로 열기 · E 닫기", Color("fff0b4"), HORIZONTAL_ALIGNMENT_CENTER, 16)
-	charge_label = _overlay_label(Vector2(14, 249), Vector2(330, 278), "레버에 접근하세요", Color("fff0b4"), HORIZONTAL_ALIGNMENT_LEFT, 17)
+	forecast_label = _overlay_label(Vector2(290, 36), Vector2(680, 62), "", Color("eafaff"), HORIZONTAL_ALIGNMENT_CENTER, 17)
+	control_label = _overlay_label(Vector2(20, 213), Vector2(940, 242), "A/D 이동 · W 점프 · Space 열기 · E 닫기", Color("fff0b4"), HORIZONTAL_ALIGNMENT_CENTER, 17)
+	control_label.anchor_top = 1.0
+	control_label.anchor_bottom = 1.0
+	control_label.offset_top = -32.0
+	control_label.offset_bottom = -5.0
+	charge_label = _overlay_label(Vector2.ZERO, Vector2(140, 20), "", Color("fff0b4"), HORIZONTAL_ALIGNMENT_CENTER, 14)
+	charge_label.anchor_right = 0.0
+	charge_label.size = Vector2(70, 20)
 	charge_bar = ProgressBar.new()
-	charge_bar.position = Vector2(330, 247)
-	charge_bar.size = Vector2(616, 26)
+	charge_bar.size = Vector2(140, 10)
 	charge_bar.max_value = 1.0
 	charge_bar.show_percentage = false
 	charge_normal_style = _bar_style(Color("52e4be"))
@@ -352,6 +386,9 @@ func _build_overlay() -> void:
 	charge_bar.add_theme_stylebox_override("background", _bar_style(Color("183645")))
 	charge_bar.add_theme_stylebox_override("fill", charge_normal_style)
 	add_child(charge_bar)
+	# The default theme initially expands ProgressBar to 24 px. Reapply the
+	# compact size after its custom styles are active so the tap count stays clear.
+	charge_bar.size = Vector2(140, 10)
 	flash = ColorRect.new()
 	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	flash.color = Color.TRANSPARENT
@@ -422,6 +459,8 @@ func _update_station() -> void:
 		selected_gate = next_gate
 		charge = 0.0
 		tap_age = 10.0
+	if practice_mode and selected_gate >= 0:
+		practice_reached_lever = true
 	_update_visuals()
 
 func _tap_selected_gate() -> void:
@@ -444,6 +483,8 @@ func _tap_selected_gate() -> void:
 
 func _open_selected_gate() -> void:
 	open_gate = selected_gate
+	if practice_mode:
+		practice_opened_gate = true
 	last_open_level = water_level
 	highest_open_level = water_level
 	last_open_generation = generated_kwh
@@ -462,6 +503,8 @@ func _close_open_gate(manual: bool) -> void:
 			notice_remaining = 1.2
 		return
 	var closed_gate := open_gate
+	if practice_mode and manual and practice_generated_power:
+		practice_closed_gate = true
 	if manual and generated_kwh > last_open_generation + 0.05 and water_level < highest_open_level - 3.0:
 		managed_closures += 1
 	open_gate = -1
@@ -483,6 +526,8 @@ func _advance_simulation(delta: float) -> void:
 	if open_gate >= 0:
 		highest_open_level = maxf(highest_open_level, water_level)
 	generated_kwh += gained_kwh
+	if practice_mode and gained_kwh > 0.0:
+		practice_generated_power = true
 	water_level += (inflow - flow * DRAIN_PER_FLOW) * delta
 	elapsed += delta
 	if open_gate >= 0 and water_level <= GATE_LEVELS[open_gate] + 1.0:
@@ -571,11 +616,11 @@ func _update_visuals() -> void:
 	power_line.visible = open_gate >= 0
 	level_label.text = "물 높이 %d%%  %s" % [roundi(water_level), "넘침 위험!" if water_level >= 86.0 else ("↓ 방류 중" if open_gate >= 0 else "↑ 물 모으기")]
 	level_label.add_theme_color_override("font_color", Color("ff8675") if water_level >= 86.0 else Color("fff0b4"))
-	energy_label.text = "누적 생산  %.1f kWh" % generated_kwh
-	head_label.text = "수면 → 터빈 낙차  %dm" % roundi(head_for_level(water_level))
-	output_label.text = "현재 발전  %.1f MW" % current_power
+	energy_label.text = "생산  %.1f kWh" % generated_kwh
+	head_label.text = "낙차  %dm" % roundi(head_for_level(water_level))
+	output_label.text = "발전  %.1f MW" % current_power
 	if selected_gate >= 0:
-		choice_label.text = "%s 레버 · %s" % [GATE_NAMES[selected_gate], "E로 닫고 물 모으기" if open_gate == selected_gate else "Space 3번으로 열기"]
+		choice_label.text = "%s · %s" % [GATE_NAMES[selected_gate], "E 닫기" if open_gate == selected_gate else "Space ×3 열기"]
 	else:
 		choice_label.text = "수문 레버까지 이동하세요 · 현재 층 %d" % (hero_floor_index + 1) if hero_floor_index >= 0 else "점프해서 위층 발판에 착지하세요"
 	var overflow_eta := projected_overflow_seconds(water_level, elapsed, rain_seed, open_gate)
@@ -585,13 +630,25 @@ func _update_visuals() -> void:
 	var next_change := RAIN_SEGMENT_SECONDS - fposmod(elapsed, RAIN_SEGMENT_SECONDS)
 	var next_inflow := inflow_for_time(elapsed + next_change + 0.01, rain_seed)
 	var save_water := open_gate >= 0 and current_inflow <= 3.0 and water_level < highest_open_level - 3.0
-	forecast_label.text = "비가 잦아들었어요! 열린 레버에서 E · 물을 다시 모아요" if save_water else ("%.1f초 뒤 %s! %s" % [next_change, _rain_name(next_inflow), "위쪽 수문도 준비해요" if next_inflow >= 25.0 else "낙차를 다시 모아요"] if elapsed + next_change < 30.0 else "마지막 물결 · 넘치기 전에 발전해요")
+	forecast_label.text = "소강 · E로 닫고 물 모으기" if save_water else ("%.1f초 뒤 %s" % [next_change, _rain_name(next_inflow)] if elapsed + next_change < 30.0 else "마지막 물결 · 넘침 주의")
 	forecast_label.add_theme_color_override("font_color", Color("ffe078") if save_water else (Color("ffad96") if next_inflow >= 25.0 and next_change < 3.0 else Color("eafaff")))
 	if practice_mode:
 		warning_label.text = "조작 연습 · 넘침 없음"
-		forecast_label.text = "수문 열기 → 물이 터빈으로 → 전기 생산 · E로 다시 닫기"
-	control_label.text = notice if notice_remaining > 0.0 else "A/D 이동 · W 점프 · 레버 앞 SPACE 연타로 열기 · E로 닫기"
-	charge_label.text = "%s 수문 개방  %d%%" % [GATE_NAMES[selected_gate], roundi(charge * 100.0)] if selected_gate >= 0 else "수문 레버로 이동"
+		forecast_label.text = "점수 없는 조작 연습"
+	control_label.text = "A/D 이동 · W 점프 · 레버 앞 Space ×3 · E 닫기" if practice_mode else (notice if notice_remaining > 0.0 else "A/D 이동 · W 점프 · 레버 앞 Space ×3 · E 닫기")
+	choice_label.visible = selected_gate >= 0
+	charge_bar.visible = selected_gate >= 0 and open_gate < 0
+	charge_label.visible = charge_bar.visible
+	if selected_gate >= 0:
+		var control_point := camera.unproject_position(Vector3(LEVER_X[selected_gate], GATE_Y[selected_gate] + 1.12, 1.2))
+		control_point.x = clampf(control_point.x, 20.0, maxf(20.0, size.x - 280.0))
+		control_point.y = clampf(control_point.y, 96.0, maxf(96.0, size.y - 95.0))
+		# Place the local callout beside, not above, the lever: the hero stands
+		# directly under the beacon and otherwise hides the tap count with its head.
+		choice_label.position = control_point + Vector2(30, 1)
+		charge_bar.position = control_point + Vector2(30, 29)
+		charge_label.position = control_point + Vector2(178, 23)
+	charge_label.text = "%d / 3번" % mini(3, roundi(charge / CHARGE_PER_TAP))
 	charge_bar.value = charge
 	charge_bar.add_theme_stylebox_override("fill", charge_danger_style if water_level >= 86.0 else charge_normal_style)
 
@@ -676,8 +733,10 @@ func _material(color: Color, glowing: bool) -> StandardMaterial3D:
 
 func _overlay_label(from: Vector2, to: Vector2, content: String, color: Color, alignment: HorizontalAlignment, font_size: int) -> Label:
 	var label := Label.new()
-	label.position = from
-	label.size = to - from
+	label.anchor_left = from.x / 960.0
+	label.anchor_right = to.x / 960.0
+	label.offset_top = from.y
+	label.offset_bottom = to.y
 	label.text = content
 	label.horizontal_alignment = alignment
 	label.add_theme_font_size_override("font_size", font_size)
