@@ -559,7 +559,7 @@ func _test_hud_initialization() -> void:
 	hud._refresh_open_market_recipe_popover()
 	for recipe_index in range(game_manager.CONSTRUCTION_PROJECTS.size()):
 		var recipe_effect = hud.open_market_recipe_grid.get_child(recipe_index).find_child("RecipeEffect", true, false)
-		_expect(recipe_effect != null and recipe_effect.text == "마을 친환경 지수 +%d" % int(game_manager.CONSTRUCTION_PROJECTS[recipe_index]["health"]), "시장 건설도감은 존재하지 않는 energy/eco 필드의 +0 대신 실제 시설 효과를 표시해야 합니다.")
+		_expect(recipe_effect != null and recipe_effect.text in hud.LEARNING_VILLAGE_UI.PROJECT_PURPOSES and not recipe_effect.text.contains("지수"), "건설 도감은 고정 지수 대신 발전·저장·절약 역할을 표시해야 합니다.")
 	_expect(hud.village_map != null, "왕국 완성도 화면에는 직접 시설을 놓을 수 있는 마을 지도가 있어야 합니다.")
 	_expect(hud.village_map.BUILDING_SIZE.x < 100.0 and hud.village_map.BUILDING_SIZE.y < 82.0, "지도에 배치되는 발전소 이미지는 기존보다 작아야 합니다.")
 	var placement_cell_total := 0
