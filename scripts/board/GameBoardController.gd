@@ -889,13 +889,20 @@ func _on_kingdom_progress_changed(projects_built: int, total_projects: int, heal
 		built_landmark_count += 1
 
 func _add_renewable_landmark(stage_index: int) -> void:
-	if renewable_landmarks == null:
+	if renewable_landmarks == null or stage_index < 0:
 		return
-	var positions := [Vector3(-9.5, 0.35, -4.7), Vector3(9.5, 0.35, -4.7), Vector3(-9.5, 0.35, 4.7), Vector3(9.5, 0.35, 4.7)]
+	var positions := [
+		Vector3(-9.5, 0.35, -4.7), Vector3(9.5, 0.35, -4.7),
+		Vector3(-9.5, 0.35, 4.7), Vector3(9.5, 0.35, 4.7),
+		Vector3(-9.5, 0.35, 0), Vector3(9.5, 0.35, 0),
+		Vector3(-4.7, 0.35, -9.5), Vector3(4.7, 0.35, -9.5),
+		Vector3(-4.7, 0.35, 9.5), Vector3(4.7, 0.35, 9.5)
+	]
+	var pad: Vector3 = positions[stage_index % positions.size()]
 	var landmark := MeshInstance3D.new()
 	var material := StandardMaterial3D.new()
 	var landmark_colors: Array[Color] = [Color("ffd84e"), Color("78d9f4"), Color("9ce77c"), Color("8ce8bf")]
-	material.albedo_color = landmark_colors[stage_index]
+	material.albedo_color = landmark_colors[stage_index % landmark_colors.size()]
 	material.emission_enabled = true
 	material.emission = material.albedo_color * 0.35
 	if stage_index == 1:
@@ -904,11 +911,11 @@ func _add_renewable_landmark(stage_index: int) -> void:
 		turbine.bottom_radius = 0.16
 		turbine.height = 2.2
 		landmark.mesh = turbine
-		landmark.position = positions[stage_index] + Vector3(0, 1.1, 0)
+		landmark.position = pad + Vector3(0, 1.1, 0)
 	else:
 		var building := BoxMesh.new()
-		building.size = Vector3(1.4, 1.2 + stage_index * 0.25, 1.4)
+		building.size = Vector3(1.4, 1.2 + (stage_index % 4) * 0.25, 1.4)
 		landmark.mesh = building
-		landmark.position = positions[stage_index] + Vector3(0, building.size.y * 0.5, 0)
+		landmark.position = pad + Vector3(0, building.size.y * 0.5, 0)
 	landmark.material_override = material
 	renewable_landmarks.add_child(landmark)

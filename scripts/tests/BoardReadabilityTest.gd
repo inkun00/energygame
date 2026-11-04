@@ -113,6 +113,18 @@ func _run() -> void:
 		var center := BoardGrid.get_tile_position_3d(index)
 		_check(not board.camera3d.is_position_behind(center) and bounds.has_point(board.camera3d.unproject_position(center)), "Overview contains tile %d" % index)
 	await _capture("overview")
+	# Construction can now supply enough useful parts for every facility. Each
+	# completion must have a valid decoration, including facilities five to ten.
+	for count in range(1, gm.CONSTRUCTION_PROJECTS.size() + 1):
+		board._on_kingdom_progress_changed(count, gm.CONSTRUCTION_PROJECTS.size(), mini(100, count * 25))
+		_check(board.renewable_landmarks.get_child_count() == count, "Every completed facility gets one landmark: %d" % count)
+	var landmark_positions: Dictionary = {}
+	for landmark in board.renewable_landmarks.get_children():
+		_check(landmark.mesh != null and landmark.material_override != null, "All ten landmarks have geometry and material")
+		landmark_positions[Vector2(landmark.position.x, landmark.position.z)] = true
+	_check(landmark_positions.size() == gm.CONSTRUCTION_PROJECTS.size(), "All ten landmarks occupy separate perimeter pads")
+	board._on_kingdom_progress_changed(10, 10, 100)
+	_check(board.renewable_landmarks.get_child_count() == 10, "Repeated progress cannot duplicate landmarks")
 	gm.stop_game()
 	main.queue_free()
 	await process_frame
