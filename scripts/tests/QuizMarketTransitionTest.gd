@@ -42,8 +42,8 @@ func _run() -> void:
 			quiz._show_result(true)
 			check(completions.size() == 1 and gm.players[0]["energy"] == before_energy + 2, "Answer is submitted exactly once before local explanation reading")
 			check(quiz.result_visible and quiz.next_button.visible, "Resolved answer should offer a readable explanation and local next button")
-		gm._start_open_market_phase()
-		check(hud.open_market_panel.visible, scenario + ": market should open")
+		gm._start_team_planning_phase()
+		check(hud.learning_village_ui.visible and hud.learning_village_ui.screen == "plan", scenario + ": shared planning should open")
 		check(not quiz.visible and not quiz.is_active and not quiz.spectator_mode, scenario + ": quiz and timers must stop immediately")
 		quiz.display_quiz(1, data)
 		check(not quiz.visible, scenario + ": late quiz event must not reopen modal")
@@ -51,10 +51,10 @@ func _run() -> void:
 		var completion_count := completions.size()
 		await create_timer(quiz.result_reading_seconds(data) + 0.2).timeout
 		check(completions.size() == completion_count and gm.players[0]["energy"] == energy, scenario + ": closing old explanation must not resubmit or grant additional rewards")
-		check(hud.open_market_panel.visible and not quiz.visible, scenario + ": market stays accessible after old callbacks")
+		check(hud.learning_village_ui.visible and hud.learning_village_ui.screen == "plan" and not quiz.visible, scenario + ": planning stays accessible after old callbacks")
 		gm.stop_game()
 	main.queue_free()
 	await process_frame
-	if failures.is_empty(): print("[PASS] Quiz to market: own answer, spectator wait, pending result, late events")
+	if failures.is_empty(): print("[PASS] Quiz to shared planning: own answer, spectator wait, pending result, late events")
 	for failure in failures: push_error(failure)
 	quit(0 if failures.is_empty() else 1)

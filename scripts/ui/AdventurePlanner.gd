@@ -1,7 +1,7 @@
 extends Control
 signal goal_selected(project_index: int)
 
-## Local presentation only: choosing a goal never consumes or reserves materials.
+## Choosing a goal recommends a shared project; it never reserves materials.
 const UI = preload("res://scripts/ui/CommercialUI.gd")
 var inventory_labels: Dictionary = {}
 var recipe_cards: Array[PanelContainer] = []
@@ -53,6 +53,10 @@ func _ready() -> void:
 		if state.get("active", false): end_exploration())
 	GameManager.village_construction_started.connect(func(_data: Array): end_exploration())
 	GameManager.game_over.connect(func(_rankings: Array): end_exploration())
+	GameManager.team_plan_changed.connect(func(state: Dictionary):
+		selected_goal = int(state.get("choices", {}).get(local_index, selected_goal))
+		if bool(state.get("active", false)): end_exploration()
+		refresh(inventory))
 
 func _label(text_value: String, font_size: int = 20, color: Color = UI.TEXT) -> Label:
 	var label := Label.new()
@@ -275,6 +279,7 @@ func close_top_overlay() -> bool:
 func select_goal(index: int) -> void:
 	if index < 0 or index >= GameManager.CONSTRUCTION_PROJECTS.size(): return
 	selected_goal = index
+	GameManager.select_team_project(local_index, index)
 	record_step("goal", local_index)
 	refresh(inventory)
 	close_catalog()
@@ -415,8 +420,8 @@ func _refresh_tutorial() -> void:
 	if exploration_active and GameManager.adventure_waiting_for_start:
 		tutorial.position = Vector2(340, 170)
 		tutorial.custom_minimum_size.x = 600
-		tutorial_body.custom_minimum_size = Vector2(568, 192)
-		tutorial_body.text = "내 차례에는 주사위를 굴려 재료를 모아요.\n퀴즈를 맞히면 에너지와 특수기술 SP를 받아요.\n미니게임에서는 모두 동시에 도전하고 보너스를 받아요.\n탐험 뒤에는 재료를 나눠 마을에 시설을 지어요.\n\n안내를 보는 동안 탐험 시간은 줄어들지 않아요."
+		tutorial_body.custom_minimum_size = Vector2(568, 160)
+		tutorial_body.text = "주사위를 굴려 재료를 모아요.\n퀴즈를 맞히면 필요한 부품을 골라요.\n미니게임에서는 모두 함께 보너스에 도전해요.\n모은 재료로 시설을 짓고, 낮과 밤에 전기를 보내요."
 		var state := GameManager.get_adventure_preparation_state()
 		tutorial_title.text = "모험 시작 전  ·  준비 %d / %d명" % [state["ready_count"], state["player_count"]]
 		tutorial_button.disabled = GameManager.adventure_ready_players.has(local_index)

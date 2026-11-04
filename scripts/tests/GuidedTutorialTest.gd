@@ -31,6 +31,9 @@ func _press_key(key: Key) -> void:
 	await process_frame
 
 func _run() -> void:
+	create_timer(90.0).timeout.connect(func():
+		push_error("Guided tutorial watchdog expired")
+		quit(1))
 	var gm: Node = root.get_node("GameManager")
 	var main: Node = load("res://scenes/Main.tscn").instantiate()
 	root.add_child(main)
@@ -90,9 +93,15 @@ func _run() -> void:
 	_check(quiz.result_visible, "Answer is graded immediately")
 	quiz._process(100.0)
 	_check(quiz.result_visible, "Practice explanation waits for learner acknowledgement")
+	await create_timer(13.2).timeout
+	_check(quiz.result_visible and tutorial.stage == "quiz" and str(gm.component_choices.get(0, {}).get("phase", "")) == "waiting", "Real elapsed review time cannot bypass the tutorial Next action")
 	await _capture("explanation")
 	quiz.next_button.pressed.emit()
-	_check(tutorial.stage == "mini_intro", "Reading acknowledgement unlocks the arcade")
+	_check(tutorial.stage == "component", "Reading acknowledgement unlocks a needed-component choice")
+	var learning: Node = board.hud.learning_village_ui
+	_check(learning.screen == "component" and learning.option_buttons.size() == 3, "Quiz choice shows exactly three component cards")
+	await _press_key(KEY_1)
+	_check(tutorial.stage == "mini_intro" and gm.component_choices.is_empty(), "Keyboard component choice unlocks the arcade without duplicate pending reward")
 	tutorial.action_button.pressed.emit()
 	var mini: Node = board.minigame_modal
 	mini.set_process(false)
@@ -113,9 +122,12 @@ func _run() -> void:
 	_check(tutorial.stage == "reward" and tutorial.last_results.size() == 4, "Actual score submission produces all four practice results")
 	gm._complete_minigame_turn(gm.minigame_round_count)
 	tutorial.action_button.pressed.emit()
+	_check(tutorial.stage == "plan" and learning.screen == "plan", "Reward acknowledgement opens shared facility recommendations")
+	learning.plan_ready_button.pressed.emit()
+	gm._update_team_plan(0.1)
 	await process_frame
-	_check(tutorial.stage == "build" and gm.village_construction_active, "Reward acknowledgement opens actual building phase")
-	_check(board.hud.construction_list.get_child_count() == 1, "Practice exposes the chosen facility with supplied materials")
+	_check(tutorial.stage == "build" and gm.village_construction_active, "Shared recommendations lead into actual building phase")
+	_check(board.hud.construction_list.get_child_count() == 2, "Practice exposes solar generation and storage as separate facilities")
 	await _press_key(KEY_ENTER)
 	var map: Node = board.hud.village_map
 	_check(not map.selected_project_payload.is_empty(), "Clicking a building card reveals valid placement pads")
@@ -131,9 +143,23 @@ func _run() -> void:
 	place.keycode = KEY_ENTER
 	place.pressed = true
 	map._gui_input(place)
-	_check(gm.projects_built == 1 and tutorial.stage == "complete", "Keyboard placement builds one facility and completes practice")
-	await _capture("complete")
+	_check(gm.projects_built == 1 and tutorial.stage == "build", "Keyboard placement constructs solar generation but does not skip storage")
+	board.hud._select_construction_project(3, 0)
+	map._preview_keyboard_cell()
+	map._gui_input(place)
+	_check(gm.projects_built == 2 and tutorial.stage == "trial_intro", "Placing storage unlocks the day/night trial")
 	tutorial.action_button.pressed.emit()
+	await create_timer(1.8).timeout
+	_check(tutorial.stage == "trial" and learning.screen == "trial", "Actual construction finish starts the energy trial")
+	await _press_key(KEY_1)
+	gm._update_energy_trial(20.0)
+	_check(gm.energy_trial["phase"] == "night" and float(gm.energy_trial["players"][0]["battery"]) > 0.0, "Day storage charges a real battery before night")
+	await _press_key(KEY_2)
+	gm._update_energy_trial(20.0)
+	_check(tutorial.stage == "complete" and gm.energy_trial["phase"] == "complete", "Night supply completes the full learning sequence")
+	_check(float(gm.energy_trial["players"][0]["night_coverage"]) > 0.99, "The learner's stored electricity supplies the night")
+	await _capture("complete")
+	learning.trial_confirm_button.pressed.emit()
 	_check(not tutorial.active and not gm.guided_tutorial_active and gm.projects_built == 0 and gm.completed_minigame_ids.is_empty(), "New adventure clears practice buildings, minigame completion and flags")
 	_check(gm.adventure_waiting_for_start and gm.players[0]["energy"] == 5, "Normal adventure starts fresh with ordinary preparation and starting energy")
 	main.switch_to_lobby()
@@ -148,5 +174,5 @@ func _run() -> void:
 	await create_timer(0.1).timeout
 	await process_frame
 	if failures.is_empty():
-		print("[PASS] Guided tutorial: real actions, unlimited reading, four-player ranks, click/keyboard construction, clean exit and restart")
+		print("[PASS] Guided tutorial: seven real-action stages, timed-review isolation, component choice, shared planning, two facilities, day/night storage, clean restart")
 	quit(0 if failures.is_empty() else 1)

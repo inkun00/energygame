@@ -331,7 +331,7 @@ text = "캡틴 에코"
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 1.0, 0.82, 1)
 theme_override_font_sizes/font_size = 16
-text = "자연의 힘으로 도시를 회복하는 밸런스형 히어로"
+text = "자연의 길을 여는 탐험대 대장"
 autowrap_mode = 2
 
 [node name="SkillSeparator" type="HSeparator" parent="HeroBadge/Margin/VBox"]
@@ -576,7 +576,7 @@ theme_override_colors/font_color = Color(0.72, 0.95, 0.60, 1)
 theme_override_colors/font_outline_color = Color(0.02, 0.05, 0.02, 1)
 theme_override_constants/outline_size = 3
 theme_override_font_sizes/font_size = 16
-text = "혼자 시작해도 AI 동료가 빈 자리를 채워 4인 파티로 출발합니다."
+text = "나와 AI 동료 3명이 함께 출발해요."
 horizontal_alignment = 1
 vertical_alignment = 1
 autowrap_mode = 2
@@ -627,7 +627,7 @@ theme_override_colors/font_color = Color(1, 0.9, 0.36, 1)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 8
 theme_override_font_sizes/font_size = 38
-text = "ENERGY FAIRY KINGDOM  •  위기의 시작"
+text = "요정마을의 에너지 위기"
 horizontal_alignment = 1
 mouse_filter = 2
 
@@ -663,7 +663,7 @@ theme_override_colors/font_color = Color(1, 0.92, 0.62, 1)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.9)
 theme_override_constants/outline_size = 4
 theme_override_font_sizes/font_size = 18
-text = "STORY  1 / 4  •  클릭하여 다음"
+text = "이야기  1 / 4"
 horizontal_alignment = 1
 mouse_filter = 2
 

@@ -37,11 +37,11 @@ const SHORTCUT_MOVE_SECONDS := 2.028 * MOVEMENT_DURATION_SCALE
 # 타일별 속성 및 이벤트 메타데이터
 static var TILE_DATA: Array[Dictionary] = [
 	{"index": 0, "name": "위기의 왕국 관문", "type": TileType.START, "desc": "화석연료 의존으로 위기에 빠진 에너지요정 나라를 복원하세요!"},
-	{"index": 1, "name": "재생에너지 설계소", "type": TileType.CHANCE_CARD, "desc": "발전소 설계 도면과 건설 자재를 확보합니다!"},
-	{"index": 2, "name": "태양광 발전소 안전 코스", "type": TileType.MINIGAME, "minigame_id": "solar_align", "desc": "햇빛 방향을 읽고 발전 설비와 자연 지형물을 피해 달립니다."},
+	{"index": 1, "name": "재생에너지 설계소", "type": TileType.CHANCE_CARD, "desc": "건설 부품 1개를 얻어요."},
+	{"index": 2, "name": "태양광 발전소 안전 코스", "type": TileType.MINIGAME, "minigame_id": "solar_align", "desc": "햇빛을 받는 패널을 골라 달리고, 장애물을 피해요."},
 	{"index": 3, "name": "스마트 플러그 사다리", "type": TileType.LADDER, "target": 16, "desc": "대기전력 차단 성공! 바로 위 16번 칸으로 사다리를 탑니다!"},
-	{"index": 4, "name": "열에너지 퀴즈", "type": TileType.QUIZ_CHOSUNG, "desc": "분자의 무작위 운동 에너지"},
-	{"index": 5, "name": "운동에너지 퀴즈", "type": TileType.QUIZ_OX, "desc": "운동하는 물체가 가진 힘"},
+	{"index": 4, "name": "열에너지 퀴즈", "type": TileType.QUIZ_CHOSUNG, "desc": "온도가 다른 물체 사이의 열 이동"},
+	{"index": 5, "name": "운동에너지 퀴즈", "type": TileType.QUIZ_OX, "desc": "움직이는 물체가 가진 에너지"},
 	{"index": 6, "name": "풍력 발전단지", "type": TileType.POWERPLANT, "reward_energy": 2, "desc": "거대한 바람개비의 힘! 에너지 2개 획득"},
 	{"index": 7, "name": "절전 지름길 사다리", "type": TileType.LADDER, "target": 12, "desc": "에너지 절약에 성공해 바로 위 12번 칸으로 사다리를 탑니다!"},
 	{"index": 8, "name": "전기에너지 퀴즈", "type": TileType.QUIZ_OX, "desc": "전하의 움직임"},
@@ -49,24 +49,24 @@ static var TILE_DATA: Array[Dictionary] = [
 	{"index": 10, "name": "소리에너지 퀴즈", "type": TileType.QUIZ_CHOICE, "desc": "물체의 진동과 파동"},
 	{"index": 11, "name": "대기전력 절약 객관식", "type": TileType.QUIZ_OX, "desc": "사용하지 않는 전자기기의 대기전력을 줄이는 방법을 확인합니다."},
 	{"index": 12, "name": "태양광 발전 사다리", "type": TileType.LADDER, "target": 27, "desc": "햇빛을 전기로 바로 전환! 바로 위 27번 칸으로 사다리를 탑니다!"},
-	{"index": 13, "name": "화학에너지 퀴즈", "type": TileType.QUIZ_CHOSUNG, "desc": "화학 결합 속 포텐셜에너지"},
+	{"index": 13, "name": "화학에너지 퀴즈", "type": TileType.QUIZ_CHOSUNG, "desc": "음식과 연료에 저장된 에너지"},
 	{"index": 14, "name": "롤러코스터 환승역", "type": TileType.POWERPLANT, "reward_energy": 2, "desc": "위치 ⇄ 운동 에너지 상호 변환! 에너지 2개 획득"},
 	{"index": 15, "name": "빈 방 전등 미끄럼틀", "type": TileType.SLIDE, "target": 4, "desc": "빈 방에 불을 켜두어 전기가 낭비되었습니다! 바로 아래 4번 칸으로 미끄러집니다!"},
 	{"index": 16, "name": "풍력 터빈 조종소", "type": TileType.MINIGAME, "minigame_id": "wind_rhythm", "desc": "터빈을 풍향에 맞추고 위험 돌풍에서 안전 정지합니다."},
 	{"index": 17, "name": "전자기 퀴즈", "type": TileType.QUIZ_CHOSUNG, "desc": "전자기장과 전하의 흐름"},
 	{"index": 18, "name": "대기전력 낭비 미끄럼틀", "type": TileType.SLIDE, "target": 1, "desc": "대기전력 낭비가 쌓였습니다! 바로 아래 1번 칸으로 미끄러집니다!"},
-	{"index": 19, "name": "태양광 패널 지대", "type": TileType.POWERPLANT, "reward_energy": 3, "desc": "무한한 햇빛 에너지! 에너지 3개 획득"},
+	{"index": 19, "name": "태양광 패널 지대", "type": TileType.POWERPLANT, "reward_energy": 3, "desc": "햇빛으로 전기 생산! 에너지 3개 획득"},
 	{"index": 20, "name": "과도한 냉방 미끄럼틀", "type": TileType.SLIDE, "target": 19, "desc": "에어컨을 과도하게 사용했습니다! 바로 아래 19번 칸으로 미끄러집니다!"},
-	{"index": 21, "name": "신재생에너지 퀴즈", "type": TileType.QUIZ_CHOICE, "desc": "그린수소와 지속 가능한 미래"},
+	{"index": 21, "name": "신재생에너지 퀴즈", "type": TileType.QUIZ_CHOICE, "desc": "햇빛·바람·물로 전기 만들기"},
 	{"index": 22, "name": "수소연료전지 기지", "type": TileType.POWERPLANT, "reward_energy": 4, "desc": "연료전지는 수소로 전기를 만듭니다. 수소를 만드는 방법도 중요해요. 에너지 4개 획득"},
-	{"index": 23, "name": "그린수소 연구 퀴즈", "type": TileType.QUIZ_CHOICE, "desc": "탄소를 배출하지 않는 청정 수소 생산 방법을 확인합니다."},
+	{"index": 23, "name": "그린수소 연구 퀴즈", "type": TileType.QUIZ_CHOICE, "desc": "재생에너지 전기로 수소 만드는 방법"},
 	{"index": 24, "name": "그린 시티 관문", "type": TileType.CHANCE_CARD, "desc": "후반 모험을 위한 보너스 건설재료를 1개 획득!"},
 	{"index": 25, "name": "고효율 조명 사다리", "type": TileType.LADDER, "target": 34, "desc": "LED 조명으로 교체 성공! 바로 위 34번 칸으로 사다리를 탑니다!"},
 	{"index": 26, "name": "태양에너지 객관식", "type": TileType.QUIZ_OX, "desc": "태양에너지의 원리를 확인합니다."},
 	{"index": 27, "name": "해상 풍력 발전소", "type": TileType.POWERPLANT, "reward_energy": 3, "desc": "바다의 강한 바람! 에너지 3개 획득"},
 	{"index": 28, "name": "단열 리모델링 사다리", "type": TileType.LADDER, "target": 31, "desc": "열손실 차단 성공! 바로 위 31번 칸으로 사다리를 탑니다!"},
 	{"index": 29, "name": "스마트그리드 시티 관제실", "type": TileType.MINIGAME, "minigame_id": "grid_balance", "desc": "도시 활동에 따라 달라지는 수요와 공급을 실시간으로 맞춥니다."},
-	{"index": 30, "name": "물 낭비 미끄럼틀", "type": TileType.SLIDE, "target": 29, "desc": "수도꼭을 잠그지 않았습니다! 바로 아래 29번 칸으로 미끄러집니다!"},
+	{"index": 30, "name": "물 낭비 미끄럼틀", "type": TileType.SLIDE, "target": 29, "desc": "수도꼭지를 잠그지 않았습니다! 바로 아래 29번 칸으로 미끄러집니다!"},
 	{"index": 31, "name": "순환 자원 객관식 퀴즈", "type": TileType.QUIZ_CHOICE, "desc": "순환경제와 자원 재활용 문제"},
 	{"index": 32, "name": "지열 에너지 기지", "type": TileType.POWERPLANT, "reward_energy": 4, "desc": "땅속의 열을 활용! 에너지 4개 획득"},
 	{"index": 33, "name": "그린 재료 보너스", "type": TileType.CHANCE_CARD, "desc": "친환경 시설용 보너스 건설재료를 1개 획득!"},
@@ -85,7 +85,7 @@ static var TILE_DATA: Array[Dictionary] = [
 	{"index": 46, "name": "그린수소 메가 플랜트", "type": TileType.POWERPLANT, "reward_energy": 5, "desc": "청정 수소 생산! 에너지 5개 획득"},
 	{"index": 47, "name": "해양 에너지 연구소", "type": TileType.POWERPLANT, "reward_energy": 5, "desc": "파도와 조류의 힘을 연구해 에너지 5개 획득"},
 	{"index": 48, "name": "최종 에코 보너스", "type": TileType.CHANCE_CARD, "desc": "결승선을 위한 마지막 건설재료를 1개 획득!"},
-	{"index": 49, "name": "에코 생활 보너스", "type": TileType.CHANCE_CARD, "desc": "후반 여정을 위한 친환경 전략 기회를 얻습니다!"}
+	{"index": 49, "name": "에코 생활 보너스", "type": TileType.CHANCE_CARD, "desc": "건설 부품 1개를 얻어요."}
 ]
 
 # 기존 50칸의 학습 흐름을 보존하면서 후반 50칸을 생성해 총 100칸을 구성합니다.
@@ -99,7 +99,7 @@ static func _initialize_tile_data() -> bool:
 		"index": LAST_TILE_INDEX,
 		"name": "왕국 중앙 공사 현장",
 		"type": TileType.FINISH,
-		"desc": "마지막 자재를 전달해 에너지요정 왕국의 친환경 전환을 완성하세요!"
+		"desc": "모은 부품으로 마을에 필요한 시설을 지어요."
 	})
 	return TILE_DATA.size() == TILE_COUNT
 
@@ -120,7 +120,7 @@ static func _make_extended_tile_data(tile_index: int) -> Dictionary:
 		76:
 			return {"index": tile_index, "name": "배터리 에너지 왕복", "type": TileType.MINIGAME, "minigame_id": "battery_relay", "desc": "남는 태양광 전기를 저장하고 흐릴 때 도시로 옮깁니다."}
 		80:
-			return {"index": tile_index, "name": "스마트그리드 보너스", "type": TileType.CHANCE_CARD, "desc": "전기를 똑똑하게 나누는 친환경 전략 기회를 얻습니다!"}
+			return {"index": tile_index, "name": "스마트그리드 보너스", "type": TileType.CHANCE_CARD, "desc": "건설 부품 1개를 얻어요."}
 		84:
 			return {"index": tile_index, "name": "계곡 소수력 발전소", "type": TileType.POWERPLANT, "reward_energy": 5, "desc": "계곡물의 흐름으로 에너지 5개 획득"}
 		88:
@@ -130,7 +130,7 @@ static func _make_extended_tile_data(tile_index: int) -> Dictionary:
 		94:
 			return {"index": tile_index, "name": "여름 냉방 창문 대시", "type": TileType.MINIGAME, "minigame_id": "heat_leak", "desc": "에어컨을 켠 교실의 열린 창문을 닫아 냉방 에너지 낭비를 줄입니다."}
 		96:
-			return {"index": tile_index, "name": "왕국 복원 보너스", "type": TileType.CHANCE_CARD, "desc": "완주를 앞두고 마지막 친환경 전략 기회를 얻습니다!"}
+			return {"index": tile_index, "name": "왕국 복원 보너스", "type": TileType.CHANCE_CARD, "desc": "건설 부품 1개를 얻어요."}
 		98:
 			return {"index": tile_index, "name": "초대형 에너지 저장소", "type": TileType.POWERPLANT, "reward_energy": 6, "desc": "남는 청정에너지를 저장해 에너지 6개 획득"}
 

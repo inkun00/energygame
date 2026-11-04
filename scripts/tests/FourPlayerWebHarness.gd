@@ -68,11 +68,13 @@ func _execute(command: Dictionary) -> void:
 		"host_leave":
 			main.switch_to_lobby()
 
-func _button(control: Control) -> Dictionary:
+func _button(control: Variant) -> Dictionary:
 	if not is_instance_valid(control) or not control.is_visible_in_tree():
 		return {}
-	var rect := control.get_global_rect()
-	return {"x": rect.get_center().x, "y": rect.get_center().y, "disabled": control.disabled if control is BaseButton else false, "text": control.text if control is Button else ""}
+	var rect: Rect2 = control.get_global_rect()
+	var label: String = control.text if control is Button else ""
+	if label.is_empty(): label = str(control.tooltip_text).get_slice("\n", 0)
+	return {"x": rect.get_center().x, "y": rect.get_center().y, "disabled": control.disabled if control is BaseButton else false, "text": label}
 
 func _publish() -> void:
 	if not is_instance_valid(main):
@@ -81,6 +83,7 @@ func _publish() -> void:
 	var hud: Node = board.hud
 	var mini: Node = board.minigame_modal
 	var quiz: Node = board.quiz_modal
+	var learning: Node = hud.learning_village_ui
 	var buttons := {
 		"start": _button(main.lobby_ui._room_start_button),
 		"ready": _button(hud.adventure_planner.tutorial_button),
@@ -88,10 +91,18 @@ func _publish() -> void:
 		"mini_ready": _button(mini.guide_start_button),
 		"practice": _button(mini.guide_practice_button),
 		"market_confirm": _button(hud.open_market_confirm_button),
+		"plan_confirm": _button(learning.plan_ready_button),
+		"trial_confirm": _button(learning.trial_confirm_button),
+		"trial_retry": _button(learning.trial_retry_button),
 		"finish": _button(hud.evaluate_button),
 		"return": _button(hud.lobby_return_button),
 		"quiz_next": _button(quiz.next_button)
 	}
+	var component_buttons: Array = []
+	for button in learning.option_buttons:
+		component_buttons.append(_button(button))
+	for mode in learning.mode_buttons:
+		buttons["trial_" + str(mode)] = _button(learning.mode_buttons[mode])
 	var recovery_buttons: Array = main.recovery_overlay.find_children("*", "Button", true, false)
 	buttons["recovery_leave"] = _button(recovery_buttons[0]) if not recovery_buttons.is_empty() and main.recovery_overlay.visible else {}
 	if str(GameManager.active_minigame.get("phase", "")) == "playing":
@@ -127,6 +138,8 @@ func _publish() -> void:
 		"local_claim": last_local_claim,
 		"results": last_results, "completed": GameManager.completed_minigame_ids,
 		"market": GameManager.get_open_market_state(), "construction": GameManager.village_construction_active,
+		"component": GameManager.get_component_choice_state(), "component_buttons": component_buttons,
+		"plan": GameManager.get_team_plan_state(), "trial": GameManager.get_energy_trial_state(),
 		"built": GameManager.built_project_ids, "placements": GameManager.built_project_placements,
 		"endings": endings, "ending_visible": is_instance_valid(hud.ending_cinematic)
 	}

@@ -9,6 +9,9 @@ var stats := {
 	"dice_rolls": 0,
 	"moves": 0,
 	"quizzes": 0,
+	"planning": false,
+	"electricity_trial": false,
+	"trial_complete": false,
 	"game_over": false,
 	"ranking_count": 0
 }
@@ -29,6 +32,11 @@ func _run_simulation() -> void:
 	game_manager.dice_rolled.connect(func(_idx: int, _value: int): stats["dice_rolls"] += 1)
 	game_manager.player_moved.connect(func(_idx: int, _from: int, _to: int): stats["moves"] += 1)
 	game_manager.quiz_requested.connect(func(_idx: int, _quiz: Dictionary): stats["quizzes"] += 1)
+	game_manager.team_plan_changed.connect(func(state: Dictionary):
+		if bool(state.get("active", false)): stats["planning"] = true)
+	game_manager.energy_trial_changed.connect(func(state: Dictionary):
+		if str(state.get("phase", "")) == "day": stats["electricity_trial"] = true
+		if str(state.get("phase", "")) == "complete": stats["trial_complete"] = true)
 	game_manager.game_over.connect(func(rankings: Array):
 		stats["game_over"] = true
 		stats["ranking_count"] = rankings.size()
@@ -50,6 +58,7 @@ func _run_simulation() -> void:
 	_expect(stats["dice_rolls"] > 0, "시뮬레이션에서 주사위가 한 번도 굴려지지 않았습니다.")
 	_expect(stats["moves"] > 0, "시뮬레이션에서 플레이어 이동이 발생하지 않았습니다.")
 	_expect(stats["quizzes"] > 0, "시뮬레이션에서 퀴즈 이벤트가 한 번도 발생하지 않았습니다.")
+	_expect(stats["planning"] and stats["electricity_trial"] and stats["trial_complete"], "AI도 공동 계획과 실제 낮밤 전기 시험을 마친 뒤 결과로 넘어가야 합니다.")
 
 	Engine.time_scale = 1.0
 	main.switch_to_lobby()

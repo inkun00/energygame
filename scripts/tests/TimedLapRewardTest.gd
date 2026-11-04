@@ -57,9 +57,14 @@ func _run() -> void:
 
 	game_manager.game_time_remaining = 0.01
 	game_manager._process(0.02)
-	_expect(game_manager.open_market_active and not game_manager.is_game_active, "설정 시간이 끝나면 보드 탐험을 멈추고 오픈마켓 단계로 전환해야 합니다.")
-	game_manager._finish_open_market_phase()
-	_expect(game_manager.village_construction_active, "오픈마켓이 끝나면 마을 건설 단계로 전환해야 합니다.")
+	_expect(game_manager.team_plan["active"] and not game_manager.open_market_active and not game_manager.is_game_active, "설정 시간이 끝나면 보드 탐험을 멈추고 공동 시설 계획으로 전환해야 합니다.")
+	for player_idx in range(4):
+		game_manager.confirm_team_plan(player_idx)
+	_expect(game_manager.village_construction_active, "모두 계획을 확인하면 마을 건설 단계로 전환해야 합니다.")
+	await process_frame
+	game_manager.stop_game()
+	main.queue_free()
+	await process_frame
 
 	if failures.is_empty():
 		print("[PASS] Timed multi-lap rewards and room duration")

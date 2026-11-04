@@ -37,15 +37,15 @@ const UI = preload("res://scripts/ui/CommercialUI.gd")
 @onready var opening_skip_button: Button = $OpeningStoryOverlay/SkipButton
 
 var characters: Array[Dictionary] = [
-	{"name": "캡틴 에코", "icon": "res://assets/characters/eco_roster/captain_eco.webp", "color": Color(0.28, 0.90, 0.34), "role": "자연의 힘으로 도시를 회복하는 밸런스형 히어로"},
-	{"name": "물방울 정령 포포", "icon": "res://assets/characters/eco_roster/water_popo.webp", "color": Color(0.20, 0.72, 0.96), "role": "깨끗한 물의 힘으로 오염을 씻어 내는 회복형 히어로"},
-	{"name": "에코 베어 퐁이", "icon": "res://assets/characters/eco_roster/bear_pongi.webp", "color": Color(0.30, 0.92, 0.82), "role": "필요한 부품을 찾아 마을 건설을 돕는 자원 수집형 히어로"},
-	{"name": "태양 여우 솔", "icon": "res://assets/characters/eco_roster/solar_fox_sol.webp", "color": Color(1.00, 0.58, 0.12), "role": "태양광 장비로 에너지를 충전하는 기술형 히어로"},
-	{"name": "바람 토끼 보리", "icon": "res://assets/characters/eco_roster/wind_rabbit_bori.webp", "color": Color(0.22, 0.82, 0.92), "role": "바람보다 빠르게 길을 개척하는 기동형 히어로"},
-	{"name": "재활용 너구리 링고", "icon": "res://assets/characters/eco_roster/recycle_raccoon_ringo.webp", "color": Color(0.36, 0.82, 0.28), "role": "버려진 자원을 멋진 도구로 바꾸는 발명형 히어로"},
-	{"name": "대지 거북 토리", "icon": "res://assets/characters/eco_roster/earth_turtle_tori.webp", "color": Color(0.60, 0.72, 0.20), "role": "대지의 방패로 위험을 막아 내는 수호형 히어로"},
-	{"name": "번개새 피카", "icon": "res://assets/characters/eco_roster/lightning_bird_pika.webp", "color": Color(1.00, 0.82, 0.10), "role": "깨끗한 전기를 다루는 초고속 정찰형 히어로"},
-	{"name": "버섯 고양이 모모", "icon": "res://assets/characters/eco_roster/mushroom_cat_momo.webp", "color": Color(0.96, 0.30, 0.22), "role": "숲의 생명 에너지를 연구하는 연금술형 히어로"}
+	{"name": "캡틴 에코", "icon": "res://assets/characters/eco_roster/captain_eco.webp", "color": Color(0.28, 0.90, 0.34), "role": "자연의 길을 여는 탐험대 대장"},
+	{"name": "물방울 정령 포포", "icon": "res://assets/characters/eco_roster/water_popo.webp", "color": Color(0.20, 0.72, 0.96), "role": "물의 힘으로 자신을 지키는 요정"},
+	{"name": "에코 베어 퐁이", "icon": "res://assets/characters/eco_roster/bear_pongi.webp", "color": Color(0.30, 0.92, 0.82), "role": "마을에 쓸 부품을 모으는 곰"},
+	{"name": "태양 여우 솔", "icon": "res://assets/characters/eco_roster/solar_fox_sol.webp", "color": Color(1.00, 0.58, 0.12), "role": "태양빛으로 에너지를 모으는 여우"},
+	{"name": "바람 토끼 보리", "icon": "res://assets/characters/eco_roster/wind_rabbit_bori.webp", "color": Color(0.22, 0.82, 0.92), "role": "바람길을 타고 멀리 달리는 토끼"},
+	{"name": "재활용 너구리 링고", "icon": "res://assets/characters/eco_roster/recycle_raccoon_ringo.webp", "color": Color(0.36, 0.82, 0.28), "role": "버려진 부품을 찾아 다시 쓰는 너구리"},
+	{"name": "대지 거북 토리", "icon": "res://assets/characters/eco_roster/earth_turtle_tori.webp", "color": Color(0.60, 0.72, 0.20), "role": "대지의 방패로 위험을 막는 거북"},
+	{"name": "번개새 피카", "icon": "res://assets/characters/eco_roster/lightning_bird_pika.webp", "color": Color(1.00, 0.82, 0.10), "role": "번개처럼 멀리 날아가는 새"},
+	{"name": "버섯 고양이 모모", "icon": "res://assets/characters/eco_roster/mushroom_cat_momo.webp", "color": Color(0.96, 0.30, 0.22), "role": "숲에서 쓸 만한 재료를 찾는 고양이"}
 ]
 
 var _character_buttons: Array[Button] = []
@@ -78,10 +78,10 @@ const OPENING_IMAGES := [
 ]
 
 const OPENING_STORY := [
-	{"caption": "에너지요정 나라는 풍부한 에너지를 당연하게 여기며, 불필요한 전기와 마법 에너지를 낭비했습니다."},
-	{"caption": "에너지가 부족해지자 요정들은 화석연료를 마구 사용해 부족분을 메우려 했습니다."},
-	{"caption": "그 결과 지구온난화·환경오염·자원고갈의 위기가 왕국을 뒤덮었습니다."},
-	{"caption": "퀴즈와 에너지 미션으로 힘을 모으고, 길에서 찾은 부품을 함께 써 깨끗한 에너지 마을을 만들어요!"}
+	{"caption": "요정마을은 쓰지 않는 불과 기기를 켜 둔 채 전기를 낭비했어요."},
+	{"caption": "전기가 부족해지자 석탄과 석유를 더 많이 태웠어요."},
+	{"caption": "연료를 태울수록 공기가 오염되고, 지구를 덥게 하는 기체도 늘어났어요."},
+	{"caption": "에너지 퀴즈를 풀고 필요한 부품을 골라요. 함께 시설을 지어 마을에 전기를 보내요!"}
 ]
 
 func _ready() -> void:
@@ -182,8 +182,7 @@ func _apply_commercial_ui() -> void:
 			chip.add_theme_stylebox_override("panel", UI.panel(Color("173b49dc"), Color("397685"), 9, 1, 2))
 	var footer := get_node_or_null("Footer") as Label
 	if footer:
-		footer.text = "재생 에너지 탐험대  •  에너지요정 나라 복원 프로젝트"
-		footer.add_theme_color_override("font_color", UI.TEXT_MUTED)
+		footer.visible = false
 
 	var story_caption := get_node_or_null("OpeningStoryOverlay/CaptionPanel") as PanelContainer
 	if story_caption:
@@ -399,7 +398,7 @@ func _setup_game_time_selector() -> void:
 	var time_label := get_node_or_null("MenuPanel/Content/GameTimeRow/Label") as Label
 	if time_label:
 		time_label.text = "탐험 시간"
-	game_time_option_button.tooltip_text = "탐험 시계만 계산합니다. 미니게임·시장·건설 시간은 별도예요."
+	game_time_option_button.tooltip_text = "미니게임·마을 계획·건설·전기 시험 시간은 포함하지 않아요."
 
 func _setup_learning_grade_selector() -> void:
 	var content := get_node("MenuPanel/Content") as VBoxContainer
@@ -421,7 +420,7 @@ func _setup_learning_grade_selector() -> void:
 		learning_grade_option.add_item("%d학년 수준" % grade)
 		learning_grade_option.set_item_metadata(learning_grade_option.item_count - 1, grade)
 	learning_grade_option.select(1)
-	learning_grade_option.tooltip_text = "방장이 고른 수준으로 같은 퀴즈를 풀어요. 학년별 용어와 읽기 시간을 조절합니다."
+	learning_grade_option.tooltip_text = "방장이 고른 수준의 퀴즈를 함께 풀어요."
 	UI.apply_input(learning_grade_option)
 	row.add_child(learning_grade_option)
 
@@ -529,7 +528,7 @@ func _on_mode_selected(idx: int) -> void:
 		reset_network_controls()
 	online_box.visible = false
 	local_start_button.visible = true
-	status_label.text = _online_mode_hint() if is_online_mode else "혼자 시작해도 AI 동료가 남은 3자리를 채워 4인 파티로 출발합니다."
+	status_label.text = _online_mode_hint() if is_online_mode else "나와 AI 동료 3명이 함께 출발해요."
 	if is_online_mode and _room_browser:
 		_room_browser.open_browser()
 
@@ -883,7 +882,7 @@ func _show_opening_step() -> void:
 	opening_image.visible = true
 	opening_image.modulate = Color.WHITE
 	opening_caption.text = step["caption"]
-	opening_step_label.text = "이야기  %d / %d  ·  읽은 뒤 다음을 눌러요" % [_opening_step + 1, OPENING_STORY.size()]
+	opening_step_label.text = "이야기  %d / %d" % [_opening_step + 1, OPENING_STORY.size()]
 	opening_next_button.text = "모험 준비로" if _opening_step == OPENING_STORY.size() - 1 else "다음 이야기  →"
 	opening_next_button.grab_focus()
 

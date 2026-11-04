@@ -70,11 +70,11 @@ func _run() -> void:
 	_expect(gm.MOVEMENT_END_REWARDS == [20, 15, 10, 5], "이동 보상이 학습 활동을 압도하지 않도록 축소되어야 합니다.")
 	gm.players[0]["inventory"]["solar_panel"] = 1
 	gm.players[1]["inventory"]["solar_panel"] = 1
-	gm.players[2]["inventory"]["battery"] = 1
+	gm.players[2]["inventory"]["smart_grid"] = 1
 	gm._start_village_construction_phase()
 	_expect(gm.can_build_village_project(0, 0), "친구들에게 나뉜 부품으로 공동 건설이 가능해야 합니다.")
 	_expect(gm.build_village_project(0, 0), "공동 태양광 발전소 건설이 성공해야 합니다.")
-	_expect(gm.get_team_inventory()["solar_panel"] == 0 and gm.get_team_inventory()["battery"] == 0, "공동 건설은 정확한 부품 수량을 사용해야 합니다.")
+	_expect(gm.get_team_inventory()["solar_panel"] == 0 and gm.get_team_inventory()["smart_grid"] == 0, "공동 건설은 정확한 부품 수량을 사용해야 합니다.")
 	_expect(gm.players[0]["energy"] == 12 and gm.players[1]["energy"] == 7 and gm.players[2]["energy"] == 7, "건설과 부품 제공 보상이 각 제공자에게 돌아가야 합니다.")
 	gm.players[2]["inventory"]["wind_blade"] = 2
 	gm.players[2]["inventory"]["smart_grid"] = 1
@@ -86,7 +86,8 @@ func _run() -> void:
 	gm.finish_village_construction(1)
 	await create_timer(1.8).timeout
 	Engine.time_scale = previous_scale
-	_expect(gm.kingdom_recovered and not gm.village_construction_active, "모두 마치면 AI가 남은 공동 시설을 건설하고 결과로 넘어가야 합니다.")
+	_expect(gm.built_project_ids.has(1) and not gm.village_construction_active and not gm.energy_trial.is_empty(), "모두 마치면 AI도 남은 공동 시설을 건설하고 전기 시험으로 넘어가야 합니다.")
+	_expect(not gm.kingdom_recovered, "경관 점수만으로 전기 시험 전에 복원 성공을 판정하면 안 됩니다.")
 
 	gm = _fresh_game()
 	var database := root.get_node("QuizDatabase")

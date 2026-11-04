@@ -35,7 +35,9 @@ func _run() -> void:
 	lobby.learning_grade_option.select(2)
 	lobby._apply_learning_grade()
 	_check(manager.learning_grade == 6, "Advanced grade must reach the quiz rules")
-	_check(lobby.game_time_option_button.tooltip_text.contains("별도"), "Exploration time must not pretend to be total session duration")
+	var duration_hint: String = lobby.game_time_option_button.tooltip_text
+	var excludes_other_stages := duration_hint.contains("별도") or duration_hint.contains("포함하지")
+	_check(excludes_other_stages and duration_hint.contains("미니게임") and duration_hint.contains("건설") and duration_hint.contains("전기 시험"), "Exploration time must clearly exclude minigames, construction and the electricity trial")
 	main.queue_free()
 	await process_frame
 	var button := Button.new()

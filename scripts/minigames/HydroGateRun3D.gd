@@ -588,7 +588,7 @@ func _overflow() -> void:
 	running = false
 	open_gate = -1
 	charge = 0.0
-	result_label.text = "댐 넘침! 게임 오버\n생산 전력 %.1f kWh" % generated_kwh
+	result_label.text = "댐 넘침! 게임 오버\n만든 전기 %.1f kWh" % generated_kwh
 	result_label.visible = true
 	flash.color = Color(0.94, 0.36, 0.26, VISUAL_STYLE.WARNING_FLASH_ALPHA)
 	arcade_event.emit(0, false, "댐이 넘쳤어요! 더 일찍 수문을 열어야 합니다.", false)

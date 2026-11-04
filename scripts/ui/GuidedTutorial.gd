@@ -74,6 +74,9 @@ func _ready() -> void:
 	GameManager.tutorial_turn_finished.connect(_on_turn_finished)
 	GameManager.minigame_finished.connect(_on_minigame_finished)
 	GameManager.village_construction_changed.connect(_on_build_changed)
+	GameManager.component_choice_changed.connect(_on_component_changed)
+	GameManager.village_construction_started.connect(_on_construction_started)
+	GameManager.energy_trial_changed.connect(_on_energy_trial_changed)
 	hide()
 
 func _label(value: String, font_size: int, color: Color = UI.TEXT) -> Label:
@@ -93,7 +96,7 @@ func begin(game_board: Node) -> void:
 	if not board.quiz_modal.review_completed.is_connected(_on_quiz_reviewed):
 		board.quiz_modal.review_completed.connect(_on_quiz_reviewed)
 	show()
-	_set_stage("dice", "1 / 5  주사위와 이동", "오른쪽 주사위를 눌러 보세요.\n연습에서는 1이 나와 재료 칸으로 이동해요.\n시간에 쫓기지 않고 천천히 해도 괜찮아요.")
+	_set_stage("dice", "1 / 7  주사위와 이동", "주사위를 눌러 재료 칸으로 이동하세요.")
 	focused_control = board.hud.center_dice_button
 	board.hud.center_dice_button.grab_focus()
 
@@ -127,7 +130,7 @@ func _process(_delta: float) -> void:
 		return
 	# One instruction surface at a time. The actual quiz/arcade guide owns the
 	# screen while in use; this coach never blocks its keys or answer choices.
-	var modal_open: bool = board.quiz_modal.visible or board.minigame_modal.visible
+	var modal_open: bool = board.quiz_modal.visible or board.minigame_modal.visible or board.hud.is_blocking_overlay_visible()
 	var catalog_open: bool = board.hud.adventure_planner.catalog.visible
 	coach.visible = not modal_open and not catalog_open
 	stage_badge.visible = modal_open or stage == "build"
@@ -146,13 +149,13 @@ func _process(_delta: float) -> void:
 		board.hud.center_dice_button.disabled = true
 	if stage == "build":
 		coach.hide()
-		board.hud.build_instruction_label.text = "연습 5/5 · 시설 선택 → 빛나는 칸 클릭 · 팀 보유 / 필요"
+		board.hud.build_instruction_label.text = "태양광 발전소와 에너지 저장소를 지어요. 시설 선택 → 빛나는 칸 클릭"
 
 func _on_turn_finished() -> void:
 	if not active:
 		return
 	if stage == "dice":
-		_set_stage("materials", "2 / 5  재료와 목표", "재료가 가방에 들어왔어요!\n왼쪽 아래 ‘건설 도감’을 열고, 만들고 싶은 시설의 ‘목표’ 버튼을 눌러 보세요.")
+		_set_stage("materials", "2 / 7  재료와 목표", "‘건설 도감’을 열고 만들고 싶은 시설을 골라요.")
 		focused_control = board.hud.adventure_planner.catalog_open_button
 		focused_control.grab_focus()
 	elif stage == "reward":
@@ -165,12 +168,22 @@ func _on_goal_selected(index: int) -> void:
 	if not active or stage != "materials":
 		return
 	goal_index = index
-	_set_stage("quiz_intro", "2 / 5  목표 선택 완료", "%s의 재료를 확인했어요.\n실제 모험에서는 길에서 모은 재료를 친구들과 함께 써요.\n이번에는 퀴즈 칸으로 이동해 볼까요?" % GameManager.CONSTRUCTION_PROJECTS[index]["name"], "퀴즈 칸으로 이동")
+	_set_stage("quiz_intro", "2 / 7  목표 선택", "%s에 쓸 재료를 모아 봐요." % GameManager.CONSTRUCTION_PROJECTS[index]["name"], "퀴즈 칸으로 이동")
 
 func _on_quiz_reviewed() -> void:
 	if not active or stage != "quiz":
 		return
-	_set_stage("mini_intro", "3 / 5  퀴즈 완료", "답을 고르고 이유까지 확인했어요.\n정답이면 에너지와 특수기술 SP를 받아요.\n다음은 AI 친구 3명과 함께 30초 미니게임을 해볼 거예요.", "미니게임 연습 시작")
+	if GameManager.get_component_choice_state().get("choices", {}).has(0):
+		_set_stage("component", "3 / 7  필요한 부품", "목표 시설에 필요한 부품을 하나 골라요.")
+	else:
+		_set_stage("quiz_intro", "3 / 7  퀴즈와 부품", "정답을 맞히고 필요한 부품을 골라요.", "다시 풀기")
+
+func _on_component_changed(state: Dictionary) -> void:
+	if active and stage == "component" and not state.get("choices", {}).has(0):
+		_show_mini_intro()
+
+func _show_mini_intro() -> void:
+	_set_stage("mini_intro", "4 / 7  함께 미니게임", "컴퓨터 플레이어 3명과 30초 동안 도전해요.", "미니게임 연습 시작")
 
 func _on_minigame_finished(results: Array) -> void:
 	if not active or stage != "mini":
@@ -180,7 +193,7 @@ func _on_minigame_finished(results: Array) -> void:
 	for result in results:
 		if int(result.get("player_idx", -1)) == 0:
 			reward = int(result.get("reward", 0))
-	_set_stage("reward", "4 / 5  미니게임 완료", "이번 연습에서 보너스 에너지 %d를 얻었어요.\n목표 행동으로 점수를 얻으면 순위에 따라 20·10·5·1 에너지를 받아요.\n공동 1위 두 명이면 20·20·5·1이에요." % reward, "마을 건설 연습")
+	_set_stage("reward", "4 / 7  미니게임 완료", "보너스 에너지 +%d\n1~4위 보상은 20·10·5·1이에요." % reward, "함께 지을 시설 고르기")
 	action_button.disabled = true
 
 func _advance() -> void:
@@ -188,30 +201,54 @@ func _advance() -> void:
 		return
 	match stage:
 		"quiz_intro":
-			_set_stage("quiz", "3 / 5  퀴즈", "퀴즈에서 답을 선택하고 해설을 읽어 보세요.")
+			_set_stage("quiz", "3 / 7  퀴즈와 부품", "답을 고르고 이유를 확인하세요.")
 			GameManager.current_state = GameManager.TurnState.PLAYER_MOVING
 			GameManager.move_player_to(0, 4)
 		"mini_intro":
-			_set_stage("mini", "4 / 5  미니게임", "조작 안내를 읽고 준비 버튼을 누르세요.\nW / S 또는 ↑ / ↓로 공급을 조절해\n도시의 수요에 맞춰요.")
+			_set_stage("mini", "4 / 7  미니게임", "W / S 또는 ↑ / ↓로 공급을 조절해 도시의 수요에 맞춰요.")
 			GameManager._start_minigame(0, "grid_balance")
 		"reward":
-			_set_stage("build", "5 / 5  함께 건설", "연습용 재료로 시설을 지어 보세요.")
+			_set_stage("plan", "5 / 7  함께 계획", "짓고 싶은 시설을 추천하고 준비를 마쳐요.")
 			var inventory: Dictionary = GameManager.players[0]["inventory"]
-			for item_id in GameManager.CONSTRUCTION_PROJECTS[goal_index]["requirements"]:
-				inventory[item_id] = maxi(int(inventory.get(item_id, 0)), int(GameManager.CONSTRUCTION_PROJECTS[goal_index]["requirements"][item_id]))
-			GameManager._start_village_construction_phase()
-			# The learner selects the card and places it on a valid pad through
-			# exactly the same authoritative path as a normal game.
-			if board.hud.construction_list.get_child_count() > 0:
-				board.hud.construction_list.get_child(0).grab_focus()
+			for project in [0, 3]:
+				for item_id in GameManager.CONSTRUCTION_PROJECTS[project]["requirements"]:
+					inventory[item_id] = int(inventory.get(item_id, 0)) + int(GameManager.CONSTRUCTION_PROJECTS[project]["requirements"][item_id])
+			GameManager._start_team_planning_phase()
+		"trial_intro":
+			_set_stage("trial", "7 / 7  낮과 밤의 전기", "낮에는 남는 전기를 저장하고 밤에는 꺼내 써요.")
+			GameManager.finish_village_construction(0)
 		"complete":
 			adventure_requested.emit()
 
 func _on_build_changed(_inventories: Array, projects: int, _health: int) -> void:
-	if not active or stage != "build" or projects < 1:
+	if not active or stage != "build" or projects < 2 or not GameManager.built_project_owners.has(0) or not GameManager.built_project_owners.has(3):
 		return
-	_set_stage("complete", "5 / 5  튜토리얼 완료!", "시설을 지어 마을 지수가 올랐어요!\n주사위로 이동하고 재료를 모아,\n친구들과 깨끗한 마을을 만들어요.\n\n이제 새 모험을 시작해 볼까요?", "새 모험 시작")
+	_set_stage("trial_intro", "7 / 7  낮과 밤의 전기", "태양광 발전소와 저장소를 지었어요.\n낮에는 남는 전기를 저장하고,\n밤에는 배터리의 전기를 보내 보세요.", "전기 보내기 시작")
 	coach.custom_minimum_size.x = 520
 	body_label.custom_minimum_size.x = 484
 	coach.position = Vector2(380, 218)
 	board.hud.village_map.set_drop_enabled(false)
+
+func _on_construction_started(_inventories: Array) -> void:
+	if not active or stage != "plan": return
+	_set_stage("build", "6 / 7  함께 건설", "태양광 발전소와 에너지 저장소를 지어요.")
+	board.hud._refresh_construction_choices()
+	if board.hud.construction_list.get_child_count() > 0:
+		board.hud.construction_list.get_child(0).call_deferred("grab_focus")
+
+func _on_energy_trial_changed(state: Dictionary) -> void:
+	if not active or stage not in ["trial", "complete"]: return
+	if str(state.get("phase", "")) == "complete":
+		_set_stage("complete", "7 / 7  연습 완료", "낮에 저장한 전기는 밤에도 쓸 수 있어요.", "새 모험 시작")
+		# The normal result owns the screen. In practice its confirmation starts
+		# a fresh adventure, rather than saving or ranking the practice session.
+		var learning: Control = board.hud.learning_village_ui
+		learning.trial_retry_button.hide()
+		learning.trial_confirm_button.text = "새 모험 시작"
+		if not learning.trial_confirm_button.pressed.is_connected(_complete_trial_practice):
+			for connection in learning.trial_confirm_button.pressed.get_connections():
+				learning.trial_confirm_button.pressed.disconnect(connection["callable"])
+			learning.trial_confirm_button.pressed.connect(_complete_trial_practice)
+
+func _complete_trial_practice() -> void:
+	adventure_requested.emit()

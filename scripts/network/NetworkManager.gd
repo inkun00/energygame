@@ -163,7 +163,7 @@ func _process(delta: float) -> void:
 			_directory_heartbeat_remaining = DIRECTORY_HEARTBEAT_SECONDS
 			_send_directory_heartbeat()
 	if is_online and is_host and game_has_started and (
-		GameManager.is_game_active or GameManager.open_market_active or GameManager.village_construction_active
+		GameManager.is_game_active or GameManager.open_market_active or GameManager.village_construction_active or bool(GameManager.team_plan.get("active", false)) or not GameManager.energy_trial.is_empty()
 	):
 		_full_game_snapshot_remaining -= delta
 		if _full_game_snapshot_remaining <= 0.0:
@@ -1468,6 +1468,26 @@ func _handle_game_action(sender_peer_id: int, action: String, payload: Dictionar
 	if player_idx < 0 or player_idx >= GameManager.players.size():
 		return
 	match action:
+		"quiz_component", "quiz_review", "team_project", "team_confirm", "trial_mode", "trial_finish":
+			if typeof(payload.get("player_idx")) != TYPE_INT or payload["player_idx"] != player_idx:
+				return
+			match action:
+				"quiz_component":
+					if typeof(payload.get("token")) == TYPE_INT and typeof(payload.get("item_id")) == TYPE_STRING:
+						GameManager.choose_quiz_component(player_idx, payload["item_id"], payload["token"])
+				"quiz_review":
+					GameManager.finish_quiz_review(player_idx)
+				"team_project":
+					if typeof(payload.get("project_idx")) == TYPE_INT:
+						GameManager.select_team_project(player_idx, payload["project_idx"])
+				"team_confirm":
+					GameManager.confirm_team_plan(player_idx)
+				"trial_mode":
+					if typeof(payload.get("mode")) == TYPE_STRING:
+						GameManager.set_energy_trial_mode(player_idx, payload["mode"])
+				"trial_finish":
+					if typeof(payload.get("retry")) == TYPE_BOOL:
+						GameManager.finish_energy_trial(player_idx, payload["retry"])
 		"adventure_ready":
 			if int(payload.get("player_idx", -1)) == player_idx:
 				GameManager.confirm_adventure_ready(player_idx)
@@ -1527,6 +1547,9 @@ func _connect_game_signals() -> void:
 	if _game_signals_connected:
 		return
 	_game_signals_connected = true
+	GameManager.component_choice_changed.connect(func(state): _broadcast_game_event("component_choice_changed", [state]))
+	GameManager.team_plan_changed.connect(func(state): _broadcast_game_event("team_plan_changed", [state]))
+	GameManager.energy_trial_changed.connect(func(state): _broadcast_game_event("energy_trial_changed", [state]))
 	GameManager.adventure_preparation_changed.connect(func(state): _broadcast_game_event("adventure_preparation_changed", [state]))
 	GameManager.turn_changed.connect(func(idx): _broadcast_game_event("turn_changed", [idx]))
 	GameManager.player_moved.connect(func(idx, from_tile, to_tile): _broadcast_game_event("player_moved", [idx, from_tile, to_tile]))
@@ -1630,6 +1653,12 @@ func _capture_game_state_patch(event_name: String, event_args: Array) -> Diction
 		"adventure_ready_players": GameManager.adventure_ready_players.duplicate(true)
 	}
 	match event_name:
+		"component_choice_changed", "team_plan_changed", "energy_trial_changed":
+			_add_learning_state(patch)
+			patch["active_quiz_data"] = GameManager.active_quiz_data.duplicate(true)
+			patch["active_quiz_player_idx"] = GameManager.active_quiz_player_idx
+			patch["pending_lap_reward"] = GameManager.pending_lap_reward.duplicate(true)
+			patch["village_construction_active"] = GameManager.village_construction_active
 		"turn_changed":
 			patch["special_skill_used_this_turn"] = GameManager.special_skill_used_this_turn
 			patch["dice_input_time_remaining"] = GameManager.dice_input_time_remaining
@@ -1675,6 +1704,7 @@ func _capture_game_state_patch(event_name: String, event_args: Array) -> Diction
 			patch["players"] = GameManager.players.duplicate(true)
 			_add_minigame_state(patch)
 		"village_construction_started", "village_construction_changed":
+			_add_learning_state(patch)
 			patch["village_finished_players"] = GameManager.village_finished_players.duplicate(true)
 			patch["players"] = GameManager.players.duplicate(true)
 			_add_kingdom_state(patch)
@@ -1684,11 +1714,23 @@ func _capture_game_state_patch(event_name: String, event_args: Array) -> Diction
 			patch["built_project_placements"] = GameManager.built_project_placements.duplicate(true)
 			patch["built_project_owners"] = GameManager.built_project_owners.duplicate(true)
 		"game_over":
+			_add_learning_state(patch)
 			patch["players"] = GameManager.players.duplicate(true)
 			_add_kingdom_state(patch)
 			patch["village_construction_active"] = GameManager.village_construction_active
 			patch["village_ai_construction_running"] = GameManager.village_ai_construction_running
 	return patch
+
+func request_learning_action(action: String, payload: Dictionary) -> void:
+	if action in ["quiz_component", "quiz_review", "team_project", "team_confirm", "trial_mode", "trial_finish"]:
+		_request_game_action(action, payload)
+
+func _add_learning_state(patch: Dictionary) -> void:
+	patch["component_choices"] = GameManager.component_choices.duplicate(true)
+	patch["component_choice_serial"] = GameManager.component_choice_serial
+	patch["team_plan"] = GameManager.team_plan.duplicate(true)
+	patch["energy_trial"] = GameManager.energy_trial.duplicate(true)
+	patch["energy_trial_retries"] = GameManager.energy_trial_retries
 
 
 func _add_player_update(patch: Dictionary, player_idx: int) -> void:
@@ -1731,6 +1773,11 @@ func _add_minigame_state(patch: Dictionary) -> void:
 
 func _capture_game_state() -> Dictionary:
 	return {
+		"component_choices": GameManager.component_choices.duplicate(true),
+		"component_choice_serial": GameManager.component_choice_serial,
+		"team_plan": GameManager.team_plan.duplicate(true),
+		"energy_trial": GameManager.energy_trial.duplicate(true),
+		"energy_trial_retries": GameManager.energy_trial_retries,
 		"last_game_rankings": _last_game_rankings.duplicate(true),
 		"players": GameManager.players.duplicate(true),
 		"current_state": int(GameManager.current_state),

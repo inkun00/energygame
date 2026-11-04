@@ -35,10 +35,11 @@ func _run() -> void:
 	check(not planner.catalog.visible and not main.exit_confirmation.visible, "Escape must close the catalog before the game exit dialog")
 	planner.open_catalog()
 	planner.select_goal(0)
-	check(planner.missing_materials(0) == {"solar_panel": 2, "battery": 1}, "Goal should show exact missing materials")
+	check(planner.missing_materials(0) == {"solar_panel": 2, "smart_grid": 1}, "Goal should show the solar generation recipe without making storage mandatory")
+	check(gm.get_team_plan_state()["choices"].get(0, -1) == 0, "Exploration goal must become a shared facility recommendation")
 	check(gm.players == original, "Goal selection must not mutate authoritative player state")
 	gm.players[0]["inventory"]["solar_panel"] = 2
-	gm.players[0]["inventory"]["battery"] = 1
+	gm.players[0]["inventory"]["smart_grid"] = 1
 	gm.player_inventory_changed.emit(0, gm.players[0]["inventory"])
 	check(planner.missing_materials(0).is_empty() and planner.goal_progress.value == 3, "Inventory updates should complete goal progress")
 	gm.dice_rolled.emit(1, 3)

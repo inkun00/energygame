@@ -11,6 +11,7 @@ const VILLAGE_DRAG_CARD = preload("res://scripts/ui/ConstructionDragCard.gd")
 const SPECIAL_SKILL_CINEMATIC = preload("res://scripts/effects/SpecialSkillCinematic.gd")
 const ENDING_CINEMATIC = preload("res://scripts/effects/EndingCinematic.gd")
 const ADVENTURE_PLANNER = preload("res://scripts/ui/AdventurePlanner.gd")
+const LEARNING_VILLAGE_UI = preload("res://scripts/ui/LearningVillageUI.gd")
 const UI = preload("res://scripts/ui/CommercialUI.gd")
 
 @onready var player_panels_container: HBoxContainer = $TopHUD/PlayerPanels
@@ -62,6 +63,7 @@ var special_skill_target_hint_label: Label
 var active_special_skill_player_idx := -1
 var active_special_skill: Dictionary = {}
 var adventure_planner: Control
+var learning_village_ui: Control
 var guide_inventory_count_labels: Dictionary = {}
 var guide_recipe_cards: Array[PanelContainer] = []
 var lap_reward_dimmer: ColorRect
@@ -123,6 +125,9 @@ func _ready() -> void:
 	_create_special_skill_target_panel()
 	_create_lap_reward_panel()
 	_create_open_market_panel()
+	learning_village_ui = LEARNING_VILLAGE_UI.new()
+	add_child(learning_village_ui)
+	learning_village_ui.stage_visibility_changed.connect(_on_learning_stage_visibility_changed)
 	NetworkManager.game_action_rejected.connect(_on_network_action_rejected)
 	if help_button:
 		help_button.pressed.connect(_on_help_pressed)
@@ -168,6 +173,28 @@ func restore_online_ui() -> void:
 		adventure_planner.end_exploration()
 	else:
 		adventure_planner._refresh_tutorial()
+	learning_village_ui.restore_state()
+	_on_learning_stage_visibility_changed(learning_village_ui.is_blocking_overlay_visible())
+
+func _on_learning_stage_visibility_changed(blocking: bool) -> void:
+	if not blocking:
+		_refresh_primary_action_controls()
+		return
+	_hide_lap_reward_panel()
+	_hide_open_market_panel()
+	_cancel_special_skill_targeting()
+	adventure_planner.close_catalog()
+	adventure_planner.tutorial.hide()
+	adventure_planner.preparation_dimmer.hide()
+	_set_center_dice_visible(false, false)
+	if learning_village_ui.screen in ["plan", "trial"]:
+		adventure_planner.end_exploration()
+		victory_modal.hide()
+		victory_dimmer.hide()
+		_set_village_construction_controls(false)
+
+func is_blocking_overlay_visible() -> bool:
+	return is_instance_valid(learning_village_ui) and learning_village_ui.is_blocking_overlay_visible()
 
 func _create_construction_scroll() -> void:
 	if not victory_modal or not construction_list:
@@ -185,6 +212,7 @@ func _create_construction_scroll() -> void:
 	construction_list.custom_minimum_size.x = 300
 
 func initialize_hud() -> void:
+	learning_village_ui.reset()
 	adventure_planner.begin_exploration(_local_player_index())
 	if is_instance_valid(ending_cinematic):
 		ending_cinematic.queue_free()
@@ -820,7 +848,7 @@ func _refresh_open_market_recipe_popover() -> void:
 
 		var stat_lbl := Label.new()
 		stat_lbl.name = "RecipeEffect"
-		stat_lbl.text = "마을 친환경 지수 +%d" % int(project["health"])
+		stat_lbl.text = LEARNING_VILLAGE_UI.PROJECT_PURPOSES[GameManager.CONSTRUCTION_PROJECTS.find(project)]
 		stat_lbl.add_theme_font_size_override("font_size", 15)
 		stat_lbl.add_theme_color_override("font_color", UI.TEXT)
 		c_vbox.add_child(stat_lbl)
@@ -1240,7 +1268,7 @@ func _refresh_primary_action_controls() -> void:
 	if GameManager and not GameManager.players.is_empty():
 		var local_idx := _local_player_index()
 		is_local_turn = local_idx >= 0 and GameManager.current_turn_idx == local_idx and not bool(GameManager.players[local_idx].get("is_ai", false))
-		action_ready = is_local_turn and GameManager.current_state == GameManager.TurnState.WAIT_ACTION and active_special_skill_player_idx < 0
+		action_ready = is_local_turn and GameManager.current_state == GameManager.TurnState.WAIT_ACTION and active_special_skill_player_idx < 0 and not is_blocking_overlay_visible()
 		if GameManager.guided_tutorial_active:
 			action_ready = action_ready and GameManager.guided_tutorial_step == "dice"
 	# The dice face / target picker are the action surfaces. Do not repeat the
@@ -1552,7 +1580,8 @@ func _play_ending_cinematic(is_success: bool, rankings: Array) -> void:
 		ending_cinematic.queue_free()
 	ending_cinematic = ENDING_CINEMATIC.new()
 	ending_cinematic.name = "EndingCinematic"
-	ending_cinematic.setup(is_success, GameManager.kingdom_health, GameManager.VILLAGE_RECOVERY_TARGET, rankings)
+	var trial: Dictionary = GameManager.get_energy_trial_state()
+	ending_cinematic.setup(is_success, GameManager.kingdom_health, GameManager.VILLAGE_RECOVERY_TARGET, rankings, trial.get("summary", trial))
 	ending_cinematic.animation_finished.connect(_show_game_over_results.bind(rankings.duplicate(true)), CONNECT_ONE_SHOT)
 	add_child(ending_cinematic)
 
@@ -1610,8 +1639,8 @@ func _set_village_construction_controls(is_construction_phase: bool) -> void:
 	if evaluate_button:
 		evaluate_button.visible = is_construction_phase
 		evaluate_button.disabled = GameManager.village_finished_players.has(_local_player_index())
-		evaluate_button.text = "친구 건설 기다리는 중" if evaluate_button.disabled else "내 건설 마침 · 결과 확인"
-		evaluate_button.tooltip_text = "친구들도 건설을 마치면 AI와 함께 마을 결과를 확인합니다."
+		evaluate_button.text = "친구 건설 기다리는 중" if evaluate_button.disabled else "내 건설 마침 · 전기 보내기"
+		evaluate_button.tooltip_text = "모두 건설을 마치면 낮과 밤에 마을로 전기를 보내요."
 	var scroll := victory_modal.get_node_or_null("ConstructionScroll")
 	if scroll:
 		scroll.visible = is_construction_phase
@@ -1633,12 +1662,25 @@ func _refresh_construction_choices() -> void:
 		construction_list.remove_child(child)
 		child.queue_free()
 	construction_list.add_theme_constant_override("separation", 10)
-	for project_index in range(GameManager.CONSTRUCTION_PROJECTS.size()):
-		if GameManager.guided_tutorial_active and GameManager.guided_tutorial_step == "build" and project_index != adventure_planner.selected_goal:
+	var recommendations: Dictionary = GameManager.get_team_plan_state().get("choices", {})
+	var own_recommendation := int(recommendations.get(_local_player_index(), -1))
+	var project_order: Array[int] = []
+	for idx in range(GameManager.CONSTRUCTION_PROJECTS.size()): project_order.append(idx)
+	project_order.sort_custom(func(a: int, b: int):
+		var a_built := a in GameManager.built_project_ids
+		var b_built := b in GameManager.built_project_ids
+		if a_built != b_built: return not a_built
+		if a == own_recommendation or b == own_recommendation: return a == own_recommendation
+		var a_recommended := a in recommendations.values()
+		var b_recommended := b in recommendations.values()
+		if a_recommended != b_recommended: return a_recommended
+		return a < b)
+	for project_index in project_order:
+		if GameManager.guided_tutorial_active and GameManager.guided_tutorial_step == "build" and project_index not in [0, 3]:
 			continue
 		var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[project_index]
 		var build_button: Button = VILLAGE_DRAG_CARD.new()
-		build_button.custom_minimum_size = Vector2(300, 176)
+		build_button.custom_minimum_size = Vector2(300, 198)
 		build_button.text = ""
 		build_button.clip_contents = true
 		var already_built := project_index in GameManager.built_project_ids
@@ -1652,7 +1694,7 @@ func _refresh_construction_choices() -> void:
 			builder_idx = local_idx if local_idx in builders else -1
 		if GameManager.village_finished_players.has(_local_player_index()):
 			builder_idx = -1
-		build_button.tooltip_text = "%s\n팀 재료를 함께 사용합니다. 지수 +%d · 적합 지형: %s\n건설자 에너지 +5 · 부품 제공자 1개당 +2\n마을 지도 위로 끌어 배치하세요." % [project["name"], int(project["health"]), project.get("terrain_label", "지정 구역")]
+		build_button.tooltip_text = "%s\n%s · %s\n건설자 에너지 +5 · 부품 제공자 1개당 +2" % [project["name"], LEARNING_VILLAGE_UI.PROJECT_PURPOSES[project_index], project.get("terrain_label", "지정 구역")]
 		_apply_secondary_button_style(build_button)
 
 		var margin := MarginContainer.new()
@@ -1697,8 +1739,9 @@ func _refresh_construction_choices() -> void:
 		info.add_child(project_label)
 		var effect_label := Label.new()
 		effect_label.name = "ProjectEffect"
-		effect_label.text = "마을 친환경 지수 +%d" % int(project["health"])
-		effect_label.custom_minimum_size.y = 23
+		effect_label.text = LEARNING_VILLAGE_UI.PROJECT_PURPOSES[project_index]
+		effect_label.custom_minimum_size.y = 42
+		effect_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		effect_label.add_theme_font_size_override("font_size", 18)
 		effect_label.add_theme_color_override("font_color", UI.TEXT)
 		info.add_child(effect_label)
@@ -1728,7 +1771,14 @@ func _refresh_construction_choices() -> void:
 		if already_built and completed_owner_idx >= 0 and completed_owner_idx < GameManager.players.size():
 			owner_label.text = "완공 · " + str(GameManager.players[completed_owner_idx]["name"])
 		else:
-			owner_label.text = "선택 후 지도 클릭" if builder_idx >= 0 else ("완공" if already_built else "팀 재료가 부족해요")
+			var recommendation_names: Array[String] = []
+			for idx in recommendations:
+				if int(recommendations[idx]) == project_index:
+					recommendation_names.append(str(GameManager.players[int(idx)].get("name", "친구")))
+			var recommendation_text := "내 추천 · " if project_index == own_recommendation else ("%d명 추천 · " % recommendation_names.size() if not recommendation_names.is_empty() else "")
+			owner_label.text = recommendation_text + ("배치 가능" if builder_idx >= 0 else ("완공" if already_built else "재료 부족"))
+			if not recommendation_names.is_empty():
+				build_button.tooltip_text += "\n추천: " + ", ".join(recommendation_names)
 		owner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		owner_label.add_theme_font_size_override("font_size", 18)
 		owner_label.add_theme_color_override("font_color", UI.SUCCESS if builder_idx >= 0 or already_built else UI.DANGER)
@@ -1740,10 +1790,10 @@ func _refresh_construction_choices() -> void:
 		build_instruction_label.add_theme_font_size_override("font_size", 19)
 		build_instruction_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		build_instruction_label.offset_bottom = 626
-		build_instruction_label.tooltip_text = "오른쪽 목록을 스크롤해서 시설을 골라요. 팀 재료로 함께 건설하고, 모두 ‘내 건설 마침’을 누르면 결과를 확인해요."
+		build_instruction_label.tooltip_text = "팀 재료로 함께 건설해요. 모두 마치면 낮과 밤에 전기를 보내요."
 	if evaluate_button:
 		evaluate_button.disabled = GameManager.village_finished_players.has(_local_player_index())
-		evaluate_button.text = "친구 건설 기다리는 중" if evaluate_button.disabled else "내 건설 마침 · 결과 확인"
+		evaluate_button.text = "친구 건설 기다리는 중" if evaluate_button.disabled else "내 건설 마침 · 전기 보내기"
 		if GameManager.guided_tutorial_active:
 			evaluate_button.visible = false
 
@@ -1765,15 +1815,14 @@ func _create_asset_texture_rect(asset_path: String, minimum_size: Vector2) -> Te
 
 func _update_kingdom_visual(health: int) -> void:
 	if kingdom_health_bar:
-		kingdom_health_bar.value = clampi(health, 0, 100)
+		kingdom_health_bar.visible = false
 	if energy_resolution_label:
-		var target := GameManager.VILLAGE_RECOVERY_TARGET
-		if health >= target:
-			energy_resolution_label.text = "친환경 에너지 지수 %d / %d  ·  요정마을 에너지 문제 해결 완료" % [health, target]
-			energy_resolution_label.add_theme_color_override("font_color", Color("a8ffe0"))
-		else:
-			energy_resolution_label.text = "친환경 에너지 지수 %d / %d  ·  문제 해결까지 %d" % [health, target, target - health]
-			energy_resolution_label.add_theme_color_override("font_color", Color("fff0a4"))
+		var trial: Dictionary = GameManager.get_energy_trial_state()
+		var summary: Dictionary = trial.get("summary", trial)
+		energy_resolution_label.text = "낮과 밤에 필요한 전기를 보내 보세요."
+		if not summary.is_empty():
+			energy_resolution_label.text = "필요한 전기 공급 · 낮 %d%% / 밤 %d%%" % [roundi(float(summary.get("daytime_coverage", 0.0)) * 100), roundi(float(summary.get("night_coverage", 0.0)) * 100)]
+		energy_resolution_label.add_theme_color_override("font_color", UI.GOLD)
 	if village_map:
 		village_map.set_environment_health(health)
 		# 지도 중앙을 가리는 장시간 툴팁 대신 상단 안내 문구로 정보를 전달합니다.
@@ -1843,7 +1892,7 @@ func _refresh_ranking_cards(rankings: Array) -> void:
 		var contribution_label := Label.new()
 		contribution_label.name = "SessionContribution"
 		contribution_label.text = "이번 판: 퀴즈 %d · 재료 %d · 완공 %d" % [int(player.get("quiz_correct", 0)), int(player.get("construction_contribution", 0)), int(player.get("project_completion_bonus", 0))]
-		contribution_label.tooltip_text = "이번 모험에서 정답을 맞힌 횟수 · 얻은 재료 개수 · 완공한 시설 수입니다. 건설자 +5, 실제 부품 제공자 1개당 +2. 에너지 동점이면 이동·퀴즈·재료 공헌 점수로 비교합니다. 기록을 저장하지 않습니다."
+		contribution_label.tooltip_text = "맞힌 퀴즈 · 모은 재료 · 완공한 시설. 건설자 +5, 부품 제공자 1개당 +2. 에너지 동점이면 이동·퀴즈·재료 공헌 점수로 비교해요."
 		contribution_label.add_theme_font_size_override("font_size", 18)
 		contribution_label.add_theme_color_override("font_color", UI.TEXT)
 		content.add_child(contribution_label)
@@ -2043,7 +2092,7 @@ func _on_sound_pressed() -> void:
 	_show_event_banner("효과음을 껐습니다." if sound_muted else "효과음을 켰습니다.")
 
 func _on_info_pressed() -> void:
-	_show_event_banner("공동 건설 %d / %d · 친환경 지수 %d / %d · %d라운드" % [GameManager.projects_built, GameManager.CONSTRUCTION_PROJECTS.size(), GameManager.kingdom_health, GameManager.VILLAGE_RECOVERY_TARGET, GameManager.total_turns / 4 + 1])
+	_show_event_banner("공동 건설 %d / %d · %d라운드" % [GameManager.projects_built, GameManager.CONSTRUCTION_PROJECTS.size(), GameManager.total_turns / 4 + 1])
 
 func _on_zoom_in_pressed() -> void:
 	board_zoom_requested.emit(1.0)

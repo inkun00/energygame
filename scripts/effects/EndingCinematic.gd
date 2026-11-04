@@ -15,36 +15,36 @@ const UI = preload("res://scripts/ui/CommercialUI.gd")
 const SUCCESS_SCENES: Array[Dictionary] = [
 	{
 		"image": "res://assets/kingdom/kingdom_stage_0.webp",
-		"title": "마지막 에너지 연결",
-		"caption": "처음에는 연기와 낭비로 어두웠던 마을. 탐험대가 모은 지식과 재료가 마지막 에너지 연결을 완성했어요."
+		"title": "함께 지은 마을",
+		"caption": "모은 부품으로 시설을 짓고, 마을에 전기를 보냈어요."
 	},
 	{
 		"image": "res://assets/kingdom/kingdom_stage_50.webp",
-		"title": "마을을 달리는 깨끗한 빛",
-		"caption": "태양과 바람, 물의 에너지가 이어지며 밝은 빛이 요정마을 곳곳으로 퍼져 나갑니다."
+		"title": "낮과 밤의 전기",
+		"caption": "낮에도 밤에도 마을에 필요한 전기를 마련했어요."
 	},
 	{
 		"image": "res://assets/kingdom/kingdom_stage_100.webp",
-		"title": "다시 빛나는 에너지 요정 왕국",
-		"caption": "모든 시설이 힘차게 움직이고 주민들의 웃음이 돌아왔습니다. 에너지요정왕국의 에너지 위기 탈출에 성공했습니다!"
+		"title": "다시 불이 켜진 요정마을",
+		"caption": "탐험대가 함께 마을의 에너지 위기를 해결했어요."
 	}
 ]
 
 const FAILURE_SCENES: Array[Dictionary] = [
 	{
 		"image": "res://assets/story/ending/failure_01_incomplete_grid.webp",
-		"title": "아직 이어지지 않은 에너지 길",
-		"caption": "몇몇 시설은 움직였지만 마을 전체를 밝히기에는 연결과 에너지가 조금 부족했습니다."
+		"title": "아직 전기가 부족해요",
+		"caption": "마을에 필요한 전기를 모두 보내지는 못했어요."
 	},
 	{
 		"image": "res://assets/story/ending/failure_02_safe_night.webp",
-		"title": "어둠 속에서도 함께",
-		"caption": "탐험대는 작은 빛을 나누며 주민들을 안전하게 도왔습니다. 누구도 포기하지 않았습니다."
+		"title": "밤에는 무엇이 필요할까요?",
+		"caption": "해가 지면 태양광 발전이 멈춰요. 저장한 전기나 다른 발전 시설이 필요해요."
 	},
 	{
 		"image": "res://assets/story/ending/failure_03_new_plan.webp",
-		"title": "다음 도전을 위한 약속",
-		"caption": "비가 그친 새벽, 탐험대는 남은 재료와 지도를 펼치고 에너지요정왕국의 회복을 위해 또 다시 도전할 계획입니다."
+		"title": "마을 계획을 돌아봐요",
+		"caption": "발전 시설과 배터리를 갖추고, 절전 시설로 필요한 전기를 줄일 수 있어요."
 	}
 ]
 
@@ -67,15 +67,17 @@ var _caption_label: Label
 var _progress_label: Label
 var _energy_label: Label
 var team_snapshot: Array[Dictionary] = []
+var trial_summary: Dictionary = {}
 var _recovery_label: Label
 var _team_panel: PanelContainer
 var _team_row: HBoxContainer
 var team_cards: Array[PanelContainer] = []
 
-func setup(success: bool, energy_value: int, target_value: int, players_snapshot: Array = []) -> void:
+func setup(success: bool, energy_value: int, target_value: int, players_snapshot: Array = [], electricity_summary: Dictionary = {}) -> void:
 	is_success = success
 	village_energy = energy_value
 	target_energy = target_value
+	trial_summary = electricity_summary.duplicate(true)
 	team_snapshot.clear()
 	var source_players := players_snapshot
 	if source_players.is_empty():
@@ -276,10 +278,13 @@ func _show_scene(next_index: int, immediate: bool = false) -> void:
 	title_text = str(scene["title"])
 	subtitle_text = str(scene["caption"])
 	if _energy_label:
-		_energy_label.text = "친환경 지수 %d / 목표 %d" % [village_energy, target_energy]
+		if trial_summary.is_empty():
+			_energy_label.text = "전기 공급 성공" if is_success else "전기 공급 부족"
+		else:
+			_energy_label.text = "공급 · 낮 %d%% / 밤 %d%%" % [roundi(float(trial_summary.get("daytime_coverage", 0.0)) * 100.0), roundi(float(trial_summary.get("night_coverage", 0.0)) * 100.0)]
 		_energy_label.add_theme_color_override("font_color", UI.TEAL if is_success else Color("d4e8ef"))
 	if _recovery_label:
-		var stages := ["어두웠던 마을", "에너지 연결", "다시 살아난 마을"] if is_success else ["남은 연결", "주민 돕기", "다음 도전"]
+		var stages := ["함께 건설", "낮과 밤", "마을 회복"] if is_success else ["공급 부족", "밤의 전기", "마을 계획"]
 		var stage_text := ""
 		for index in range(stages.size()):
 			stage_text += ("▶ " if index == scene_index else "") + str(stages[index])

@@ -12,7 +12,7 @@ const PREVIEWS := {
 	"grid_balance": "도시 수요에 전기 공급을 맞춰요",
 	"standby_hunt": "쓰지 않는 기기의 전원을 꺼요",
 	"hydro_gate": "물을 모아 수문을 열고 닫아요",
-	"energy_sort": "금방 다시 얻는 에너지를 나눠요",
+	"energy_sort": "다시 얻을 수 있는 에너지원을 찾아요",
 	"battery_relay": "남는 전기 저장 → 흐릴 때 공급",
 	"eco_commute": "학생을 태우고 학교에 멈춰요",
 	"heat_leak": "열린 창문을 닫아 냉방을 지켜요",
@@ -42,7 +42,7 @@ func _ready() -> void:
 	modal.standalone_replay_requested.connect(_replay)
 	modal.standalone_menu_requested.connect(_show_menu)
 	GameManager.minigame_finished.connect(_on_minigame_finished)
-	DisplayServer.window_set_title("에코 히어로즈 · 미니게임 체험")
+	DisplayServer.window_set_title("에코 히어로즈 · 에너지 미니게임")
 
 func open_request(requested_id: String) -> void:
 	if requested_id in AVAILABLE_IDS:
@@ -67,17 +67,17 @@ func _build_menu() -> void:
 	content.add_theme_constant_override("separation", 10)
 	menu.add_child(content)
 	var eyebrow := Label.new()
-	eyebrow.text = "에코 히어로즈 · 30~60초 아케이드"
+	eyebrow.text = "에코 히어로즈 · 4인 동시 도전"
 	eyebrow.add_theme_font_size_override("font_size", 17)
 	eyebrow.add_theme_color_override("font_color", Color("8fffe0"))
 	content.add_child(eyebrow)
 	var heading := Label.new()
-	heading.text = "에너지 미니게임 체험"
+	heading.text = "에너지 미니게임"
 	heading.add_theme_font_size_override("font_size", 31)
 	heading.add_theme_color_override("font_color", Color("fff0a6"))
 	content.add_child(heading)
 	var intro := Label.new()
-	intro.text = "미션을 고르면 P로 조작 연습을 할 수 있어요. 준비되면 나와 AI 3명이 함께 도전해요."
+	intro.text = "미션을 골라 나와 AI 3명이 도전해요. 시작 전 P로 조작을 연습할 수 있어요."
 	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	intro.add_theme_font_size_override("font_size", 18)
 	intro.add_theme_color_override("font_color", Color("c9e5e1"))

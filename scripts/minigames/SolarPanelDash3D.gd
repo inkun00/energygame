@@ -452,7 +452,7 @@ func _resolve_hazard_collision(obstacle: Node3D) -> void:
 		var obstacle_name := str(record.get("name", "장애물"))
 		_show_collision_flash()
 		_show_score_popup(penalty, false, "%s 충돌 · 뒤로 밀림" % obstacle_name)
-		arcade_event.emit(penalty, false, "%s에 부딪혀 충격량만큼 뒤로 밀려났어요." % obstacle_name, false)
+		arcade_event.emit(penalty, false, "%s에 부딪혀 뒤로 밀렸어요." % obstacle_name, false)
 		return
 
 func _update_course(delta: float) -> void:
@@ -489,7 +489,7 @@ func _update_course(delta: float) -> void:
 			var same_lane := absf(hero_body.position.x - obstacle.position.x) < 0.92
 			if same_lane and jump_height >= float(record.get("clearance", 0.6)):
 				_show_score_popup(30, true, "%s 회피 성공!" % str(record.get("name", "지형물")))
-				arcade_event.emit(30, true, "지형물을 뛰어넘어 태양광 발전 경로를 지켰어요!", false)
+				arcade_event.emit(30, true, "장애물을 뛰어넘었어요!", false)
 			elif same_lane:
 				record["resolved"] = false
 				_resolve_hazard_collision(obstacle)
@@ -516,7 +516,7 @@ func _resolve_panel_gate(record: Dictionary) -> void:
 		_tint_model(panels[selected_lane] as Node3D, correct_material if selected_lane == correct_lane else wrong_material)
 	if capture >= 0.95:
 		if not lane_choice_made:
-			arcade_event.emit(0, true, "태양을 보고 패널 길을 골라 보세요. 기다린 기록은 점수가 아니에요.", false)
+			arcade_event.emit(0, true, "A/D로 햇빛을 받는 패널을 골라야 점수를 얻어요.", false)
 			return
 		# Show the electricity leaving the selected panel before reaching the runner.
 		_spawn_energy_burst((panels[selected_lane] as Node3D).global_position + Vector3.UP * 0.75)

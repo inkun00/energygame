@@ -64,7 +64,9 @@ func _run() -> void:
 	gm.minigame_started.connect(_minigame_started)
 	gm.minigame_submission_changed.connect(_minigame_state)
 	gm.minigame_finished.connect(_minigame_finished)
-	gm.open_market_state_changed.connect(_market_state)
+	gm.component_choice_changed.connect(_component_state)
+	gm.team_plan_changed.connect(_team_plan_state)
+	gm.energy_trial_changed.connect(_trial_state)
 	gm.game_over.connect(func(rankings): endings = rankings.duplicate(true))
 	create_timer(230.0).timeout.connect(func(): _fail("watchdog expired"))
 	if role == "host":
@@ -144,14 +146,14 @@ func _host_scenario() -> void:
 	probe.command.rpc("checkpoint", {"key": "recovery"})
 	await _all_reports("recovery")
 	_check_same_reports("recovery")
-	# Supply a bounded shared-material fixture to cover market and construction.
+	# Supply a bounded shared-material fixture to cover planning and construction.
 	for idx in range(4):
 		for item in gm.ITEM_DEFINITIONS:
 			gm.players[idx]["inventory"][item] = 2
 		gm.player_inventory_changed.emit(idx, gm.players[idx]["inventory"].duplicate(true))
 	gm.game_time_remaining = 0.01
-	await _until(func(): return gm.village_construction_active, "market completes for all four humans")
-	_check(gm.get_team_inventory()["solar_panel"] == 8, "market preserves offered/taken materials and rejects duplicate takes")
+	await _until(func(): return gm.village_construction_active, "shared plan completes for all four humans")
+	_check(gm.get_team_inventory()["solar_panel"] == 8, "planning keeps shared materials intact")
 	var inventory_before: Dictionary = gm.get_team_inventory()
 	probe.command.rpc("invalid_build")
 	await _all_reports("invalid_build")
@@ -168,7 +170,8 @@ func _host_scenario() -> void:
 	await _all_reports("construction")
 	_check_same_reports("construction")
 	probe.command.rpc("finish")
-	await _until(func(): return endings.size() == 4, "four players finish construction and reach ending")
+	await _until(func(): return not gm.energy_trial.is_empty(), "construction opens shared electricity trial")
+	await _until(func(): return endings.size() == 4, "four players operate batteries and reach ending", 50.0)
 	await create_timer(0.25).timeout
 	probe.command.rpc("checkpoint", {"key": "ending"})
 	await _all_reports("ending")
@@ -219,7 +222,7 @@ func _command(kind: String, payload: Dictionary) -> void:
 			nm.request_evaluate_village()
 		"pass":
 			finished = true
-			print("[PASS] Four-player online rules %s · %d checks · 9 rounds · four-human turns/quiz/market/construction/ending · real ENet reconnect" % [role, checks])
+			print("[PASS] Four-player online rules %s · %d checks · 9 rounds · four-human turns/quiz/components/planning/construction/electricity/ending · real ENet reconnect" % [role, checks])
 			# Leave the authority alive until all peers have received the final packet.
 			await create_timer(0.7 if nm.is_host else 0.3).timeout
 			nm.disconnect_network()
@@ -247,10 +250,33 @@ func _quiz_resolved(idx: int, correct: bool) -> void:
 	quiz_seats[idx] = true
 	if quiz_seats.size() == 4:
 		turn_automation = false
-	if nm.is_host:
-		# Skip a 7–12s educational reading pause, retaining actual answer RPCs.
+	if nm.get_local_player_index() == idx:
+		# Skip only review reading time; earn the part via the real validated action.
 		await create_timer(0.2).timeout
-		gm.end_turn()
+		gm.finish_quiz_review(idx)
+
+func _component_state(state: Dictionary) -> void:
+	var seat: int = nm.get_local_player_index()
+	var choice: Dictionary = (state.get("choices", {}) as Dictionary).get(seat, {})
+	if str(choice.get("phase", "")) == "choosing":
+		gm.choose_quiz_component(seat, str(choice["options"][0]), int(choice["token"]))
+		gm.choose_quiz_component(seat, str(choice["options"][0]), int(choice["token"]))
+
+func _team_plan_state(state: Dictionary) -> void:
+	var seat: int = nm.get_local_player_index()
+	if bool(state.get("active", false)) and not (state.get("ready", {}) as Dictionary).has(seat):
+		gm.confirm_team_plan(seat)
+
+func _trial_state(state: Dictionary) -> void:
+	if state.is_empty(): return
+	var seat: int = nm.get_local_player_index()
+	if str(state.get("phase", "")) == "complete":
+		if not (state.get("ready", {}) as Dictionary).has(seat):
+			gm.finish_energy_trial(seat)
+	elif str(state.get("phase", "")) == "night" and str(state["players"][seat]["mode"]) != "supply":
+		gm.set_energy_trial_mode(seat, "supply")
+	elif str(state.get("phase", "")) == "day" and str(state["players"][seat]["mode"]) != "store":
+		gm.set_energy_trial_mode(seat, "store")
 
 func _minigame_started(data: Dictionary) -> void:
 	if nm.is_host: print("[TRACE] round %s" % data["id"])

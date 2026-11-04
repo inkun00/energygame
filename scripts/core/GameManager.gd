@@ -29,6 +29,18 @@ signal minigame_submission_changed(state)
 signal minigame_finished(results)
 signal adventure_preparation_changed(state)
 signal tutorial_turn_finished
+signal component_choice_changed(state)
+signal team_plan_changed(state)
+signal energy_trial_changed(state)
+
+const EnergyTrial = preload("res://scripts/core/VillageEnergyTrial.gd")
+var component_choices: Dictionary = {}
+var component_choice_serial := 0
+var team_plan: Dictionary = {"active": false, "remaining": 20.0, "choices": {}, "ready": {}}
+var energy_trial: Dictionary = {}
+var energy_trial_retries := 0
+var _learning_update_remaining := 0.0
+var _village_result_finalized := false
 
 # Session-only guided practice. Never replicated or persisted; normal setup and
 # leaving the board both clear it before another adventure can start.
@@ -93,8 +105,8 @@ const HEAT_LEAK_DASH = preload("res://scripts/minigames/HeatLeakDash3D.gd")
 const MINIGAME_DEFINITIONS := {
 	"solar_align": {
 		"id": "solar_align", "icon": "☀️", "title": "태양광 패널 대시",
-		"objective": "햇빛을 향한 패널 경로로 달리면서 태양광 발전 설비와 자연 지형물을 피하세요.",
-		"lesson": "태양광 패널은 햇빛을 정면으로 받을수록 더 많이 발전하며, 발전소에서는 설비 사이의 안전 통로를 지켜야 합니다.",
+		"objective": "햇빛을 향한 패널 경로로 달리면서 발전 설비와 장애물을 피하세요.",
+		"lesson": "패널이 햇빛을 정면으로 받을수록 발전량이 늘어요.",
 		"input_hint": "A/D 이동 · Space 점프", "accent": "ffd45c",
 		"controls": [
 			{"key": "A / D (← / →)", "action": "좌우 레인 이동"},
@@ -115,7 +127,7 @@ const MINIGAME_DEFINITIONS := {
 	},
 	"grid_balance": {
 		"id": "grid_balance", "icon": "⚡", "title": "스마트그리드 시티 컨트롤",
-		"objective": "부드럽게 변하는 도시 전력 수요를 따라가며 공급과 수요의 간격을 최대한 작게 유지하세요.",
+		"objective": "도시에 필요한 만큼 전기를 보내세요. 공급과 수요의 간격이 작을수록 좋아요.",
 		"lesson": "전력망은 매 순간 생산량과 소비량이 균형을 이뤄야 도시가 안정적으로 작동합니다.",
 		"input_hint": "W/S 또는 ↑/↓ 공급 조절", "accent": "78f0bd",
 		"controls": [
@@ -227,14 +239,14 @@ const ITEM_DEFINITIONS := {
 	"fast_charge_module": {"name": "고속 충전 모듈", "icon": "🔋", "asset": "res://assets/items/fast_charge_module.webp"}
 }
 const CONSTRUCTION_PROJECTS := [
-	{"name": "태양광 발전소", "image": "res://assets/buildings/solar_power_plant.webp", "requirements": {"solar_panel": 2, "battery": 1}, "terrains": ["solar_field"], "terrain_label": "햇빛 초원", "health": 35, "message": "햇빛으로 전기를 만드는 태양광 발전소가 완공됐습니다!"},
-	{"name": "풍력 발전단지", "image": "res://assets/buildings/wind_power_complex.webp", "requirements": {"wind_blade": 2, "smart_grid": 1}, "terrains": ["wind_plain", "wind_coast"], "terrain_label": "바람 들판 또는 해안 절벽", "health": 35, "message": "맑은 바람을 전기로 바꾸는 풍력 발전단지가 돌아가기 시작했습니다!"},
+	{"name": "태양광 발전소", "image": "res://assets/buildings/solar_power_plant.webp", "requirements": {"solar_panel": 2, "smart_grid": 1}, "terrains": ["solar_field"], "terrain_label": "햇빛 초원", "health": 35, "message": "햇빛으로 전기를 만드는 태양광 발전소가 완공됐습니다!"},
+	{"name": "풍력 발전단지", "image": "res://assets/buildings/wind_power_complex.webp", "requirements": {"wind_blade": 2, "smart_grid": 1}, "terrains": ["wind_plain", "wind_coast"], "terrain_label": "바람 들판 또는 해안 절벽", "health": 35, "message": "바람을 전기로 바꾸는 풍력 발전단지가 돌아가기 시작했습니다!"},
 	{"name": "에너지 절약 건물", "image": "res://assets/buildings/efficiency_building.webp", "requirements": {"insulation": 2, "smart_grid": 1}, "terrains": ["eco_city"], "terrain_label": "친환경 도시", "health": 25, "message": "단열과 절전 설비를 갖춘 에너지 절약 건물이 늘어났습니다!"},
 	{"name": "에너지 저장소", "image": "res://assets/buildings/energy_storage_facility.webp", "requirements": {"battery": 2, "smart_grid": 1}, "terrains": ["grid_hub"], "terrain_label": "전력망 광장", "health": 25, "message": "남는 전기를 모아 쓰는 에너지 저장소가 완공됐습니다!"},
 	{"name": "소수력 발전소", "image": "res://assets/buildings/small_hydro_plant.webp", "requirements": {"hydro_turbine": 2, "smart_grid": 1}, "terrains": ["riverbank"], "terrain_label": "강변 수로", "health": 30, "message": "강물의 흐름을 살린 친환경 소수력 발전소가 완공됐습니다!"},
-	{"name": "지열 발전소", "image": "res://assets/buildings/geothermal_power_plant.webp", "requirements": {"geothermal_core": 2, "insulation": 1}, "terrains": ["geothermal_field"], "terrain_label": "지열 온천 지대", "health": 30, "message": "땅속 열을 안정적인 전기로 바꾸는 지열 발전소가 완공됐습니다!"},
+	{"name": "지열 발전소", "image": "res://assets/buildings/geothermal_power_plant.webp", "requirements": {"geothermal_core": 2, "insulation": 1}, "terrains": ["geothermal_field"], "terrain_label": "지열 온천 지대", "health": 30, "message": "땅속 열을 전기로 바꾸는 지열 발전소가 완공됐습니다!"},
 	{"name": "조력 발전소", "image": "res://assets/buildings/tidal_power_plant.webp", "requirements": {"tidal_generator": 2, "battery": 1}, "terrains": ["tidal_lagoon"], "terrain_label": "바닷가 조력 석호", "health": 30, "message": "밀물과 썰물의 힘을 이용하는 조력 발전소가 완공됐습니다!"},
-	{"name": "원자력 발전소", "image": "res://assets/buildings/nuclear_power_plant.webp", "requirements": {"reactor_control_core": 2, "smart_grid": 1}, "terrains": ["nuclear_site"], "terrain_label": "안전 관리 부지", "health": 40, "message": "안전 제어 설비를 갖춘 차세대 원자력 발전소가 안정적으로 전력을 공급합니다!"},
+	{"name": "원자력 발전소", "image": "res://assets/buildings/nuclear_power_plant.webp", "requirements": {"reactor_control_core": 2, "smart_grid": 1}, "terrains": ["nuclear_site"], "terrain_label": "안전 관리 부지", "health": 40, "message": "안전 제어 설비를 갖춘 원자력 발전소가 전기를 공급합니다."},
 	{"name": "자원순환 생활센터", "category": "친환경 생활", "image": "res://assets/buildings/resource_circulation_center.webp", "requirements": {"recycled_composite": 2, "smart_grid": 1}, "terrains": ["eco_city"], "terrain_label": "친환경 마을", "health": 20, "message": "수리·재사용·분리배출을 한곳에서 실천하는 자원순환 생활센터가 문을 열었습니다!"},
 	{"name": "전기 대중교통 허브", "category": "친환경 생활", "image": "res://assets/buildings/electric_transit_hub.webp", "requirements": {"fast_charge_module": 2, "battery": 1}, "terrains": ["grid_hub"], "terrain_label": "다리 옆 전력 광장", "health": 25, "message": "전기 셔틀과 자전거를 편리하게 이용하는 친환경 교통 거점이 완성됐습니다!"}
 ]
@@ -334,6 +346,13 @@ func _process(delta: float) -> void:
 	if adventure_waiting_for_start:
 		return
 	_update_ai_progress_watchdog(delta)
+	_update_component_choices(delta)
+	if bool(team_plan.get("active", false)):
+		_update_team_plan(delta)
+		return
+	if not energy_trial.is_empty() and not village_construction_active and not _village_result_finalized:
+		_update_energy_trial(delta)
+		return
 	if not active_minigame.is_empty():
 		_update_minigame(delta)
 		return
@@ -350,8 +369,7 @@ func _process(delta: float) -> void:
 		_last_emitted_time_seconds = display_seconds
 		game_time_changed.emit(display_seconds, game_duration_seconds)
 	if game_time_remaining <= 0.0:
-		status_message_posted.emit("⏰ 설정한 플레이 시간이 끝났습니다. 남은 부품으로 오픈마켓을 엽니다!")
-		_start_open_market_phase()
+		_start_team_planning_phase()
 		return
 	_update_player_dice_input_timer(delta)
 	if current_state == TurnState.RESOLVING_QUIZ and active_quiz_player_idx >= 0:
@@ -361,6 +379,7 @@ func _process(delta: float) -> void:
 
 # 게임 초기화 (로비에서 호출)
 func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAULT_GAME_DURATION_SECONDS) -> void:
+	_reset_learning_flow()
 	local_minigame_practice_round_id = -1
 	game_session_id += 1
 	guided_tutorial_active = false
@@ -503,6 +522,7 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 	status_message_posted.emit(party_message)
 
 func stop_game() -> void:
+	_reset_learning_flow()
 	local_minigame_practice_round_id = -1
 	game_session_id += 1
 	guided_tutorial_active = false
@@ -561,6 +581,16 @@ func apply_network_patch(patch: Dictionary, event_name: String, event_args: Arra
 
 func _apply_network_values(values: Dictionary) -> void:
 	var old_preparation := [adventure_waiting_for_start, adventure_ready_players.duplicate(true)]
+	if values.has("component_choices"):
+		component_choices = (values["component_choices"] as Dictionary).duplicate(true)
+	if values.has("component_choice_serial"):
+		component_choice_serial = int(values["component_choice_serial"])
+	if values.has("team_plan"):
+		team_plan = (values["team_plan"] as Dictionary).duplicate(true)
+	if values.has("energy_trial"):
+		energy_trial = (values["energy_trial"] as Dictionary).duplicate(true)
+	if values.has("energy_trial_retries"):
+		energy_trial_retries = int(values["energy_trial_retries"])
 	if values.has("players"):
 		players.clear()
 		for player_value in values["players"]:
@@ -953,6 +983,8 @@ func _resolve_tile_event(player_idx: int, tile_idx: int, shortcut_history: Array
 			current_state = TurnState.RESOLVING_QUIZ
 			# 게임판에 남아 있는 세 종류의 퀴즈 칸은 모두 4지선다 문제를 출제합니다.
 			var quiz = QuizDatabase.get_random_quiz()
+			if guided_tutorial_active:
+				quiz = {"type": 0, "id": "tutorial_solar", "question": "태양광 패널은 무엇을 이용해 전기를 만들까요?", "options": ["햇빛", "바람", "석탄", "건전지"], "answer": "햇빛", "explanation": "태양광 패널은 햇빛을 전기로 바꿔요. 해가 진 뒤에는 저장한 전기나 다른 발전 시설이 필요해요.", "reward_energy": 2, "time_limit": 25.0}
 			active_quiz_data = quiz
 			active_quiz_player_idx = player_idx
 			active_quiz_time_remaining = float(quiz.get("time_limit", 25.0)) + 1.0
@@ -1724,7 +1756,8 @@ func on_network_quiz_resolved(player_idx: int, is_correct: bool, selected_choice
 		team_quiz_correct += 1
 		kingdom_progress_changed.emit(projects_built, CONSTRUCTION_PROJECTS.size(), kingdom_health)
 		AudioManager.play_correct_sfx()
-		status_message_posted.emit("정답! 에너지 +%d · 특수기술 SP +%d · 동점 점수 +%d" % [reward_energy, reward_energy, QUIZ_CORRECT_SCORE])
+		status_message_posted.emit("정답! 에너지 +%d · 기술 에너지 +%d · 필요한 부품 1개를 고르세요." % [reward_energy, reward_energy])
+		_offer_quiz_component(player_idx)
 	else:
 		AudioManager.play_wrong_sfx()
 		if cur_p["shield"]:
@@ -1742,11 +1775,230 @@ func on_network_quiz_resolved(player_idx: int, is_correct: bool, selected_choice
 	active_quiz_player_idx = -1
 	active_quiz_time_remaining = 0.0
 	active_spectator_quiz_attempts.clear()
+	# Practice advances only when the child closes the explanation. A hidden
+	# reading timer must not cancel the review and strand the tutorial stage.
+	if guided_tutorial_active:
+		return
 	var review_turn := total_turns
 	_schedule_game_action(quiz_result_reading_seconds(resolved_quiz, learning_grade), func():
 		if total_turns == review_turn and current_turn_idx == player_idx and current_state == TurnState.RESOLVING_QUIZ and not open_market_active and not village_construction_active:
-			end_turn()
+			if component_choices.has(player_idx):
+				finish_quiz_review(player_idx)
+			else:
+				end_turn()
 	)
+
+func _reset_learning_flow() -> void:
+	component_choices.clear()
+	component_choice_serial = 0
+	team_plan = {"active": false, "remaining": 20.0, "choices": {}, "ready": {}}
+	energy_trial.clear()
+	energy_trial_retries = 0
+	_learning_update_remaining = 0.0
+	_village_result_finalized = false
+
+func get_component_choice_state() -> Dictionary:
+	return {"choices": component_choices.duplicate(true), "serial": component_choice_serial}
+
+func get_team_plan_state() -> Dictionary:
+	return team_plan.duplicate(true)
+
+func get_energy_trial_state() -> Dictionary:
+	var state := energy_trial.duplicate(true)
+	if not state.is_empty():
+		state["can_retry"] = energy_trial_retries < 1 and not bool(state.get("success", false))
+		state["summary"] = {"success": bool(state.get("success", false)), "coverage": float(state.get("coverage", 0.0)), "daytime_coverage": float(state.get("daytime_coverage", 0.0)), "night_coverage": float(state.get("night_coverage", 0.0))}
+	return state
+
+func _component_options(player_idx: int) -> Array[String]:
+	var options: Array[String] = []
+	var goals: Array = [int((team_plan.get("choices", {}) as Dictionary).get(player_idx, [0, 3, 2, 4][player_idx % 4]))]
+	for goal in (team_plan.get("choices", {}) as Dictionary).values():
+		if not int(goal) in goals:
+			goals.append(int(goal))
+	var inventory := get_team_inventory()
+	for goal in goals:
+		if int(goal) < 0 or int(goal) >= CONSTRUCTION_PROJECTS.size() or int(goal) in built_project_ids:
+			continue
+		var recipe: Dictionary = CONSTRUCTION_PROJECTS[int(goal)]["requirements"]
+		for item in recipe:
+			if int(inventory.get(item, 0)) < int(recipe[item]) and not str(item) in options:
+				options.append(str(item))
+	for item in ["solar_panel", "battery", "smart_grid", "hydro_turbine", "insulation"]:
+		if not item in options:
+			options.append(item)
+	return options.slice(0, 3)
+
+func _offer_quiz_component(player_idx: int) -> void:
+	component_choice_serial += 1
+	component_choices[player_idx] = {"token": component_choice_serial, "options": _component_options(player_idx), "phase": "waiting", "remaining": 8.0, "project_idx": int((team_plan["choices"] as Dictionary).get(player_idx, [0, 3, 2, 4][player_idx % 4]))}
+	component_choice_changed.emit(get_component_choice_state())
+
+func finish_quiz_review(player_idx: int) -> void:
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		NetworkManager.request_learning_action("quiz_review", {"player_idx": player_idx})
+		return
+	if not component_choices.has(player_idx) or not is_game_active:
+		return
+	var choice: Dictionary = component_choices[player_idx]
+	if str(choice.get("phase", "")) != "waiting":
+		return
+	choice["phase"] = "choosing"
+	component_choice_changed.emit(get_component_choice_state())
+
+func choose_quiz_component(player_idx: int, item_id: String, token: int) -> bool:
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		NetworkManager.request_learning_action("quiz_component", {"player_idx": player_idx, "item_id": item_id, "token": token})
+		return true
+	if player_idx < 0 or player_idx >= players.size() or not component_choices.has(player_idx) or not is_game_active:
+		return false
+	var choice: Dictionary = component_choices[player_idx]
+	if int(choice.get("token", -1)) != token or str(choice.get("phase", "")) != "choosing" or not item_id in choice.get("options", []):
+		return false
+	# Consume before signals: repeated RPCs and review timers cannot grant twice.
+	component_choices.erase(player_idx)
+	var inventory: Dictionary = players[player_idx]["inventory"]
+	inventory[item_id] = int(inventory.get(item_id, 0)) + 1
+	player_inventory_changed.emit(player_idx, inventory.duplicate(true))
+	component_choice_changed.emit(get_component_choice_state())
+	status_message_posted.emit("%s: %s +1" % [players[player_idx]["name"], ITEM_DEFINITIONS[item_id]["name"]])
+	if current_turn_idx == player_idx and current_state == TurnState.RESOLVING_QUIZ:
+		end_turn()
+	return true
+
+func _update_component_choices(delta: float) -> void:
+	for idx_value in component_choices.keys():
+		var idx := int(idx_value)
+		var choice: Dictionary = component_choices[idx]
+		if str(choice.get("phase", "")) != "choosing":
+			continue
+		var old_second := ceili(float(choice["remaining"]))
+		choice["remaining"] = maxf(0.0, float(choice["remaining"]) - delta)
+		if float(choice["remaining"]) <= 0.0 or bool(players[idx].get("is_ai", false)):
+			choose_quiz_component(idx, str(choice["options"][0]), int(choice["token"]))
+		elif old_second != ceili(float(choice["remaining"])):
+			component_choice_changed.emit(get_component_choice_state())
+
+func select_team_project(player_idx: int, project_idx: int) -> bool:
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		NetworkManager.request_learning_action("team_project", {"player_idx": player_idx, "project_idx": project_idx})
+		return true
+	if player_idx < 0 or player_idx >= players.size() or project_idx < 0 or project_idx >= CONSTRUCTION_PROJECTS.size():
+		return false
+	if not is_game_active and not bool(team_plan.get("active", false)):
+		return false
+	team_plan["choices"][player_idx] = project_idx
+	team_plan["ready"].erase(player_idx)
+	team_plan_changed.emit(get_team_plan_state())
+	return true
+
+func _start_team_planning_phase() -> void:
+	if bool(team_plan.get("active", false)) or village_construction_active or not energy_trial.is_empty():
+		return
+	# Earned choices survive the exploration deadline; settle them once before planning.
+	for idx in component_choices.keys():
+		var choice: Dictionary = component_choices[idx]
+		choice["phase"] = "choosing"
+		choose_quiz_component(int(idx), str(choice["options"][0]), int(choice["token"]))
+	is_game_active = false
+	active_quiz_data.clear()
+	active_quiz_player_idx = -1
+	active_quiz_time_remaining = 0.0
+	pending_lap_reward.clear()
+	open_market_active = false
+	current_state = TurnState.GAME_OVER
+	team_plan["active"] = true
+	team_plan["remaining"] = 20.0
+	team_plan["ready"] = {}
+	for idx in range(players.size()):
+		if not team_plan["choices"].has(idx):
+			team_plan["choices"][idx] = [0, 3, 2, 4][idx % 4]
+	team_plan_changed.emit(get_team_plan_state())
+	status_message_posted.emit("모은 부품으로 어떤 시설을 지을까요? 친구들과 골라 보세요.")
+
+func confirm_team_plan(player_idx: int) -> bool:
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		NetworkManager.request_learning_action("team_confirm", {"player_idx": player_idx})
+		return true
+	if not bool(team_plan.get("active", false)) or player_idx < 0 or player_idx >= players.size():
+		return false
+	team_plan["ready"][player_idx] = true
+	team_plan_changed.emit(get_team_plan_state())
+	if team_plan["ready"].size() == players.size():
+		_finish_team_planning()
+	return true
+
+func _update_team_plan(delta: float) -> void:
+	var old_second := ceili(float(team_plan["remaining"]))
+	team_plan["remaining"] = maxf(0.0, float(team_plan["remaining"]) - delta)
+	for idx in range(players.size()):
+		if bool(players[idx].get("is_ai", false)):
+			team_plan["ready"][idx] = true
+	if float(team_plan["remaining"]) <= 0.0 or team_plan["ready"].size() == players.size():
+		_finish_team_planning()
+	elif old_second != ceili(float(team_plan["remaining"])):
+		team_plan_changed.emit(get_team_plan_state())
+
+func _finish_team_planning() -> void:
+	team_plan["active"] = false
+	team_plan_changed.emit(get_team_plan_state())
+	_start_village_construction_phase()
+
+func _start_energy_trial() -> void:
+	village_construction_active = false
+	village_ai_construction_running = false
+	energy_trial = EnergyTrial.create_state(built_project_ids, players.size())
+	energy_trial["ready"] = {}
+	energy_trial["retry_available"] = energy_trial_retries < 1
+	energy_trial["retry_count"] = energy_trial_retries
+	_learning_update_remaining = 0.0
+	energy_trial_changed.emit(get_energy_trial_state())
+
+func set_energy_trial_mode(player_idx: int, mode: String) -> bool:
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		NetworkManager.request_learning_action("trial_mode", {"player_idx": player_idx, "mode": mode})
+		return true
+	if energy_trial.is_empty() or village_construction_active or _village_result_finalized:
+		return false
+	if not EnergyTrial.set_mode(energy_trial, player_idx, mode):
+		return false
+	energy_trial_changed.emit(get_energy_trial_state())
+	return true
+
+func _update_energy_trial(delta: float) -> void:
+	if EnergyTrial.is_complete(energy_trial):
+		for idx in range(players.size()):
+			if bool(players[idx].get("is_ai", false)):
+				energy_trial["ready"][idx] = true
+		if energy_trial["ready"].size() == players.size():
+			_finalize_village_evaluation()
+		return
+	for idx in range(players.size()):
+		if bool(players[idx].get("is_ai", false)):
+			EnergyTrial.set_mode(energy_trial, idx, "supply" if str(energy_trial["phase"]) == "night" else "store")
+	var old_phase := str(energy_trial["phase"])
+	EnergyTrial.advance(energy_trial, delta)
+	_learning_update_remaining -= delta
+	if _learning_update_remaining <= 0.0 or str(energy_trial["phase"]) != old_phase:
+		_learning_update_remaining = 0.1
+		energy_trial_changed.emit(get_energy_trial_state())
+
+func finish_energy_trial(player_idx: int, retry: bool = false) -> void:
+	if NetworkManager.is_online and not NetworkManager.is_host:
+		NetworkManager.request_learning_action("trial_finish", {"player_idx": player_idx, "retry": retry})
+		return
+	if player_idx < 0 or player_idx >= players.size() or energy_trial.is_empty() or not EnergyTrial.is_complete(energy_trial) or _village_result_finalized or village_construction_active:
+		return
+	if retry and not bool(energy_trial.get("success", false)) and energy_trial_retries < 1:
+		energy_trial_retries += 1
+		energy_trial.clear()
+		energy_trial_changed.emit(get_energy_trial_state())
+		_start_village_construction_phase()
+		return
+	energy_trial["ready"][player_idx] = true
+	energy_trial_changed.emit(get_energy_trial_state())
+	if energy_trial["ready"].size() == players.size():
+		_finalize_village_evaluation()
 
 static func quiz_result_reading_seconds(quiz: Dictionary, grade: int = 5) -> float:
 	var reading_characters := str(quiz.get("explanation", "")).length() + str(quiz.get("answer", "")).length()
@@ -2335,7 +2587,7 @@ func _start_village_construction_phase() -> void:
 	village_finished_players.clear()
 	is_game_active = false
 	current_state = TurnState.GAME_OVER
-	status_message_posted.emit("🏘️ 친구들의 재료를 함께 써서 지수 %d의 마을을 만들어요. 모두 건설을 마치면 AI와 함께 결과를 확인해요." % VILLAGE_RECOVERY_TARGET)
+	status_message_posted.emit("친구들과 모은 부품으로 시설을 지으세요. 모두 마치면 낮과 밤의 전기 공급을 확인해요.")
 	village_construction_started.emit(get_player_inventories())
 	# 모든 사람이 자신의 건설을 마친 뒤 AI도 남은 공동 재료로 시설을 건설합니다.
 	_schedule_village_ai_construction()
@@ -2435,8 +2687,6 @@ func build_village_project(project_index: int, player_idx: int = -1, map_positio
 	kingdom_progress_changed.emit(projects_built, CONSTRUCTION_PROJECTS.size(), kingdom_health)
 	village_construction_changed.emit(get_player_inventories(), projects_built, kingdom_health)
 	status_message_posted.emit("🏗️ 팀 재료로 %s 완공! 건설자 에너지 +%d · 부품 제공자 1개당 +%d. 모두 건설을 마치면 결과를 확인해요." % [project["name"], CONSTRUCTION_COMPLETION_REWARD, TEAM_MATERIAL_REWARD])
-	if kingdom_health >= VILLAGE_RECOVERY_TARGET and _all_humans_finished_construction():
-		evaluate_village(true)
 	return true
 
 func evaluate_village(allow_during_ai_construction: bool = false) -> void:
@@ -2445,7 +2695,13 @@ func evaluate_village(allow_during_ai_construction: bool = false) -> void:
 	if village_ai_construction_running and not allow_during_ai_construction:
 		status_message_posted.emit("🤖 AI 플레이어가 발전소를 선택하고 있습니다. 잠시 후 마을 완성도를 확인하세요.")
 		return
-	kingdom_recovered = kingdom_health >= VILLAGE_RECOVERY_TARGET
+	_start_energy_trial()
+
+func _finalize_village_evaluation() -> void:
+	if _village_result_finalized or energy_trial.is_empty() or not EnergyTrial.is_complete(energy_trial):
+		return
+	_village_result_finalized = true
+	kingdom_recovered = bool(energy_trial.get("success", false))
 	village_construction_active = false
 	village_ai_construction_running = false
 	_award_movement_end_rewards()
@@ -2468,9 +2724,9 @@ func evaluate_village(allow_during_ai_construction: bool = false) -> void:
 	)
 	game_over.emit(rankings)
 	if kingdom_recovered:
-		status_message_posted.emit("🌍 목표 달성! 친환경 시설이 화력발전소를 대신하며 왕국이 건강한 미래를 되찾았습니다!")
+		status_message_posted.emit("낮에도 밤에도 마을에 전기를 보냈어요!")
 	else:
-		status_message_posted.emit("🌧️ 공동 친환경 에너지 지수가 아직 %d / %d입니다. 왕국 복원은 다음 도전으로 이어집니다." % [kingdom_health, VILLAGE_RECOVERY_TARGET])
+		status_message_posted.emit("전기가 부족한 시간이 있었어요. 낮과 밤의 결과를 확인해 보세요.")
 
 func _record_player_movement(player_idx: int, from_tile: int, to_tile: int) -> void:
 	if player_idx < 0 or player_idx >= players.size():
@@ -2541,7 +2797,7 @@ func _run_one_ai_village_construction() -> bool:
 		if project_index < 0:
 			continue
 		village_ai_builder_cursor = (player_idx + 1) % players.size()
-		status_message_posted.emit("🤖 [%s] 님이 보유 재료를 분석해 %s 건설을 선택했습니다." % [players[player_idx]["name"], CONSTRUCTION_PROJECTS[project_index]["name"]])
+		status_message_posted.emit("%s: %s 건설" % [players[player_idx]["name"], CONSTRUCTION_PROJECTS[project_index]["name"]])
 		return build_village_project(project_index, player_idx)
 	return false
 
@@ -2552,11 +2808,18 @@ func _choose_ai_village_project(player_idx: int) -> int:
 			candidates.append(project_index)
 	if candidates.is_empty():
 		return -1
-	# 같은 조건에서는 선택이 매번 달라질 수 있게 먼저 섞고, 공동 지수를 많이
-	# 올리는 시설부터 고려해 AI가 의미 있는 건설 결정을 내리게 합니다.
-	candidates.shuffle()
+	var recommended := int((team_plan.get("choices", {}) as Dictionary).get(player_idx, -1))
+	if recommended in candidates:
+		return recommended
+	# Choose a facility that improves the actual day/night supply, not scenery points.
 	candidates.sort_custom(func(a: int, b: int):
-		return int(CONSTRUCTION_PROJECTS[a].get("health", 0)) > int(CONSTRUCTION_PROJECTS[b].get("health", 0))
+		var first := built_project_ids.duplicate()
+		first.append(a)
+		var second := built_project_ids.duplicate()
+		second.append(b)
+		var first_supply: Dictionary = EnergyTrial.forecast(first)
+		var second_supply: Dictionary = EnergyTrial.forecast(second)
+		return float(first_supply["coverage"]) + float(first_supply["night_coverage"]) > float(second_supply["coverage"]) + float(second_supply["night_coverage"])
 	)
 	return candidates[0]
 

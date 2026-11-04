@@ -60,30 +60,51 @@ const server = http.createServer((req, res) => {
     await enter();
     await capture('03-quiz-explanation');
     await enter();
+    await capture('04-component-choice');
+    await page.keyboard.press('Digit1', {delay: 160});
+    await page.waitForTimeout(600);
     await enter();
-    await capture('04-arcade-guide');
+    await capture('05-arcade-guide');
     await enter();
     await page.waitForTimeout(3800);
     await page.keyboard.down('KeyW');
     await page.waitForTimeout(400);
     await page.keyboard.up('KeyW');
-    await capture('05-arcade-playing');
+    await capture('06-arcade-playing');
     await page.waitForTimeout(31000);
-    await capture('06-arcade-results');
+    await capture('07-arcade-results');
     // The software WebGL renderer can deliver fewer active frames than a real
     // laptop; allow the noncompetitive eight-second results animation to drain.
     await page.waitForTimeout(15000);
-    await capture('07-reward');
+    await capture('08-reward');
     await enter();
-    await capture('08-construction');
+    await capture('09-team-plan');
+    await page.mouse.click(640, 646);
+    await page.waitForTimeout(1200);
+    await capture('10-construction');
     await enter();
-    await capture('09-placement-pads');
+    await capture('11-placement-pads');
     await enter();
-    await capture('10-complete');
+    // Newly completed cards move below the remaining recommendation. Select
+    // the first available facility, then place it with the actual map keyboard.
+    await page.mouse.click(947, 229);
     await enter();
-    await capture('11-fresh-adventure');
+    await capture('12-storage-built');
+    await enter();
+    await page.waitForTimeout(2000);
+    await page.keyboard.press('Digit1', {delay: 160});
+    await page.waitForTimeout(2000);
+    await capture('13-day-storage');
+    await page.waitForTimeout(18500);
+    await page.keyboard.press('Digit2', {delay: 160});
+    await page.waitForTimeout(2200);
+    await capture('14-night-supply');
+    await page.waitForTimeout(21000);
+    await capture('15-trial-result');
+    await enter();
+    await capture('16-fresh-adventure');
     if (errors.length) throw new Error(errors.join('\n'));
-    console.log('[TutorialBrowser] No browser errors. Review captures 01–11 alongside GuidedTutorialTest assertions.');
+    console.log('[TutorialBrowser] No browser errors. Review captures 01–16 alongside GuidedTutorialTest and LearningVillageUITest assertions.');
     await page.close({runBeforeUnload: false});
   } finally {
     if (browser) await browser.close();

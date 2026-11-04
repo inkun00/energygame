@@ -23,7 +23,7 @@ func _run_tests() -> void:
 	_test_special_skills()
 	await _test_ai_special_skills()
 	_test_personal_material_inventory()
-	_test_open_market_exchange()
+	_test_shared_facility_planning()
 	_test_expanded_renewable_projects()
 	await _test_ai_village_construction()
 	_test_movement_end_rewards()
@@ -345,32 +345,23 @@ func _test_personal_material_inventory() -> void:
 	_expect(game_manager.collected_item_tiles.get(1, -1) == 0, "칸별 재료의 최초 획득 플레이어가 기록되어야 합니다.")
 	game_manager.stop_game()
 
-func _test_open_market_exchange() -> void:
+func _test_shared_facility_planning() -> void:
 	var game_manager = _fresh_game()
 	game_manager.players[0]["inventory"]["solar_panel"] = 2
-	game_manager.players[1]["inventory"]["wind_blade"] = 1
-	game_manager._start_open_market_phase()
-	_expect(game_manager.open_market_active, "게임 종료 뒤 남은 부품이 있으면 오픈마켓이 시작되어야 합니다.")
-	_expect(game_manager.open_market_phase == game_manager.OpenMarketPhase.OFFERING, "오픈마켓은 비공개 출품 선택 단계부터 시작해야 합니다.")
-
-	_expect(game_manager.submit_open_market_offer(0, {"solar_panel": 2}), "플레이어가 보유한 부품을 출품할 수 있어야 합니다.")
-	_expect(game_manager.submit_open_market_offer(1, {"wind_blade": 1}), "다른 플레이어도 자신의 부품을 출품할 수 있어야 합니다.")
-	_expect(game_manager.submit_open_market_offer(2, {}), "부품을 출품하지 않는 선택도 완료 처리되어야 합니다.")
-	_expect(game_manager._open_market_stock_total() == 0, "전원이 결정하기 전에는 출품 부품이 마켓에 공개되면 안 됩니다.")
-	_expect(game_manager.players[0]["inventory"]["solar_panel"] == 2, "동시 공개 전에는 개인 인벤토리에서 부품을 차감하면 안 됩니다.")
-
-	_expect(game_manager.submit_open_market_offer(3, {}), "마지막 플레이어의 선택이 정상적으로 제출되어야 합니다.")
-	_expect(game_manager.open_market_phase == game_manager.OpenMarketPhase.TAKING, "전원이 결정하면 모든 출품 부품이 동시에 공개되어야 합니다.")
-	_expect(game_manager.open_market_stock["solar_panel"] == 2 and game_manager.open_market_stock["wind_blade"] == 1, "동시 공개된 오픈마켓 재고가 모든 출품 수량과 일치해야 합니다.")
-	_expect(game_manager.open_market_take_allowances[0] == 2 and game_manager.open_market_take_allowances[1] == 1, "가져갈 수 있는 수량은 각자 출품한 수량과 같아야 합니다.")
-
-	_expect(game_manager.take_open_market_item(0, "wind_blade"), "먼저 누른 플레이어가 마켓 부품을 획득해야 합니다.")
-	_expect(game_manager.take_open_market_item(0, "solar_panel"), "남은 허용 수량만큼 추가 부품을 획득할 수 있어야 합니다.")
-	_expect(not game_manager.take_open_market_item(0, "solar_panel"), "출품 수량을 초과해 마켓 부품을 가져갈 수 없어야 합니다.")
-	_expect(game_manager.take_open_market_item(1, "solar_panel"), "남아 있는 부품은 다음 요청 플레이어가 선착순으로 획득해야 합니다.")
-	_expect(not game_manager.open_market_active and game_manager.village_construction_active, "마켓 재고 소진 뒤에는 최종 마을 건설 단계로 이어져야 합니다.")
-	_expect(game_manager.players[0]["inventory"]["solar_panel"] == 1 and game_manager.players[0]["inventory"]["wind_blade"] == 1, "교환 결과가 첫 번째 플레이어의 개인 인벤토리에 반영되어야 합니다.")
-	_expect(game_manager.players[1]["inventory"]["solar_panel"] == 1 and game_manager.players[1]["inventory"]["wind_blade"] == 0, "교환 결과가 두 번째 플레이어의 개인 인벤토리에 반영되어야 합니다.")
+	game_manager.players[1]["inventory"]["smart_grid"] = 1
+	var inventory_before: Dictionary = game_manager.get_team_inventory().duplicate(true)
+	game_manager.game_time_remaining = 0.01
+	game_manager._process(0.02)
+	_expect(game_manager.team_plan["active"] and not game_manager.open_market_active, "탐험이 끝나면 공동 시설을 계획해야 합니다.")
+	_expect(game_manager.select_team_project(0, 0) and game_manager.select_team_project(1, 3), "태양광과 저장 시설처럼 서로 보완하는 시설을 함께 계획할 수 있어야 합니다.")
+	for idx in range(3):
+		game_manager.confirm_team_plan(idx)
+	_expect(game_manager.team_plan["active"], "마지막 친구의 계획 확인을 기다려야 합니다.")
+	game_manager.confirm_team_plan(3)
+	_expect(game_manager.village_construction_active and not game_manager.team_plan["active"], "모두 확인하면 공동 건설이 열려야 합니다.")
+	_expect(game_manager.get_team_inventory() == inventory_before, "계획 단계는 재료를 잃거나 임의로 옮기지 않아야 합니다.")
+	_expect(game_manager.can_build_village_project(0, 0) and game_manager.build_village_project(0, 0), "친구들의 부품을 합쳐 선택한 태양광 시설을 건설할 수 있어야 합니다.")
+	_expect(game_manager.get_team_inventory()["solar_panel"] == 0 and game_manager.get_team_inventory()["smart_grid"] == 0, "건설할 때에만 필요한 공동 재료를 사용해야 합니다.")
 	game_manager.stop_game()
 
 func _test_expanded_renewable_projects() -> void:
@@ -415,7 +406,7 @@ func _test_ai_village_construction() -> void:
 	game_manager.players[1]["is_ai"] = true
 	var ai_inventory: Dictionary = game_manager._create_empty_inventory()
 	ai_inventory["solar_panel"] = 2
-	ai_inventory["battery"] = 1
+	ai_inventory["smart_grid"] = 1
 	game_manager.players[1]["inventory"] = ai_inventory
 	game_manager._start_village_construction_phase()
 	var previous_time_scale := Engine.time_scale
@@ -429,7 +420,7 @@ func _test_ai_village_construction() -> void:
 	_expect(0 in game_manager.built_project_ids, "사람과 함께 플레이한 AI도 자기 재료로 건설 가능한 발전소를 선택해야 합니다.")
 	_expect(int(game_manager.built_project_owners.get(0, -1)) == 1, "AI가 선택한 발전소는 해당 AI의 건설 결과로 기록되어야 합니다.")
 	_expect(game_manager.players[1].get("project_completion_bonus", 0) == 1, "AI의 최종 완공 수에 자동 건설 결과가 반영되어야 합니다.")
-	_expect(game_manager.players[1]["inventory"]["solar_panel"] == 0 and game_manager.players[1]["inventory"]["battery"] == 0, "AI 건설에도 해당 AI의 개인 재료가 소모되어야 합니다.")
+	_expect(game_manager.players[1]["inventory"]["solar_panel"] == 0 and game_manager.players[1]["inventory"]["smart_grid"] == 0, "AI 건설에도 해당 AI의 개인 재료가 소모되어야 합니다.")
 	game_manager.stop_game()
 
 func _test_kingdom_recovery_ending() -> void:
@@ -439,7 +430,7 @@ func _test_kingdom_recovery_ending() -> void:
 	game_manager.game_over.connect(capture_game_over)
 	game_manager._start_village_construction_phase()
 	_expect(game_manager.village_construction_active and not game_manager.is_game_active, "마지막 칸 뒤에는 재료를 쓰는 마을 건설 단계가 열려야 합니다.")
-	game_manager.players[0]["inventory"] = {"solar_panel": 2, "wind_blade": 0, "battery": 1, "insulation": 0, "smart_grid": 0}
+	game_manager.players[0]["inventory"] = {"solar_panel": 2, "wind_blade": 0, "battery": 0, "insulation": 0, "smart_grid": 1}
 	game_manager.players[1]["inventory"] = {"solar_panel": 0, "wind_blade": 2, "battery": 0, "insulation": 0, "smart_grid": 1}
 	_expect(game_manager.can_build_village_project(0, 0) and game_manager.can_build_village_project(1, 1), "각자 필요한 재료를 보유한 플레이어는 건물을 지을 수 있어야 합니다.")
 	_expect(game_manager.can_build_village_project(1, 0), "팀원들의 재료를 합쳐 누구든 필요한 공동 시설을 건설할 수 있어야 합니다.")
@@ -447,11 +438,26 @@ func _test_kingdom_recovery_ending() -> void:
 	_expect(game_manager.build_village_project(1, 1), "플레이어 1의 개인 재료로 풍력 발전단지가 건설되어야 합니다.")
 	_expect(game_manager.kingdom_health == game_manager.VILLAGE_RECOVERY_TARGET, "건물 효과의 합으로 복원 목표 건강도에 도달해야 합니다.")
 	_expect(game_manager.village_construction_active and not ending["received"], "목표를 먼저 달성해도 다른 사람이 건설할 기회를 빼앗으면 안 됩니다.")
+	game_manager.players[2]["inventory"]["battery"] = 2
+	game_manager.players[2]["inventory"]["smart_grid"] = 1
+	_expect(game_manager.build_village_project(3, 2), "남는 낮 전기를 밤에 쓰기 위한 저장 시설을 따로 건설할 수 있어야 합니다.")
 	for player_idx in range(game_manager.players.size()):
 		game_manager.finish_village_construction(player_idx)
-	_expect(game_manager.kingdom_recovered, "모두 건설을 마친 뒤 목표 건강도 이상인 마을은 복원 성공으로 판정되어야 합니다.")
-	_expect(ending["received"], "모두 건설을 마치면 최종 순위용 game_over 시그널을 발생시켜야 합니다.")
+	_expect(not game_manager.kingdom_recovered and not ending["received"], "건설을 마친 뒤 실제 전기 공급을 확인하기 전에는 성공을 판정하면 안 됩니다.")
+	_complete_energy_trial(game_manager)
+	_expect(game_manager.kingdom_recovered, "낮 전기를 저장하고 밤 수요를 충족한 마을은 복원 성공으로 판정되어야 합니다.")
+	_expect(ending["received"], "전기 시험 결과를 모두 확인하면 최종 순위용 game_over 시그널을 발생시켜야 합니다.")
 	game_manager.game_over.disconnect(capture_game_over)
+
+func _complete_energy_trial(game_manager: Node) -> void:
+	for player_idx in range(game_manager.players.size()):
+		game_manager.set_energy_trial_mode(player_idx, "store")
+	game_manager._update_energy_trial(20.0)
+	for player_idx in range(game_manager.players.size()):
+		game_manager.set_energy_trial_mode(player_idx, "supply")
+	game_manager._update_energy_trial(20.0)
+	for player_idx in range(game_manager.players.size()):
+		game_manager.finish_energy_trial(player_idx)
 
 func _test_energy_ranking() -> void:
 	var game_manager = _fresh_game()
@@ -465,6 +471,7 @@ func _test_energy_ranking() -> void:
 	game_manager.game_over.connect(func(rankings: Array): result["rankings"] = rankings)
 	game_manager._start_village_construction_phase()
 	game_manager.evaluate_village()
+	_complete_energy_trial(game_manager)
 	var rankings: Array = result["rankings"]
 	_expect(rankings.size() == 4, "에너지 순위 판정 결과에 모든 플레이어가 포함되어야 합니다.")
 	if rankings.size() == 4:
@@ -473,23 +480,23 @@ func _test_energy_ranking() -> void:
 
 func _test_ending_cinematics() -> void:
 	var success_ending = ENDING_CINEMATIC.new()
-	success_ending.setup(true, 80, 70)
+	success_ending.setup(true, 80, 70, [], {"coverage": 1.0, "daytime_coverage": 1.0, "night_coverage": 1.0})
 	root.add_child(success_ending)
-	_expect(success_ending.is_success and success_ending.scenes.size() == 3 and success_ending.title_text == "마지막 에너지 연결", "복원 성공 시 3장 구성의 성공 시나리오가 준비되어야 합니다.")
+	_expect(success_ending.is_success and success_ending.scenes.size() == 3 and success_ending.scene_index == 0, "복원 성공 시 3장 구성의 성공 시나리오가 준비되어야 합니다.")
 	for scene in success_ending.scenes:
 		_expect(ResourceLoader.exists(str(scene["image"])), "성공 엔딩의 ImageGen 장면 이미지가 존재해야 합니다.")
 	success_ending._process(success_ending.SCENE_DURATION + 0.1)
-	_expect(success_ending.scene_index == 1 and success_ending.title_text == "마을을 달리는 깨끗한 빛", "엔딩 시간이 지나면 다음 이미지 장면으로 자동 전환되어야 합니다.")
+	_expect(success_ending.scene_index == 1, "엔딩 시간이 지나면 다음 이미지 장면으로 자동 전환되어야 합니다.")
 	success_ending.queue_free()
 
 	var failure_ending = ENDING_CINEMATIC.new()
-	failure_ending.setup(false, 35, 70)
+	failure_ending.setup(false, 35, 70, [], {"coverage": 0.6, "daytime_coverage": 1.0, "night_coverage": 0.3})
 	root.add_child(failure_ending)
-	_expect(not failure_ending.is_success and failure_ending.scenes.size() == 3 and failure_ending.title_text == "아직 이어지지 않은 에너지 길", "복원 미달 시 3장 구성의 실패 시나리오가 준비되어야 합니다.")
+	_expect(not failure_ending.is_success and failure_ending.scenes.size() == 3 and failure_ending.scene_index == 0, "복원 미달 시 3장 구성의 실패 시나리오가 준비되어야 합니다.")
 	for scene in failure_ending.scenes:
 		_expect(ResourceLoader.exists(str(scene["image"])), "실패 엔딩의 ImageGen 장면 이미지가 존재해야 합니다.")
 	failure_ending._show_scene(2, true)
-	_expect(failure_ending.subtitle_text.contains("또 다시 도전"), "실패 엔딩의 마지막 장면은 다음 도전을 안내해야 합니다.")
+	_expect(failure_ending.scene_index == 2 and not failure_ending.subtitle_text.is_empty(), "실패 엔딩의 마지막 장면에서도 결과를 돌아볼 수 있어야 합니다.")
 	failure_ending.queue_free()
 
 func _test_movement_end_rewards() -> void:
@@ -501,6 +508,7 @@ func _test_movement_end_rewards() -> void:
 	game_manager.game_over.connect(func(rankings: Array): result["rankings"] = rankings)
 	game_manager._start_village_construction_phase()
 	game_manager.evaluate_village()
+	_complete_energy_trial(game_manager)
 	_expect(game_manager.players[0]["movement_reward_energy"] == 20, "가장 많이 이동한 플레이어는 학습 활동을 압도하지 않는 보너스 에너지 20을 받아야 합니다.")
 	_expect(game_manager.players[1]["movement_reward_energy"] == 15 and game_manager.players[2]["movement_reward_energy"] == 10 and game_manager.players[3]["movement_reward_energy"] == 5, "이동 순위가 낮아질수록 20/15/10/5 보너스가 지급되어야 합니다.")
 	_expect(game_manager.players[0]["energy"] == 25 and game_manager.players[3]["energy"] == 10, "이동 종료 보너스가 일반 에너지에 합산되어야 합니다.")
@@ -542,12 +550,12 @@ func _test_hud_initialization() -> void:
 	_expect(hud.guide_recipe_cards.size() == game_manager.CONSTRUCTION_PROJECTS.size(), "하단 건설 가이드에 모든 발전소 설계도가 표시되어야 합니다.")
 	var guide_inventory: Dictionary = game_manager._create_empty_inventory()
 	guide_inventory["solar_panel"] = 2
-	guide_inventory["battery"] = 1
+	guide_inventory["smart_grid"] = 1
 	hud._update_inventory(0, guide_inventory)
 	_expect((hud.guide_recipe_cards[0].find_child("Status", true, false) as Label).text == "건설 준비 완료", "탐험 중에는 건설 재료가 준비됐지만 아직 건설 단계가 아니라는 상태를 표시해야 합니다.")
 	var wind_missing := 0
 	for amount in hud.adventure_planner.missing_materials(1).values(): wind_missing += int(amount)
-	_expect(wind_missing == 3 and (hud.guide_recipe_cards[1].find_child("Status", true, false) as Label).text == "재료 3개 더 모아요", "보유 재료가 부족한 발전소는 필요한 추가 재료 개수를 정확히 표시해야 합니다.")
+	_expect(wind_missing == 2 and (hud.guide_recipe_cards[1].find_child("Status", true, false) as Label).text == "재료 2개 더 모아요", "보유 재료가 부족한 발전소는 필요한 추가 재료 개수를 정확히 표시해야 합니다.")
 	hud._refresh_open_market_recipe_popover()
 	for recipe_index in range(game_manager.CONSTRUCTION_PROJECTS.size()):
 		var recipe_effect = hud.open_market_recipe_grid.get_child(recipe_index).find_child("RecipeEffect", true, false)
@@ -596,7 +604,7 @@ func _test_hud_initialization() -> void:
 		var project_name = construction_card.find_child("ProjectName", true, false)
 		var project_effect = construction_card.find_child("ProjectEffect", true, false)
 		_expect(project_name != null and project_name.size.y >= 27.0 and project_name.text_overrun_behavior != TextServer.OVERRUN_TRIM_ELLIPSIS, "시설 이름은 1px로 접히거나 말줄임되지 않고 실제 한 줄 높이를 확보해야 합니다.")
-		_expect(project_effect != null and project_effect.text.begins_with("마을 친환경 지수 +") and not project_effect.text.contains("%"), "시설 효과는 이름과 별도 줄에 마을 친환경 지수로 표시해야 합니다.")
+		_expect(project_effect != null and project_effect.text in hud.LEARNING_VILLAGE_UI.PROJECT_PURPOSES and not project_effect.text.contains("지수"), "시설 효과는 이름과 별도 줄에 발전·저장·절약 역할로 표시해야 합니다.")
 	var solar_card = hud.construction_list.get_child(0)
 	var drag_payload: Dictionary = solar_card.create_drag_payload()
 	var solar_position: Vector2 = hud.village_map.get_terrain_build_cell_center("solar_field")
@@ -629,7 +637,7 @@ func _test_hud_initialization() -> void:
 	hud.village_map._drop_data(hud.village_map.get_terrain_build_cell_center("wind_plain"), hud.village_map.create_drop_payload(1, 1))
 	_expect(game_manager.built_project_owners.get(1, -1) == 1, "풍력 발전소를 건설한 다른 플레이어도 기록해야 합니다.")
 	_expect(hud.village_map.get_placed_project_count() == 2, "서로 다른 플레이어의 시설은 한 마을 지도에 함께 보여야 합니다.")
-	_expect("에너지 문제 해결 완료" in hud.energy_resolution_label.text, "친환경 에너지 지수가 목표에 도달하면 요정마을 문제 해결 상태를 보여야 합니다.")
+	_expect("낮과 밤" in hud.energy_resolution_label.text and not "해결 완료" in hud.energy_resolution_label.text, "건설 중에는 성공을 단정하지 말고 낮밤 전기 공급 확인을 안내해야 합니다.")
 	var result_fixture: Array = game_manager.players.duplicate(true)
 	for player in result_fixture:
 		player["energy"] = 9999
@@ -727,7 +735,7 @@ func _test_other_player_quiz_observation() -> void:
 	await process_frame
 	_expect("선택: 에너지" in quiz_modal.explanation_label.text, "다른 플레이어가 선택한 객관식 답안이 표시되어야 합니다.")
 	_expect("내 관전 도전: 정답 · 동점 비교 점수 +5" in quiz_modal.explanation_label.text, "대상 플레이어 결과와 함께 내 관전 도전 결과가 표시되어야 합니다.")
-	_expect("테스트 1님 정답 보상: 에너지 +2" in quiz_modal.explanation_label.text, "대상 플레이어의 정답 에너지 보상 주체가 명확히 표시되어야 합니다.")
+	_expect("테스트 1님 보상:" in quiz_modal.explanation_label.text and "부품 1개" in quiz_modal.explanation_label.text and "에너지 +2" in quiz_modal.explanation_label.text, "대상 플레이어의 정답 에너지와 선택 부품 보상 주체가 명확히 표시되어야 합니다.")
 	var reading_delay: float = game_manager.quiz_result_reading_seconds(quiz, game_manager.learning_grade)
 	_expect(quiz_modal.result_visible and quiz_modal.next_button.visible and reading_delay >= 7.0 and is_equal_approx(quiz_modal.result_duration_seconds, reading_delay), "관전 결과에 다음 버튼과 7~12초 공통 해설 시간이 제공되어야 합니다.")
 	await create_timer(1.3).timeout

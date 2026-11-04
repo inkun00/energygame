@@ -96,6 +96,8 @@ func _board_overlay_is_visible() -> bool:
 	if (is_instance_valid(quiz_modal) and quiz_modal.visible) or (is_instance_valid(minigame_modal) and minigame_modal.visible):
 		return true
 	if is_instance_valid(hud):
+		if hud.has_method("is_blocking_overlay_visible") and hud.is_blocking_overlay_visible():
+			return true
 		for path in ["VictoryModal", "OpenMarketDimmer"]:
 			var overlay := hud.get_node_or_null(path) as CanvasItem
 			if overlay and overlay.visible:
@@ -175,6 +177,9 @@ func _connect_board_render_budget() -> void:
 	if is_instance_valid(planner):
 		planner.catalog.visibility_changed.connect(_refresh_board_render_budget)
 	GameManager.adventure_preparation_changed.connect(func(_state: Dictionary): _refresh_board_render_budget())
+	GameManager.component_choice_changed.connect(func(_state: Dictionary): _refresh_board_render_budget.call_deferred())
+	GameManager.team_plan_changed.connect(func(_state: Dictionary): _refresh_board_render_budget.call_deferred())
+	GameManager.energy_trial_changed.connect(func(_state: Dictionary): _refresh_board_render_budget.call_deferred())
 	_refresh_board_render_budget()
 
 func _ready() -> void:
@@ -236,6 +241,9 @@ func _on_session_restored() -> void:
 		GameManager.open_market_state_changed.emit(GameManager.get_open_market_state())
 	elif GameManager.village_construction_active:
 		GameManager.village_construction_started.emit(GameManager.get_player_inventories())
+	GameManager.component_choice_changed.emit(GameManager.get_component_choice_state())
+	GameManager.team_plan_changed.emit(GameManager.get_team_plan_state())
+	GameManager.energy_trial_changed.emit(GameManager.get_energy_trial_state())
 	_on_minigame_finished([])
 	_request_board_snapshot()
 

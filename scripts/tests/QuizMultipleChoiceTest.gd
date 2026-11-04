@@ -47,12 +47,14 @@ func _run_tests() -> void:
 	gm.active_quiz_time_remaining = 21.0
 	quiz_modal.display_quiz(0, data)
 	var energy_before: int = gm.players[0]["energy"]
+	var skill_energy_before: int = gm.players[0]["skill_energy"]
 	var completions := []
 	quiz_modal.quiz_completed.connect(func(correct: bool): completions.append(correct))
 	quiz_modal._on_choice_pressed("끈다")
 	_expect(gm.players[0]["energy"] == energy_before + 2 and completions.size() == 1, "Choosing an answer should submit immediately exactly once")
 	_expect(quiz_modal.result_visible and quiz_modal.next_button.visible and not quiz_modal.choice_container.visible, "Readable result and next button should replace the choices")
-	_expect(quiz_modal.explanation_label.text.contains("에너지 +2") and quiz_modal.explanation_label.text.contains("동점 비교용 퀴즈 점수 +10"), "Energy and tie-break score must be labelled separately")
+	_expect(quiz_modal.explanation_label.text.contains("에너지 +2") and quiz_modal.explanation_label.text.contains("SP +2") and quiz_modal.explanation_label.text.contains("부품 1개"), "The result distinguishes energy, skill energy and the component reward")
+	_expect(gm.players[0]["skill_energy"] == skill_energy_before + 2 and gm.component_choices.has(0), "Correct answers award skill energy and queue a component choice after the explanation")
 	_expect(quiz_modal.result_seconds_remaining >= 7.0 and quiz_modal.result_seconds_remaining <= 12.0, "Result must allow 7–12 seconds to read")
 	await process_frame
 	var reading_before_pause: float = quiz_modal.result_seconds_remaining

@@ -392,7 +392,7 @@ func _process(delta: float) -> void:
 				practice_completed_at = practice_elapsed
 				_set_arcades_running(false)
 			goal_label.add_theme_color_override("font_color", UI.SUCCESS)
-			feedback_label.text = "연습 성공! 잠시 후 안내로 돌아가요. 준비되면 게임을 시작해요."
+			feedback_label.text = "연습 완료! 잠시 후 게임 안내로 돌아가요."
 			if practice_elapsed - practice_completed_at >= 2.0:
 				_finish_practice()
 				return
@@ -493,7 +493,7 @@ func _on_minigame_started(data: Dictionary) -> void:
 	timer_bar.value = duration
 	timer_label.text = "%02d초" % ceili(duration)
 	feedback_label.text = "게임 방법을 확인하고 시작 버튼을 누르세요."
-	submission_label.text = "내 점수는 종료 즉시 비공개로 제출됩니다."
+	submission_label.text = "모두 끝나면 점수와 순위를 확인해요."
 	_refresh_score()
 	_build_mode()
 	_refresh_goal_progress()
@@ -618,10 +618,10 @@ func _on_minigame_finished(results: Array) -> void:
 	timer_label.text = "종료"
 	timer_bar.value = 0
 	lesson_label.text = "내 플레이  |  " + str(learning_report.get("evidence", ""))
-	feedback_label.text = "함께 확인  |  " + str(learning_report.get("next_action", ""))
+	feedback_label.text = str(learning_report.get("next_action", ""))
 	feedback_label.add_theme_color_override("font_color", Color("83f2b6"))
 	if standalone_mode:
-		submission_label.text = "언제든 다시 플레이하거나 다른 게임을 선택할 수 있어요."
+		submission_label.text = ""
 		if is_instance_valid(standalone_actions):
 			standalone_actions.visible = true
 		return
@@ -770,13 +770,13 @@ func _build_guide_ui() -> void:
 	guide_objective_label.add_theme_color_override("font_color", Color("e0f6f1"))
 	obj_box.get_child(0).add_child(guide_objective_label)
 
-	var ctrl_box := _make_guide_section("조작 방법 & 플레이 규칙", Color("79d7ef"))
+	var ctrl_box := _make_guide_section("조작", Color("79d7ef"))
 	body.add_child(ctrl_box)
 	guide_controls_container = VBoxContainer.new()
 	guide_controls_container.add_theme_constant_override("separation", 6)
 	ctrl_box.get_child(0).add_child(guide_controls_container)
 
-	var lesson_box := _make_guide_section("알아두면 유익한 에너지 과학 원리", Color("ffd66e"))
+	var lesson_box := _make_guide_section("에너지 원리", Color("ffd66e"))
 	# 원리는 설명을 읽는 대신 게임 안의 물·빛·도시 반응으로 경험합니다.
 	lesson_box.visible = false
 	body.add_child(lesson_box)
@@ -796,7 +796,7 @@ func _build_guide_ui() -> void:
 	tip_box.get_child(0).add_child(guide_tip_label)
 
 	guide_rewards_label = Label.new()
-	guide_rewards_label.text = "목표 행동을 확인하면 순위에 따라 에너지를 받아요. 0점은 보상 없이 다시 연습해요."
+	guide_rewards_label.text = "목표를 달성하고 1점 이상 얻으면 순위에 따라 에너지를 받아요."
 	guide_rewards_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	guide_rewards_label.add_theme_font_size_override("font_size", 15)
 	guide_rewards_label.add_theme_color_override("font_color", Color("95f2d6"))
@@ -854,12 +854,12 @@ func _populate_guide_content() -> void:
 	var title := str(game_data.get("title", "에너지 미니게임"))
 	var duration_val := int(game_data.get("duration", 30))
 	guide_title_label.text = title
-	guide_badge_label.text = "게임 방법 안내 · %d초 아케이드" % duration_val
+	guide_badge_label.text = "게임 방법 · %d초" % duration_val
 	guide_objective_label.text = str(game_data.get("objective", "제한시간 안에 최고 점수를 달성하세요."))
-	guide_lesson_label.text = str(game_data.get("lesson", "신재생에너지를 올바르게 활용하여 탄소를 줄입니다."))
-	guide_tip_label.text = str(game_data.get("tip", "신속하고 정확하게 조작하여 콤보 점수를 획득하세요!"))
+	guide_lesson_label.text = str(game_data.get("lesson", ""))
+	guide_tip_label.text = str(game_data.get("tip", ""))
 	guide_practice_button.visible = true
-	guide_rewards_label.text = "%s\n목표 달성 + 양수 점수: 순위에 따라 에너지 20 / 10 / 5 / 1. 같은 점수는 공동 순위예요." % LEARNING_FEEDBACK.goal_requirement(game_id)
+	guide_rewards_label.text = "%s\n목표를 달성하고 1점 이상 얻으면 1~4위 보너스 20 / 10 / 5 / 1. 같은 점수는 공동 순위예요." % LEARNING_FEEDBACK.goal_requirement(game_id)
 
 	for child in guide_controls_container.get_children():
 		guide_controls_container.remove_child(child)
@@ -963,7 +963,7 @@ func _start_practice() -> void:
 	practice_arcade.connect("arcade_event", _on_practice_event)
 	GameManager.set_local_minigame_practice(round_id, true)
 	practice_active = true
-	mode_label.text = "조작 연습 · 한 단계씩 해봐요"
+	mode_label.text = "조작 연습"
 	practice_elapsed = 0.0
 	practice_completed_at = -1.0
 	simulation_elapsed = 0.0
@@ -979,8 +979,8 @@ func _start_practice() -> void:
 	timer_bar.value = timer_bar.max_value
 	timer_label.add_theme_color_override("font_color", UI.TEXT)
 	score_label.text = "점수 없는 연습"
-	feedback_label.text = "직접 조작해 미션을 해봐요. 틀려도 다시 해볼 수 있어요."
-	submission_label.text = "한 단계씩 해봐요 · Esc로 안내로 돌아가기"
+	feedback_label.text = "안내에 따라 조작해 보세요."
+	submission_label.text = "Esc로 안내로 돌아가기"
 	if game_id == "hydro_gate":
 		hydro_arcade.call("set_practice_mode", true)
 	_set_arcades_running(true)
@@ -1112,7 +1112,7 @@ func _on_solar_pressed() -> void:
 	var position := _solar_position()
 	var error := absf(position - solar_target)
 	if error <= 0.07:
-		_register_success(120 if error <= 0.025 else 85, "최적 각도! 태양광 발전 효율 최고")
+		_register_success(120 if error <= 0.025 else 85, "햇빛을 정면으로 받아 발전량이 늘었어요.")
 		solar_target = rng.randf_range(0.15, 0.85)
 		primary_label.text = "패널 최적 각도: %d°" % int(solar_target * 90.0)
 	else:
@@ -1151,10 +1151,10 @@ func _on_wind_lane_pressed(lane: int) -> void:
 	attempts += 1
 	if lane == wind_lane and wind_window > 0.0:
 		var speed_bonus := int(wind_window * 45.0)
-		_register_success(65 + speed_bonus, "돌풍 포착! 바람이 강할 때 발전량이 커집니다.")
+		_register_success(65 + speed_bonus, "바람 방향을 맞춰 전기를 만들었어요.")
 		wind_lane = -1
 		mode_tick = -0.35
-		primary_label.text = "좋아요! 다음 돌풍 준비…"
+		primary_label.text = "다음 바람을 기다려요"
 	else:
 		_register_miss(22, "바람 방향을 놓쳤어요. 풍향 표시를 확인하세요.")
 

@@ -72,8 +72,8 @@ function passed(label, extra = {}) { steps.push({ label, ...extra }); console.lo
 async function releaseKeys() {
   await Promise.all(pages.map(async page => { for (const key of ['a', 'd', 'w', 's', 'e', 'Space']) await page.keyboard.up(key); }));
 }
-async function playRound(id, round) {
-  await command(0, 'minigame_fixture', { id });
+async function playRound(id, round, alreadyStarted = false) {
+  if (!alreadyStarted) await command(0, 'minigame_fixture', { id });
   let ss = await waitFor(all => all.every(s => s?.mini?.id === id && s.mini.phase === 'ready'), `${id} guide`);
   equalAll(ss, s => [s.mini.seed, s.mini.round_id, s.mini.duration], `${id} shared conditions`);
   // A participant may practice while peers ready; shared start must interrupt safely.
@@ -203,6 +203,7 @@ async function main() {
     await waitFor(all => all.some(s => s.state !== 0 || s.turns > 0), 'real dice action');
     // Let movement/quiz resolve using visible choices before scenario-selected rounds.
     const turnDeadline = Date.now() + 45000;
+    let naturalGame = '';
     while (Date.now() < turnDeadline) {
       ss = await states();
       await Promise.all(pages.map(async (page, i) => {
@@ -211,20 +212,25 @@ async function main() {
           if (choice) await page.mouse.click(choice.x, choice.y, { delay: 100 });
         } else if (ss[i].buttons.quiz_next?.x !== undefined && !ss[i].buttons.quiz_next.disabled) {
           await click(i, 'quiz_next');
+        } else if (ss[i].component_buttons?.some(c => c.x !== undefined)) {
+          await page.keyboard.press('1', { delay: 180 });
         }
       }));
       if (ss.every(s => s.turns > 0 && !s.quiz.visible && s.state === 0)) break;
-      if (ss.some(s => s.mini?.id)) throw new Error('Dice unexpectedly reached a minigame; re-run with controlled seed');
+      if (ss.some(s => s.mini?.id)) { naturalGame = ss.find(s => s.mini?.id).mini.id; break; }
       await delay(500);
     }
     await capture('03-board-turn'); passed('Actual dice/board controls and local turn authority');
+    if (naturalGame) await playRound(naturalGame, 3, true);
     const selectedGames = process.env.FOUR_PLAYER_GAMES ? process.env.FOUR_PLAYER_GAMES.split(',') : games;
-    for (let i = 0; i < selectedGames.length; i++) await playRound(selectedGames[i], i + 4);
+    for (let i = 0; i < selectedGames.length; i++) {
+      if (selectedGames[i] !== naturalGame) await playRound(selectedGames[i], i + 4);
+    }
     await command(0, 'market_fixture');
-    await waitFor(all => all.every(s => s.market.active), 'open market');
-    await capture('20-market');
-    await Promise.all(pages.map((_, i) => click(i, 'market_confirm')));
-    await waitFor(all => all.every(s => s.construction), 'all four market submissions -> construction');
+    await waitFor(all => all.every(s => s.plan.active), 'shared facility planning');
+    await capture('20-shared-plan');
+    await Promise.all(pages.map((_, i) => click(i, 'plan_confirm')));
+    await waitFor(all => all.every(s => s.construction), 'all four plan confirmations -> construction');
     ss = await states(); equalAll(ss, s => s.players.map(p => p.inventory), 'shared inventories');
     await capture('21-construction');
     const card = ss[1].cards.find(c => c.x !== undefined && !c.disabled);
@@ -232,9 +238,24 @@ async function main() {
     await pages[1].mouse.click(card.x, card.y, { delay: 100 });
     await pages[1].keyboard.press('Enter', { delay: 180 });
     ss = await waitFor(all => all.every(s => s.built.length > 0), 'remote keyboard construction');
+    const solarCard = ss[0].cards.find(c => c.x !== undefined && !c.disabled && c.text.includes('태양광'));
+    assert(solarCard, 'host can add generation to the recommended storage facility');
+    await pages[0].mouse.click(solarCard.x, solarCard.y, { delay: 100 });
+    await pages[0].keyboard.press('Enter', { delay: 180 });
+    ss = await waitFor(all => all.every(s => s.built.includes(0) && s.built.includes(3)), 'solar generation and separate storage');
     equalAll(ss, s => [s.built, s.placements], 'authoritative shared buildings');
-    await capture('22-built'); passed('Four market confirmations and remote keyboard building');
+    await capture('22-built'); passed('Four plan confirmations and remote keyboard building');
     await Promise.all(pages.map((_, i) => click(i, 'finish')));
+    await waitFor(all => all.every(s => s.trial.phase === 'day'), 'four electricity trial screens');
+    await Promise.all(pages.map((page) => page.keyboard.press('1', { delay: 180 })));
+    await capture('23-trial-day');
+    await waitFor(all => all.every(s => s.trial.phase === 'night'), 'shared night transition', 30000);
+    await Promise.all(pages.map((page) => page.keyboard.press('2', { delay: 180 })));
+    await capture('23-trial-night');
+    ss = await waitFor(all => all.every(s => s.trial.phase === 'complete'), 'actual 40-second electricity trial', 30000);
+    equalAll(ss, s => [s.trial.coverage, s.trial.night_coverage, s.trial.success], 'shared measured electricity result');
+    await capture('23-trial-result');
+    await Promise.all(pages.map((_, i) => click(i, 'trial_confirm')));
     ss = await waitFor(all => all.every(s => s.endings === 1 && s.ending_visible), 'four ending cinematics');
     await capture('23-ending'); equalAll(ss, s => [s.players, s.built, s.placements], 'final state');
     await waitFor(all => all.every(s => !s.ending_visible && s.buttons.return?.x !== undefined), 'final results', 45000);

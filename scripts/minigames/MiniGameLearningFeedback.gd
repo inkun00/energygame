@@ -106,6 +106,6 @@ static func result_lines(game_id: String, metrics: Dictionary) -> Dictionary:
 				evidence += " · 냉방 사용량 %.1f (게임 속 비교 값)" % float(metrics["cooling_used"])
 			next_action = "에어컨이 켜진 공간에서는 열린 창문을 찾아 닫으세요."
 		_:
-			evidence = "도전 기록을 확인했어요."
-			next_action = "다음 도전에서 에너지 선택을 다시 해 보세요."
+			evidence = ""
+			next_action = ""
 	return {"evidence": evidence, "next_action": next_action}

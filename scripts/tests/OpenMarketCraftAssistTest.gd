@@ -1,8 +1,7 @@
 extends SceneTree
 
-# OpenMarketCraftAssistTest.gd
-# 오픈마켓 출품/획득 단계에서의 건설 가능 시설 확인, 완공 기회 감지, 레시피 팝오버 기능 검증
-
+# Keep the established runner path while testing the shared planning that
+# replaces exchanging the same materials before pooled construction.
 var failures: Array[String] = []
 
 func _initialize() -> void:
@@ -11,129 +10,56 @@ func _initialize() -> void:
 func check(value: bool, message: String) -> void:
 	if not value:
 		failures.append(message)
-		printerr("[FAIL] " + message)
+		push_error("[FAIL] " + message)
 
 func _run() -> void:
-	print("--- Starting OpenMarketCraftAssistTest ---")
 	var main = load("res://scenes/Main.tscn").instantiate()
 	root.add_child(main)
 	await process_frame
-
-	var gm = root.get_node("GameManager")
-	var hud = main.find_child("HUD", true, false)
-	check(hud != null, "HUD must exist in Main scene")
-	check(gm != null, "GameManager autoload must exist")
-
-	var configs: Array[Dictionary] = [
-		{"name": "플레이어", "is_ai": false},
-		{"name": "AI 1", "is_ai": true},
-		{"name": "AI 2", "is_ai": true},
-		{"name": "AI 3", "is_ai": true}
-	]
+	var gm: Node = root.get_node("GameManager")
+	var hud: Node = main.find_child("HUD", true, false)
+	var configs: Array[Dictionary] = []
+	for idx in range(4):
+		configs.append({"name": "계획 친구 %d" % idx, "is_ai": false})
 	main._on_start_game_requested(configs, 600)
-	await create_timer(0.2).timeout
+	gm.confirm_adventure_ready(0)
+	await process_frame
 	gm.set_process(false)
-
-	# 1. 헬퍼 분석 로직 검증
-	print("  1. Testing analysis helper functions...")
-	# 태양광 발전소: solar_panel 2개 + battery 1개
-	var inv1 := { "solar_panel": 2, "battery": 1 }
-	var buildable = hud._get_player_buildable_projects(inv1)
+	var buildable: Array = hud._get_player_buildable_projects({"solar_panel": 2, "smart_grid": 1})
 	var found_solar := false
-	for p in buildable:
-		if p["name"] == "태양광 발전소":
-			found_solar = true
-			break
-	check(found_solar, "solar power plant should be buildable with 2 solar panels and 1 battery")
-
-	# 1개 부족한 상황 (battery만 있으면 태양광 완성)
-	var inv2 := { "solar_panel": 2, "battery": 0 }
-	var opp_battery = hud._get_item_completion_opportunity("battery", inv2)
-	check(opp_battery["completes"].has("태양광 발전소"), "battery should complete the solar power plant")
-
-	# 2. UI 노드 생성 확인
-	print("  2. Testing UI node presence...")
-	check(hud.open_market_panel != null, "open_market_panel must be created")
-	check(hud.open_market_guide_banner != null, "open_market_guide_banner must exist")
-	check(hud.open_market_guide_label != null, "open_market_guide_label must exist")
-	check(hud.open_market_inspect_box != null, "open_market_inspect_box must exist")
-	check(hud.open_market_inspect_label != null, "open_market_inspect_label must exist")
-	check(hud.open_market_recipe_button != null, "open_market_recipe_button must exist")
-	check(hud.open_market_recipe_popover != null, "open_market_recipe_popover must exist")
-
-	# 3. 출품(OFFERING) 단계 분석 브리핑 테스트
-	print("  3. Testing offering phase craft analysis...")
-	gm.players[0]["inventory"] = { "wind_blade": 2, "smart_grid": 1, "battery": 1 }
-	gm.players[1]["inventory"] = {"wind_blade": 1, "smart_grid": 1}
-	var state_offering := {
-		"active": true,
-		"phase": gm.OpenMarketPhase.OFFERING,
-		"time_remaining": 20,
-		"submitted_players": {},
-		"player_count": 4
-	}
-	hud._on_open_market_state_changed(state_offering)
-	check(hud.open_market_panel.visible, "Open market panel should be visible in offering phase")
-	check(not hud.turn_prompt_label.visible and not hud.special_skill_button.visible,
-		"Market phase should hide the old dice prompt and special skill action")
-	var highlighted_button: Button
-	for child in hud.open_market_item_grid.get_children():
-		if child is Button and child.text.begins_with("[완성재료]"):
-			highlighted_button = child
-			break
-	check(highlighted_button != null, "A protected construction material should be highlighted")
-	if highlighted_button != null:
-		check(highlighted_button.get_theme_color("font_color").get_luminance() < 0.35,
-			"Highlighted yellow material button should use dark readable text")
-		check(highlighted_button.get_theme_color("icon_normal_color").get_luminance() > 0.8,
-			"Highlighted material icon should keep its source colors")
-	check(hud.open_market_guide_label.text.contains("풍력") and hud.open_market_guide_label.text.contains("내 부품") and hud.open_market_guide_label.text.contains("친구 재료"),
-		"Guide banner should distinguish my complete wind recipe from pooled team construction")
-
-	# 내 부품 제공량의 감소와 팀 공동 건설을 구분합니다.
-	hud.open_market_offer_selection["wind_blade"] = 1
-	hud._inspect_open_market_item("wind_blade", gm.OpenMarketPhase.OFFERING, true)
-	check(hud.open_market_inspect_label.text.contains("내가 제공할 부품이 줄") and hud.open_market_inspect_label.text.contains("팀 재료") and not hud.open_market_inspect_label.text.contains("불가능"),
-		"Inspector should explain personal contribution, not falsely forbid pooled team construction")
-
-	# 4. 획득(TAKING) 단계 완공 기회 분석 브리핑 테스트
-	print("  4. Testing taking phase completion opportunity highlights...")
-	gm.players[0]["inventory"] = { "hydro_turbine": 2 }
-	var state_taking := {
-		"active": true,
-		"phase": gm.OpenMarketPhase.TAKING,
-		"time_remaining": 15,
-		"allowances": { 0: 2 },
-		"taken_counts": { 0: 0 },
-		"stock": { "smart_grid": 2, "solar_panel": 1 }
-	}
-	hud._on_open_market_state_changed(state_taking)
-	check(hud.open_market_guide_label.text.contains("완성") or hud.open_market_guide_label.text.contains("기회"),
-		"Taking guide banner should highlight completion opportunity")
-
-	# 획득은 내 레시피를 채우는 행위이며 시설 배치 전에는 자동 완공이 아닙니다.
-	hud._inspect_open_market_item("smart_grid", gm.OpenMarketPhase.TAKING, true)
-	check(hud.open_market_inspect_label.text.contains("내가 모두 제공") and hud.open_market_inspect_label.text.contains("시설을 놓아야") and not hud.open_market_inspect_label.text.contains("즉시 완공"),
-		"Inspector should explain a complete personal recipe and the required later placement action")
-
-	# 5. 10종 레시피 팝오버 토글 테스트
-	print("  5. Testing 10-project recipe popover...")
-	check(not hud.open_market_recipe_popover.visible, "Popover should be hidden initially")
-	hud._toggle_open_market_recipe_popover()
-	check(hud.open_market_recipe_popover.visible, "Popover should be visible after toggle")
-	check(hud.open_market_recipe_grid.get_child_count() == gm.CONSTRUCTION_PROJECTS.size(),
-		"Popover must contain all 10 construction projects")
-	hud._toggle_open_market_recipe_popover()
-	check(not hud.open_market_recipe_popover.visible, "Popover should hide on toggle again")
-	gm._start_village_construction_phase()
-	check(gm.can_build_village_project(4, 0), "Friends' grid and my hydro turbines should enable actual pooled construction")
+	for project: Dictionary in buildable:
+		found_solar = found_solar or project["name"] == "태양광 발전소"
+	check(found_solar, "solar panels plus a grid connection build solar without mandatory storage")
+	var opportunity: Dictionary = hud._get_item_completion_opportunity("smart_grid", {"solar_panel": 2})
+	check(opportunity["completes"].has("태양광 발전소"), "the missing grid connection completes the solar recipe")
+	gm.players[0]["inventory"]["solar_panel"] = 2
+	gm.players[1]["inventory"]["smart_grid"] = 1
+	gm.players[2]["inventory"]["battery"] = 2
+	gm.players[3]["inventory"]["smart_grid"] = 1
+	var inventory_before: Dictionary = gm.get_team_inventory().duplicate(true)
+	gm._start_team_planning_phase()
+	await process_frame
+	var planner: Node = hud.learning_village_ui
+	check(planner.visible and planner.screen == "plan", "the shared plan opens after exploration")
+	check(not hud.open_market_panel.visible, "material trading does not cover the shared plan")
+	check(planner.plan_buttons.size() == gm.CONSTRUCTION_PROJECTS.size(), "all ten facility choices are available in the plan")
+	check(planner.plan_recipe_labels[0].text == "건설 가능" and planner.plan_recipe_labels[3].text == "건설 가능", "recipe readiness counts friends' materials")
+	planner._recommend_project(3)
+	check(gm.team_plan["choices"][0] == 3, "a facility card updates the player's shared recommendation")
+	check(planner.plan_player_labels[0].text.contains(gm.CONSTRUCTION_PROJECTS[3]["name"]), "the recommendation is visible to the team")
+	planner._confirm_plan()
+	check(gm.team_plan["ready"].has(0) and planner.plan_ready_button.disabled, "confirmation stays visible while waiting for friends")
+	check(gm.get_team_inventory() == inventory_before, "proposing and confirming never transfers or consumes materials")
+	for idx in range(1, 4):
+		gm.confirm_team_plan(idx)
+	await process_frame
+	check(gm.village_construction_active and planner.screen == "", "the plan closes when team construction opens")
+	check(gm.build_village_project(0, 0), "the proposed plan can use pooled parts to build solar")
+	check(gm.build_village_project(3, 1), "a separate storage facility uses the remaining battery parts")
+	check(gm.get_team_inventory()["solar_panel"] == 0 and gm.get_team_inventory()["battery"] == 0 and gm.get_team_inventory()["smart_grid"] == 0, "only actual buildings consume the exact team recipes")
 	gm.stop_game()
 	main.queue_free()
 	await process_frame
-
 	if failures.is_empty():
-		print("[PASS] OpenMarketCraftAssistTest: All craft analysis and recipe checks passed!")
-		quit()
-	else:
-		printerr("[FAIL] OpenMarketCraftAssistTest failed with %d errors" % failures.size())
-		quit(1)
+		print("[PASS] Shared facility planning and recipe assistance")
+	quit(0 if failures.is_empty() else 1)

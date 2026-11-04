@@ -322,7 +322,7 @@ func _try_close() -> void:
 	usage_after_close = BASE_COOLING_USE + OPEN_WINDOW_USE * float(_open_window_count())
 	comparison_remaining = 2.4
 	_update_window_visual(closest)
-	arcade_event.emit(points, true, "창문을 닫았어요! 더운 공기가 멈춰 에어컨 사용 속도가 느려져요.", true)
+	arcade_event.emit(points, true, "창문을 닫아 더운 공기를 막았어요. 에어컨이 쓰는 전기가 줄어요.", true)
 	_notice("창문 닫기 +%d점 · 전기 사용 %.1f → %.1f/초" % [points, usage_before_close, usage_after_close])
 	flash.color = Color(Color("8af2ae"), VISUAL_STYLE.SUCCESS_FLASH_ALPHA)
 	flash_remaining = 0.20

@@ -37,7 +37,8 @@ func _verify_presentation() -> bool:
 	for index in range(3, -1, -1):
 		players.append({"index": index, "name": names[index], "char_icon": "res://assets/characters/eco_roster/%s.webp" % portraits[index], "quiz_correct": index + 2, "construction_contribution": index + 5, "project_completion_bonus": index % 3})
 	var ending = ENDING.new()
-	ending.setup(true, 80, 70, players)
+	var electricity_summary := {"success": true, "coverage": 0.97, "daytime_coverage": 1.0, "night_coverage": 0.94}
+	ending.setup(true, 80, 70, players, electricity_summary)
 	root.add_child(ending)
 	ending.set_process(false)
 	ending._process(5.9)
@@ -47,6 +48,8 @@ func _verify_presentation() -> bool:
 	_check(ending.team_snapshot.size() == 4 and ending.team_snapshot[0]["index"] == 0, "Actual selected heroes stay in seat order, not winner order")
 	players[0]["quiz_correct"] = 999
 	_check(ending.team_snapshot[3]["quiz_correct"] == 5, "Scene contributions are an immutable copy of the supplied round results")
+	electricity_summary["night_coverage"] = 0.0
+	_check(is_equal_approx(float(ending.trial_summary["night_coverage"]), 0.94), "Ending keeps an immutable snapshot of the actual electricity trial")
 	_check(str(ending.scenes[0]["image"]).contains("kingdom_stage_0") and str(ending.scenes[1]["image"]).contains("kingdom_stage_50") and str(ending.scenes[2]["image"]).contains("kingdom_stage_100"), "The same village visibly changes from polluted to recovering to restored using existing art")
 	for dimensions in [Vector2i(1280, 720), Vector2i(1024, 600)]:
 		root.size = dimensions
@@ -62,6 +65,7 @@ func _verify_presentation() -> bool:
 		var team_rect: Rect2 = ending._team_panel.get_global_rect()
 		var caption_rect: Rect2 = ending._caption_panel.get_global_rect()
 		_check(scene_rect.encloses(team_rect) and scene_rect.encloses(caption_rect) and not team_rect.intersects(caption_rect), "Team and caption panels stay on-screen without overlap at each laptop size")
+		_check(scene_rect.encloses(ending._energy_label.get_global_rect()) and not ending._energy_label.get_global_rect().intersects(ending._recovery_label.get_global_rect()), "Day and night supply values stay on-screen without overlapping the story progress")
 		for index in range(ending.team_cards.size()):
 			var card: PanelContainer = ending.team_cards[index]
 			var portrait := card.find_child("HeroPortrait", true, false) as TextureRect
@@ -70,12 +74,12 @@ func _verify_presentation() -> bool:
 			_check(portrait.texture.resource_path.ends_with(portraits[index] + ".webp"), "Each contribution is linked to that selected hero's existing portrait")
 			_check(learning.text == "퀴즈 %d · 재료 %d" % [index + 2, index + 5] and construction.text == "시설 %d곳 완공" % (index % 3), "Contribution labels use real quiz/material/build values, not fabricated hero roles")
 			_check(card.get_global_rect().encloses(learning.get_global_rect()) and card.get_global_rect().encloses(construction.get_global_rect()), "Contribution numbers fit their own card")
-		_check(ending._energy_label.text.contains("80") and ending._energy_label.text.contains("70"), "Final energy values are preserved rather than simulated scores")
+		_check(ending._energy_label.text.contains("100%") and ending._energy_label.text.contains("94%") and not ending._energy_label.text.contains("친환경 지수"), "Ending displays the measured day and night supply, rather than the old building-point target")
 		await _capture("recovery-after-team")
-	ending.setup(false, 35, 70, players)
+	ending.setup(false, 35, 70, players, {"success": false, "coverage": 0.6, "daytime_coverage": 1.0, "night_coverage": 0.2})
 	ending.set_process(false)
 	ending._show_scene(2, true)
-	_check(not ending.is_success and ending.subtitle_text.contains("또 다시 도전") and ending._recovery_label.text.contains("다음 도전"), "An incomplete village remains an encouraging retry, not a false recovery")
+	_check(not ending.is_success and ending._energy_label.text.contains("20%") and ending._recovery_label.text.contains("공급 부족"), "An undersupplied village shows the failed trial rather than a false recovery")
 	await _capture("next-challenge")
 	ending._show_scene(0, true)
 	var wheel := InputEventMouseButton.new()
