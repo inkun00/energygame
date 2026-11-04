@@ -91,6 +91,9 @@ var progress_label: Label
 var saved_label: Label
 var action_label: Label
 var flash: ColorRect
+var focus_marker: MeshInstance3D
+var focused_device: Dictionary = {}
+var standby_led_material: StandardMaterial3D
 
 func _ready() -> void:
 	stretch = true
@@ -145,6 +148,7 @@ func _build_world() -> void:
 	floor_glow_material = _material(Color("ffc85a"), true)
 	floor_glow_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	floor_glow_material.albedo_color.a = 0.38
+	standby_led_material = _material(Color("ffc66b"), true)
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = 7.2
@@ -174,6 +178,18 @@ func _build_house_course() -> void:
 	course_root = Node3D.new()
 	course_root.name = "KenneyHouseLap%d" % lap_index
 	world.add_child(course_root)
+	focused_device = {}
+	focus_marker = MeshInstance3D.new()
+	focus_marker.name = "NearestDeviceFocus"
+	var focus_ring := TorusMesh.new()
+	focus_ring.inner_radius = 0.48
+	focus_ring.outer_radius = 0.55
+	focus_ring.rings = 16
+	focus_ring.ring_segments = 6
+	focus_marker.mesh = focus_ring
+	focus_marker.material_override = safe_material
+	focus_marker.visible = false
+	course_root.add_child(focus_marker)
 	_build_house_shell()
 	_build_room_decor()
 	_build_jump_barriers()
@@ -290,7 +306,7 @@ func _build_device(device_index: int, spec: Dictionary) -> void:
 	var status := Label3D.new()
 	status.name = "StatusLabel"
 	status.position = Vector3(0, 1.55, 0.15)
-	status.text = "%s\n%s · %d W" % [str(spec["name"]), "전원 꺼짐" if is_waste else "사용 중", watts]
+	status.text = "%s\n%s · %d W" % [str(spec["name"]), "대기 중" if is_waste else "사용 중", watts]
 	status.font_size = 46
 	status.pixel_size = 0.006
 	status.outline_size = 10
@@ -300,15 +316,35 @@ func _build_device(device_index: int, spec: Dictionary) -> void:
 	if not is_waste:
 		var activity := MeshInstance3D.new()
 		activity.name = "ActivityGlow"
-		var sphere := SphereMesh.new()
-		sphere.radius = 0.13
-		sphere.height = 0.26
-		sphere.radial_segments = 10
-		activity.mesh = sphere
+		var work_ring := TorusMesh.new()
+		work_ring.inner_radius = 0.13
+		work_ring.outer_radius = 0.17
+		work_ring.rings = 12
+		work_ring.ring_segments = 5
+		activity.mesh = work_ring
+		activity.rotation.x = PI / 2.0
 		activity.position = Vector3(-0.72, 0.45, 0.5)
 		activity.material_override = active_material
 		station.add_child(activity)
-	device_records.append({"node": station, "model": model, "x": float(spec["x"]), "level": level, "name": str(spec["name"]), "room": str(spec["room"]), "waste": is_waste, "powered": not is_waste, "watt": watts, "resolved": false, "label": status, "plug": plug, "miss_deadline": -1.0})
+		var work_tick := MeshInstance3D.new()
+		var tick_mesh := BoxMesh.new()
+		tick_mesh.size = Vector3(0.075, 0.075, 0.075)
+		work_tick.mesh = tick_mesh
+		work_tick.position.x = 0.15
+		work_tick.material_override = active_material
+		activity.add_child(work_tick)
+	else:
+		var led := MeshInstance3D.new()
+		led.name = "StandbyLED"
+		var led_mesh := SphereMesh.new()
+		led_mesh.radius = 0.07
+		led_mesh.height = 0.14
+		led_mesh.radial_segments = 8
+		led.mesh = led_mesh
+		led.position = Vector3(0.72, 0.59, 0.50)
+		led.material_override = standby_led_material
+		station.add_child(led)
+	device_records.append({"node": station, "model": model, "x": float(spec["x"]), "level": level, "name": str(spec["name"]), "room": str(spec["room"]), "waste": is_waste, "powered": not is_waste, "disconnected": false, "watt": watts, "resolved": false, "label": status, "plug": plug, "miss_deadline": -1.0})
 
 func _process(delta: float) -> void:
 	visual_time += delta
@@ -393,6 +429,11 @@ func _animate_scene() -> void:
 		var glow := node.get_node_or_null("ActivityGlow") as MeshInstance3D
 		if glow:
 			glow.scale = Vector3.ONE * (0.82 + sin(visual_time * 6.0 + float(record["x"])) * 0.18)
+			glow.rotation.y = visual_time * 2.5
+		var led := node.get_node_or_null("StandbyLED") as MeshInstance3D
+		if led:
+			led.visible = not bool(record.get("disconnected", false))
+			led.scale = Vector3.ONE * (0.9 + sin(visual_time * 3.0) * 0.1)
 		var model := record.get("model") as Node3D
 		if is_instance_valid(model) and bool(record.get("powered", false)):
 			if "오디오" in str(record["name"]) or "스피커" in str(record["name"]):
@@ -409,7 +450,7 @@ func _update_device_passes() -> void:
 		elif deadline < 0.0 and run_velocity > 0.1 and hero.position.x > float(record["x"]) + PASS_DISTANCE:
 			if bool(record["waste"]):
 				record["miss_deadline"] = play_elapsed + RECOVERY_SECONDS
-				(record["label"] as Label3D).text = "%s\n← 아직 돌아가서 차단할 수 있어요" % str(record["name"])
+				(record["label"] as Label3D).text = "%s\n대기 · %d W" % [str(record["name"]), int(record["watt"])]
 			else:
 				_resolve_device(record, false)
 
@@ -444,6 +485,9 @@ func _resolve_device(record: Dictionary, disconnect: bool) -> void:
 	var plug := record["plug"] as MeshInstance3D
 	if disconnect:
 		record["powered"] = false
+		record["disconnected"] = true
+		var led := (record["node"] as Node3D).get_node_or_null("StandbyLED")
+		if led: led.hide()
 		_set_model_activity(record["model"] as Node3D, false)
 		var activity := (record["node"] as Node3D).get_node_or_null("ActivityGlow")
 		if activity: activity.visible = false
@@ -491,6 +535,7 @@ func _update_hud() -> void:
 	saved_label.text = "차단한 대기전력  %d W" % saved_watts
 	action_label.modulate.a = 1.0
 	var nearest := _nearest_unresolved_device()
+	_update_device_focus(nearest)
 	# Prioritize the device that SPACE would really act on. An approaching
 	# table must not hide its prompt while the player is standing at the TV.
 	if not nearest.is_empty():
@@ -509,6 +554,24 @@ func _update_hud() -> void:
 			action_label.text = "← %s 돌아가서 차단 · %.1f초" % [str(record["name"]), deadline - play_elapsed]
 			return
 	action_label.text = "A/D로 집 안을 이동하세요"
+
+func _update_device_focus(nearest: Dictionary) -> void:
+	focused_device = nearest
+	if is_instance_valid(focus_marker):
+		focus_marker.visible = not nearest.is_empty()
+		if not nearest.is_empty():
+			focus_marker.position = Vector3(float(nearest["x"]), float(nearest.get("level", 0.0)) + 0.09, 0.75)
+			focus_marker.material_override = safe_material if bool(nearest["waste"]) else neutral_material
+	# Labels describe state, not extra action prompts. Only the current floor's
+	# nearby devices need text; SPACE and the single ring always target the same one.
+	for record in device_records:
+		var nearby := absf(hero.position.x - float(record["x"])) <= 4.6
+		var same_floor := absf(hero.position.y - GROUND_Y - float(record.get("level", 0.0))) <= 0.95
+		var label := record["label"] as Label3D
+		label.visible = nearby and same_floor
+		# The hero stands in front of the current appliance. Lift its status clear
+		# of the hero's head instead of asking the player to read through a sprite.
+		label.position.y = 2.45 if not nearest.is_empty() and record["node"] == nearest["node"] else 1.55
 
 func _build_overlay() -> void:
 	var help := Label.new()

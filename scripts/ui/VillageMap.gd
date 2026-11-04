@@ -8,7 +8,7 @@ signal project_drop_rejected(message: String)
 const BUILDING_SIZE := Vector2(76, 62)
 const MAP_PADDING := Vector2(12, 12)
 const RECOVERY_VISUAL_TARGET := 70.0
-const MAP_TEXTURE: Texture2D = preload("res://assets/maps/energy_village_map.webp")
+const MAP_TEXTURE: Texture2D = preload("res://assets/maps/energy_village_diorama.png")
 const TERRAIN_ZONES := {
 	"wind_plain": {"label": "바람 초원", "rect": Rect2(0.08, 0.06, 0.33, 0.30), "color": Color("78d9ba")},
 	"wind_coast": {"label": "바람 해안 절벽", "rect": Rect2(0.05, 0.28, 0.27, 0.34), "color": Color("58c4dd")},
@@ -25,14 +25,14 @@ const TERRAIN_ZONES := {
 # 위치는 가장 가까운 빈 셀로 스냅되어 길이나 강을 크게 덮지 않습니다.
 const PLACEMENT_CELLS := {
 	"wind_plain": [Vector2(0.18, 0.15), Vector2(0.31, 0.18), Vector2(0.20, 0.29), Vector2(0.34, 0.30)],
-	"wind_coast": [Vector2(0.13, 0.37), Vector2(0.24, 0.42), Vector2(0.14, 0.54), Vector2(0.27, 0.56)],
-	"solar_field": [Vector2(0.68, 0.15), Vector2(0.82, 0.16), Vector2(0.70, 0.28), Vector2(0.87, 0.28)],
+	"wind_coast": [Vector2(0.19, 0.29), Vector2(0.30, 0.35), Vector2(0.22, 0.44), Vector2(0.16, 0.53)],
+	"solar_field": [Vector2(0.65, 0.18), Vector2(0.81, 0.13), Vector2(0.79, 0.23), Vector2(0.88, 0.31)],
 	"riverbank": [Vector2(0.48, 0.17), Vector2(0.53, 0.31), Vector2(0.47, 0.45), Vector2(0.54, 0.56)],
-	"eco_city": [Vector2(0.69, 0.40), Vector2(0.83, 0.40), Vector2(0.70, 0.53), Vector2(0.86, 0.54)],
+	"eco_city": [Vector2(0.71, 0.36), Vector2(0.81, 0.41), Vector2(0.68, 0.51), Vector2(0.79, 0.49)],
 	"grid_hub": [Vector2(0.44, 0.44), Vector2(0.56, 0.44), Vector2(0.45, 0.55), Vector2(0.57, 0.55)],
 	"tidal_lagoon": [Vector2(0.14, 0.71), Vector2(0.29, 0.72), Vector2(0.16, 0.86), Vector2(0.34, 0.85)],
-	"nuclear_site": [Vector2(0.43, 0.68), Vector2(0.57, 0.68), Vector2(0.44, 0.83), Vector2(0.58, 0.83)],
-	"geothermal_field": [Vector2(0.73, 0.68), Vector2(0.87, 0.68), Vector2(0.73, 0.83), Vector2(0.87, 0.84)]
+	"nuclear_site": [Vector2(0.45, 0.64), Vector2(0.55, 0.64), Vector2(0.45, 0.72), Vector2(0.55, 0.72)],
+	"geothermal_field": [Vector2(0.77, 0.73), Vector2(0.85, 0.75), Vector2(0.78, 0.81), Vector2(0.90, 0.86)]
 }
 
 var environment_health_visual := 0.0
@@ -48,14 +48,18 @@ var drop_enabled := false
 var build_preview: Control
 var preview_shadow: Polygon2D
 var preview_icon: TextureRect
+var selected_project_payload: Dictionary = {}
+var keyboard_cell_index := 0
 
 func _ready() -> void:
 	clip_contents = true
+	focus_mode = Control.FOCUS_ALL
 	mouse_default_cursor_shape = Control.CURSOR_CAN_DROP
 	_create_build_preview()
 	queue_redraw()
 
 func reset_map() -> void:
+	selected_project_payload.clear()
 	if health_tween and health_tween.is_valid():
 		health_tween.kill()
 	environment_health_visual = 0.0
@@ -73,6 +77,7 @@ func set_drop_enabled(enabled: bool) -> void:
 	drop_enabled = enabled
 	mouse_default_cursor_shape = Control.CURSOR_CAN_DROP if enabled else Control.CURSOR_ARROW
 	if not enabled:
+		selected_project_payload.clear()
 		_clear_drag_state()
 	queue_redraw()
 
@@ -106,6 +111,8 @@ func sync_projects(projects: Array, built_project_ids: Array[int], placements: D
 		var owner_index := int(owners.get(project_index, -1))
 		var owner_data: Dictionary = players[owner_index] if owner_index >= 0 and owner_index < players.size() else {}
 		_add_building(project_index, str(project.get("image", "")), str(project.get("name", "시설")), requested_position, owner_data)
+		if int(selected_project_payload.get("project_index", -1)) == project_index:
+			cancel_selection()
 	set_environment_health(health)
 	queue_redraw()
 
@@ -131,6 +138,58 @@ func cancel_project_placement(project_index: int) -> void:
 	pending_project_cells.erase(project_index)
 	queue_redraw()
 
+func select_project(project_index: int, player_idx: int) -> void:
+	var payload := create_drop_payload(project_index, player_idx)
+	if not _has_valid_project_payload(payload):
+		return
+	selected_project_payload = payload
+	active_drag_project_index = project_index
+	keyboard_cell_index = 0
+	_preview_keyboard_cell()
+	grab_focus()
+	queue_redraw()
+
+func cancel_selection() -> bool:
+	if selected_project_payload.is_empty():
+		return false
+	selected_project_payload.clear()
+	_clear_drag_state()
+	return true
+
+func _preview_keyboard_cell() -> void:
+	var cells := _get_project_cells(active_drag_project_index)
+	if cells.is_empty():
+		return
+	keyboard_cell_index = posmod(keyboard_cell_index, cells.size())
+	_can_drop_data(cells[keyboard_cell_index]["position"], selected_project_payload)
+
+func _get_project_cells(project_index: int) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for terrain in _get_project_terrains(project_index):
+		for index in range((PLACEMENT_CELLS.get(terrain, []) as Array).size()):
+			result.append({"position": get_terrain_build_cell_center(terrain, index)})
+	return result
+
+func _gui_input(event: InputEvent) -> void:
+	if selected_project_payload.is_empty() or not drop_enabled:
+		return
+	if event is InputEventMouseMotion:
+		_can_drop_data(event.position, selected_project_payload)
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		_drop_data(event.position, selected_project_payload.duplicate())
+		accept_event()
+	elif event.is_action_pressed("ui_right") or event.is_action_pressed("ui_down"):
+		keyboard_cell_index += 1
+		_preview_keyboard_cell()
+		accept_event()
+	elif event.is_action_pressed("ui_left") or event.is_action_pressed("ui_up"):
+		keyboard_cell_index -= 1
+		_preview_keyboard_cell()
+		accept_event()
+	elif event.is_action_pressed("ui_accept"):
+		_drop_data(hovered_drop_position, selected_project_payload.duplicate())
+		accept_event()
+
 func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
 	if not _has_valid_project_payload(data):
 		_clear_drag_state()
@@ -150,18 +209,20 @@ func _drop_data(at_position: Vector2, data: Variant) -> void:
 	var candidate := _get_drop_candidate(project_index, at_position)
 	if not candidate["allowed"]:
 		project_drop_rejected.emit(_get_project_terrain_label(project_index) + "의 비어 있는 건설 패드에만 지을 수 있습니다.")
-		_clear_drag_state()
+		queue_redraw()
 		return
 	var cell_id := str(candidate["cell_id"])
 	reserved_cell_ids[cell_id] = project_index
 	pending_project_cells[project_index] = cell_id
 	var snapped_position: Vector2 = candidate["position"]
+	selected_project_payload.clear()
 	_clear_drag_state()
 	project_drop_requested.emit(project_index, int(data["player_idx"]), snapped_position)
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_DRAG_END:
-		_clear_drag_state()
+		if selected_project_payload.is_empty():
+			_clear_drag_state()
 
 func _set_environment_health_visual(value: float) -> void:
 	environment_health_visual = value

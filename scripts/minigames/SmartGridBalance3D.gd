@@ -34,6 +34,7 @@ var city_buildings: Array[MeshInstance3D] = []
 var city_windows: Array[MeshInstance3D] = []
 var power_lines: Array[MeshInstance3D] = []
 var power_pulses: Array[MeshInstance3D] = []
+var lit_window_count := 0
 
 var rng := RandomNumberGenerator.new()
 var running := false
@@ -74,6 +75,7 @@ var help_label: Label
 var supply_bar: ProgressBar
 var demand_bar: ProgressBar
 var phase_bar: ProgressBar
+var phase_countdown: Label
 var danger_tint: ColorRect
 
 func _ready() -> void:
@@ -139,7 +141,7 @@ func _build_world() -> void:
 
 func _create_materials() -> void:
 	normal_building_material = _material(VISUAL_STYLE.TEAL, false)
-	balanced_building_material = _material(Color("42dca3"), true)
+	balanced_building_material = _material(Color("648c94"), false)
 	shortage_building_material = _material(Color("273e59"), false)
 	overload_building_material = _material(Color("e05a45"), true)
 	normal_line_material = _material(Color("54a9cb"), true)
@@ -286,30 +288,58 @@ func _build_overlay() -> void:
 
 	var supply_caption := _overlay_label("공급", Vector2(18, 228), 15, Color("72efb6"))
 	supply_caption.custom_minimum_size.x = 70.0
+	supply_caption.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	supply_caption.offset_left = 18.0
+	supply_caption.offset_right = 88.0
+	supply_caption.offset_top = -66.0
+	supply_caption.offset_bottom = -42.0
 	var demand_caption := _overlay_label("수요", Vector2(18, 254), 15, Color("ffcf78"))
 	demand_caption.custom_minimum_size.x = 70.0
+	demand_caption.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	demand_caption.offset_left = 18.0
+	demand_caption.offset_right = 88.0
+	demand_caption.offset_top = -38.0
+	demand_caption.offset_bottom = -14.0
 
 	supply_bar = ProgressBar.new()
-	supply_bar.position = Vector2(88, 230)
-	supply_bar.size = Vector2(740, 17)
+	supply_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	supply_bar.offset_left = 88.0
+	supply_bar.offset_right = -132.0
+	supply_bar.offset_top = -62.0
+	supply_bar.offset_bottom = -44.0
 	supply_bar.max_value = 120.0
 	supply_bar.show_percentage = false
 	_style_progress_bar(supply_bar, Color("55e6a6"), Color("183743"))
 	add_child(supply_bar)
 	demand_bar = ProgressBar.new()
-	demand_bar.position = Vector2(88, 256)
-	demand_bar.size = Vector2(740, 17)
+	demand_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	demand_bar.offset_left = 88.0
+	demand_bar.offset_right = -132.0
+	demand_bar.offset_top = -34.0
+	demand_bar.offset_bottom = -16.0
 	demand_bar.max_value = 120.0
 	demand_bar.show_percentage = false
 	_style_progress_bar(demand_bar, Color("ffd36e"), Color("183743"))
 	add_child(demand_bar)
 	phase_bar = ProgressBar.new()
-	phase_bar.position = Vector2(844, 230)
-	phase_bar.size = Vector2(96, 43)
+	phase_bar.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	phase_bar.offset_left = -116.0
+	phase_bar.offset_right = -20.0
+	phase_bar.offset_top = -62.0
+	phase_bar.offset_bottom = -16.0
 	phase_bar.max_value = DEMAND_PHASE_SECONDS
 	phase_bar.show_percentage = false
 	_style_progress_bar(phase_bar, Color("72cfff"), Color("183743"))
 	add_child(phase_bar)
+	phase_countdown = Label.new()
+	phase_countdown.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	phase_countdown.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	phase_countdown.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	phase_countdown.add_theme_font_size_override("font_size", 14)
+	phase_countdown.add_theme_color_override("font_outline_color", Color("12313b"))
+	phase_countdown.add_theme_constant_override("outline_size", 4)
+	phase_countdown.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	phase_bar.add_child(phase_countdown)
 
 func _style_progress_bar(bar: ProgressBar, fill_color: Color, background_color: Color) -> void:
 	var background := StyleBoxFlat.new()
@@ -445,13 +475,17 @@ func _update_city_visuals(delta: float, difference: float, balanced: bool) -> vo
 		line_material = danger_line_material
 	for building in city_buildings:
 		building.material_override = state_material
-	var window_material := normal_window_material
-	if not balanced and difference < 0.0:
-		window_material = shortage_window_material
-	elif not balanced:
-		window_material = overload_window_material
-	for window in city_windows:
-		window.material_override = window_material
+	# Demand/supply errors affect useful light, not just a whole-city tint.
+	# A fixed spatial order makes shortages visibly recover as supply is raised;
+	# decorative updates consume no scenario RNG and never affect scoring.
+	var served_ratio := 1.0 if balanced or difference >= 0.0 else clampf(1.0 + difference / maxf(demand, 1.0), 0.0, 1.0)
+	lit_window_count = roundi(served_ratio * city_windows.size())
+	var brightness := 0.35 + served_ratio * 0.65
+	normal_window_material.albedo_color = Color("a2a66c").lerp(Color("f8dc70"), served_ratio)
+	normal_window_material.emission_energy_multiplier = brightness * 0.75
+	for window_index in range(city_windows.size()):
+		var order := (window_index * 7) % maxi(1, city_windows.size())
+		city_windows[window_index].material_override = normal_window_material if order < lit_window_count else shortage_window_material
 	for line in power_lines:
 		line.material_override = line_material
 	var flow_speed := lerpf(1.5, 5.5, clampf(supply / 120.0, 0.0, 1.0))
@@ -471,20 +505,20 @@ func _update_hud(difference: float, balanced: bool) -> void:
 	supply_bar.value = supply
 	demand_bar.value = demand
 	phase_bar.value = DEMAND_PHASE_SECONDS - phase_elapsed
+	phase_countdown.text = "다음 변화\n%.1f초" % maxf(0.0, DEMAND_PHASE_SECONDS - phase_elapsed)
 	event_label.text = "도시 변화  |  " + current_event
 	var gap := absf(difference)
-	var synchronization := clampf(1.0 - gap / 60.0, 0.0, 1.0) * 100.0
 	var average_gap := gap_integral / maxf(measurement_time, 0.001)
 	demand_label.text = "현재 수요 %d · 공급 %d MW" % [roundi(demand), roundi(supply)]
 	average_gap_label.text = "지금까지 평균 차이 %.1f MW" % average_gap
 	if balanced:
-		balance_label.text = "균형 유지 · 동기화 %d%%  ·  간격 %.1f MW" % [roundi(synchronization), gap]
+		balance_label.text = "도시 불빛 안정 · 균형 유지 · 차이 %.1f MW" % gap
 		balance_label.add_theme_color_override("font_color", Color("65f2b3"))
 	elif difference < 0.0:
-		balance_label.text = "동기화 %d%%  ·  공급 부족 %.1f MW  ·  W/↑" % [roundi(synchronization), gap]
+		balance_label.text = "불빛 약해짐 · 공급 부족 %.1f MW · W/↑" % gap
 		balance_label.add_theme_color_override("font_color", Color("8ed8ff"))
 	else:
-		balance_label.text = "동기화 %d%%  ·  공급 과잉 %.1f MW  ·  S/↓" % [roundi(synchronization), gap]
+		balance_label.text = "공급 과잉 %.1f MW · S/↓로 낮춰요" % gap
 		balance_label.add_theme_color_override("font_color", Color("ff796d"))
 
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:

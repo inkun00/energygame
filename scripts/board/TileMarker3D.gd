@@ -19,6 +19,14 @@ var target_pulse_elapsed := 0.0
 var base_emission_enabled := false
 var base_emission := Color.BLACK
 var minigame_completed := false
+var kind_badge: MeshInstance3D
+var kind_label: Label3D
+var kind_material: StandardMaterial3D
+var route_ring: MeshInstance3D
+var route_material: StandardMaterial3D
+var route_current := false
+var route_destination := false
+var route_visible := false
 
 func setup_tile_3d(idx: int) -> void:
 	tile_index = idx
@@ -71,6 +79,9 @@ func setup_tile_3d(idx: int) -> void:
 	num_label.position = Vector3(0, tile_size.y * 0.5 + 0.025, 0.52)
 	num_label.rotation_degrees = Vector3(-90, 0, 0)
 	add_child(num_label)
+	_create_kind_badge(tile_size.y)
+	_create_route_ring(tile_size.y)
+	_refresh_kind_badge()
 
 func refresh_tile_data() -> void:
 	tile_data = BoardGrid.get_tile_data(tile_index)
@@ -103,6 +114,107 @@ func _refresh_tile_style() -> void:
 		_: block_material.albedo_color = Color("4f6a80")
 	base_emission_enabled = block_material.emission_enabled
 	base_emission = block_material.emission
+	_refresh_kind_badge()
+
+func _create_kind_badge(tile_height: float) -> void:
+	# A small solid badge + Korean word remains readable without relying on hue.
+	# Reuse these two nodes when shortcuts and completed minigames change.
+	kind_badge = MeshInstance3D.new()
+	kind_badge.name = "TileKindBadge"
+	kind_badge.position = Vector3(-0.35, tile_height * 0.5 + 0.035, -0.50)
+	kind_material = StandardMaterial3D.new()
+	kind_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	kind_material.albedo_color = Color("153b43")
+	kind_badge.material_override = kind_material
+	add_child(kind_badge)
+	kind_label = Label3D.new()
+	kind_label.name = "TileKindLabel"
+	kind_label.font_size = 47
+	kind_label.pixel_size = 0.0045
+	kind_label.outline_size = 5
+	kind_label.modulate = Color("f6f4df")
+	kind_label.outline_modulate = Color("17343b")
+	kind_label.position = kind_badge.position + Vector3(0, 0.045, 0)
+	kind_label.rotation_degrees.x = -90.0
+	add_child(kind_label)
+
+func _refresh_kind_badge() -> void:
+	if kind_badge == null or kind_label == null:
+		return
+	var type: int = tile_data.get("type", BoardGrid.TileType.QUIZ_OX)
+	var word := "퀴즈"
+	var sides := 16
+	var color := Color("315f72")
+	match type:
+		BoardGrid.TileType.START:
+			word = "출발"
+			color = Color("306f58")
+		BoardGrid.TileType.FINISH:
+			word = "완주"
+			color = Color("a26e26")
+		BoardGrid.TileType.LADDER:
+			word = "상승"
+			sides = 3
+			color = Color("9a762e")
+		BoardGrid.TileType.SLIDE:
+			word = "하강"
+			sides = 3
+			color = Color("a34f48")
+		BoardGrid.TileType.POWERPLANT:
+			word = "발전"
+			sides = 6
+			color = Color("2d7373")
+		BoardGrid.TileType.CHANCE_CARD:
+			word = "보너스"
+			sides = 4
+			color = Color("6b558a")
+		BoardGrid.TileType.REST_TURN:
+			word = "쉼"
+			sides = 4
+			color = Color("607264")
+		BoardGrid.TileType.MINIGAME:
+			word = "완료" if minigame_completed else "미니"
+			sides = 6
+			color = Color("455d61") if minigame_completed else Color("744e91")
+	kind_label.text = word
+	kind_label.modulate = Color("c0d6cd") if type == BoardGrid.TileType.MINIGAME and minigame_completed else Color("fff5d8")
+	kind_material.albedo_color = color
+	var mesh := kind_badge.mesh as CylinderMesh
+	if mesh == null:
+		mesh = CylinderMesh.new()
+		mesh.top_radius = 0.34
+		mesh.bottom_radius = 0.34
+		mesh.height = 0.025
+		mesh.rings = 1
+		kind_badge.mesh = mesh
+	mesh.radial_segments = sides
+	kind_badge.scale = Vector3(1.24 if word.length() > 2 else 1.0, 1.0, 0.64)
+	kind_badge.rotation.y = PI if type == BoardGrid.TileType.SLIDE else 0.0
+
+func _create_route_ring(tile_height: float) -> void:
+	route_ring = MeshInstance3D.new()
+	route_ring.name = "MovementRouteRing"
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.74
+	ring.outer_radius = 0.80
+	ring.rings = 20
+	ring.ring_segments = 4
+	route_ring.mesh = ring
+	route_ring.position.y = tile_height * 0.5 + 0.065
+	route_material = StandardMaterial3D.new()
+	route_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	route_ring.material_override = route_material
+	route_ring.visible = false
+	add_child(route_ring)
+
+func set_route_state(is_current: bool, is_destination: bool, on_route: bool) -> void:
+	route_current = is_current
+	route_destination = is_destination
+	route_visible = is_current or is_destination or on_route
+	if route_ring:
+		route_ring.visible = route_visible
+		route_material.albedo_color = Color("ffd166") if is_current or is_destination else Color("77dece")
+		route_ring.scale = Vector3.ONE * (1.05 if is_destination else 1.0)
 
 func _process(delta: float) -> void:
 	if not skill_targetable or target_ring == null:

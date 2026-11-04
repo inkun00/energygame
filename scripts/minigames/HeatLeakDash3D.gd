@@ -31,6 +31,14 @@ var preview_label: Label
 var cooling_use_bar: ProgressBar
 var action_label: Label
 var flash: ColorRect
+var ac_power_cells: Array[MeshInstance3D] = []
+var cool_air: Array[MeshInstance3D] = []
+var power_active_material: StandardMaterial3D
+var power_efficient_material: StandardMaterial3D
+var power_idle_material: StandardMaterial3D
+var usage_before_close := 0.0
+var usage_after_close := 0.0
+var comparison_remaining := 0.0
 var hero_x := 0.0
 var elapsed := 0.0
 var cooling_used := 0.0
@@ -66,6 +74,9 @@ func setup(player_data: Dictionary, round_seed: int) -> void:
 	notice = "A/D 이동 · 열린 창문 앞에서 Space로 닫기"
 	notice_remaining = 3.0
 	flash_remaining = 0.0
+	usage_before_close = 0.0
+	usage_after_close = 0.0
+	comparison_remaining = 0.0
 	_spawn_hero(player_data)
 	for window in windows:
 		window["open"] = false
@@ -134,6 +145,17 @@ func _build_world() -> void:
 	_box(world, Vector3(-7.45, 2.60, -0.88), Vector3(1.00, 0.58, 0.40), Color("e8f8fb"))
 	_box(world, Vector3(-7.45, 2.39, -0.65), Vector3(0.72, 0.08, 0.08), Color("6cb7c9"), true)
 	_label3d(world, "에어컨", Vector3(-7.40, 3.16, -0.65), Color("eaffff"))
+	power_active_material = VISUAL_STYLE.material(Color("ffa067"), true)
+	power_efficient_material = VISUAL_STYLE.material(Color("72e6d2"), true)
+	power_idle_material = VISUAL_STYLE.material(Color("627d80"))
+	for cell in range(7):
+		var power_cell := _box(world, Vector3(-7.75 + float(cell) * 0.10, 2.64, -0.64), Vector3(0.065, 0.18, 0.03), Color("627d80"))
+		power_cell.name = "AirConditionerPower%d" % cell
+		ac_power_cells.append(power_cell)
+	for index in range(4):
+		var puff := _sphere(world, Vector3.ZERO, 0.065, Color("9eeaff"), true)
+		puff.name = "CoolingAir%d" % index
+		cool_air.append(puff)
 	var sun := _sphere(world, Vector3(7.25, 4.15, -1.0), 0.42, Color("ffd45f"), true)
 	sun.name = "SummerSun"
 	_label3d(world, "무더운 여름 34°C", Vector3(5.85, 3.75, -0.55), Color("ffe0a1"))
@@ -155,13 +177,13 @@ func _build_window(index: int) -> void:
 		center_x = x
 	var pane_base_position := window_pane.position if window_pane else Vector3.ZERO
 	# Keep repeated window cues inside each window's lane and below the AC label.
-	var status := _label3d(world, "더운 공기 ↑", Vector3(x, 2.72, -0.65), Color("ffb16f"))
+	var status := _label3d(world, "열림 · 유입", Vector3(x, 2.72, -0.65), Color("ffb16f"))
 	status.font_size = 32
 	status.pixel_size = 0.007
 	status.outline_size = 6
 	var particles: Array[MeshInstance3D] = []
 	for particle_index in range(5):
-		var particle := _box(world, Vector3(x + 0.68, 1.74 + float(particle_index) * 0.32, -0.30), Vector3(0.18, 0.13, 0.13), Color("ff754f"), true)
+		var particle := _box(world, Vector3(x, 1.74 + float(particle_index) * 0.10, -0.30), Vector3(0.22, 0.10, 0.29), Color("ff754f"), true)
 		particles.append(particle)
 	var reach_marker := _box(world, Vector3(center_x, 0.08, 1.12), Vector3(CLOSE_REACH * 2.0, 0.035, 0.42), Color("88f0b9"), true)
 	reach_marker.visible = false
@@ -220,6 +242,7 @@ func _build_overlay() -> void:
 
 func _process(delta: float) -> void:
 	flash_remaining = maxf(0.0, flash_remaining - delta)
+	comparison_remaining = maxf(0.0, comparison_remaining - delta)
 	if flash_remaining <= 0.0:
 		flash.color = Color.TRANSPARENT
 	_animate_heat(delta)
@@ -289,12 +312,15 @@ func _try_close() -> void:
 		return
 	var open_for := maxf(0.0, elapsed - float(closest["since"]))
 	var points := score_for_close(open_for)
+	usage_before_close = BASE_COOLING_USE + OPEN_WINDOW_USE * float(_open_window_count())
 	closest["open"] = false
 	closest["closed"] = true
 	closed_count += 1
+	usage_after_close = BASE_COOLING_USE + OPEN_WINDOW_USE * float(_open_window_count())
+	comparison_remaining = 2.4
 	_update_window_visual(closest)
 	arcade_event.emit(points, true, "창문을 닫았어요! 더운 공기가 멈춰 에어컨 사용 속도가 느려져요.", true)
-	_notice("창문 닫기 +%d점 · 냉방 낭비가 줄었어요!" % points)
+	_notice("창문 닫기 +%d점 · 전기 사용 %.1f → %.1f/초" % [points, usage_before_close, usage_after_close])
 	flash.color = Color("8af2ae3c")
 	flash_remaining = 0.20
 	_update_overlay()
@@ -308,11 +334,18 @@ func _open_window_count() -> int:
 
 func _update_window_visual(window: Dictionary) -> void:
 	var is_open := bool(window["open"])
-	(window["status"] as Node3D).visible = is_open
+	(window["status"] as Node3D).visible = true
+	(window["status"] as Label3D).text = "열림 · 유입" if is_open else "닫힘"
+	(window["status"] as Label3D).modulate = Color("ffb16f") if is_open else Color("b6e8db")
 	for particle in (window["particles"] as Array):
 		(particle as Node3D).visible = is_open
 
 func _animate_heat(delta: float) -> void:
+	# Cold air keeps circulating after a close; the orange influx disappears.
+	# Existing small meshes are reused, with no particles/shaders or allocations.
+	for index in range(cool_air.size()):
+		var phase := fposmod(elapsed * 0.9 + float(index) * 0.25, 1.0)
+		cool_air[index].position = Vector3(-7.45 + phase * 0.55, 2.31 - phase * 0.55, -0.55 + phase * 1.4)
 	for window in windows:
 		var target := 1.0 if bool(window["open"]) else 0.0
 		window["open_amount"] = move_toward(float(window["open_amount"]), target, delta * 2.7)
@@ -327,9 +360,9 @@ func _animate_heat(delta: float) -> void:
 		for index in range(particles.size()):
 			var particle := particles[index] as Node3D
 			var phase := fposmod(elapsed * 1.8 + float(index) * 0.34, 1.0)
-			particle.position.x = float(window["x"]) + 0.58 - phase * 0.42
-			particle.position.y = 1.33 + float(index) * 0.12 + sin(phase * PI) * 0.18
-			particle.position.z = -1.00 + phase * 1.25
+			particle.position.x = float(window["x"]) + sin(float(index) * 1.7) * 0.32
+			particle.position.y = 1.43 + float(index) * 0.10 + sin(phase * PI) * 0.13
+			particle.position.z = -1.15 + phase * 2.3
 
 func _notice(message: String) -> void:
 	notice = message
@@ -344,7 +377,15 @@ func _update_overlay() -> void:
 	var upcoming_windows: Array[int] = []
 	if to_wave >= 0.0 and to_wave <= 2.5 and next_wave < WAVE_COUNT:
 		upcoming_windows = _opening_candidates(next_wave)
-	preview_label.text = "%.1f초 뒤 더운 바람! 창문을 살펴요" % to_wave if to_wave >= 0.0 and to_wave <= 2.5 else ("창문을 닫으면 더운 공기 ↓ · 냉방 전기 ↓" if _open_window_count() > 0 else "더운 공기 차단! 적은 전기로 시원하게 유지해요")
+	if to_wave >= 0.0 and to_wave <= 2.5:
+		preview_label.text = "%.1f초 뒤 더운 바람! 창문을 살펴요" % to_wave
+	elif comparison_remaining > 0.0:
+		preview_label.text = "닫기 전 %.1f → 닫은 뒤 %.1f/초 · 냉방은 계속!" % [usage_before_close, usage_after_close]
+	else:
+		preview_label.text = "창문을 닫으면 더운 공기 ↓ · 냉방 전기 ↓" if _open_window_count() > 0 else "더운 공기 차단! 적은 전기로 시원하게 유지해요"
+	var active_cells := clampi(1 + _open_window_count(), 1, ac_power_cells.size())
+	for index in range(ac_power_cells.size()):
+		ac_power_cells[index].material_override = (power_active_material if _open_window_count() > 0 else power_efficient_material) if index < active_cells else power_idle_material
 	var has_reachable_window := false
 	for window in windows:
 		var reachable := bool(window["open"]) and absf(hero_x - float(window["x"])) <= CLOSE_REACH
@@ -357,9 +398,9 @@ func _update_overlay() -> void:
 			(window["status"] as Label3D).text = "바람 예고"
 			(window["status"] as Label3D).modulate = Color("ffe178")
 		else:
-			(window["status"] as Label3D).visible = bool(window["open"])
-			(window["status"] as Label3D).text = "더운 공기 ↑"
-			(window["status"] as Label3D).modulate = Color("ffb16f")
+			(window["status"] as Label3D).visible = true
+			(window["status"] as Label3D).text = "열림 · 유입" if bool(window["open"]) else "닫힘"
+			(window["status"] as Label3D).modulate = Color("ffb16f") if bool(window["open"]) else Color("b6e8db")
 	action_label.text = notice if notice_remaining > 0.0 else "A/D 이동 · 열린 창문 앞 Space · 닫으면 냉방 효율 상승"
 	action_label.visible = not has_reachable_window
 

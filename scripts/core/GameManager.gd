@@ -28,6 +28,12 @@ signal minigame_started(game_data)
 signal minigame_submission_changed(state)
 signal minigame_finished(results)
 signal adventure_preparation_changed(state)
+signal tutorial_turn_finished
+
+# Session-only guided practice. Never replicated or persisted; normal setup and
+# leaving the board both clear it before another adventure can start.
+var guided_tutorial_active := false
+var guided_tutorial_step := ""
 
 enum TurnState {
 	WAIT_ACTION,
@@ -329,6 +335,8 @@ func _process(delta: float) -> void:
 	if not active_minigame.is_empty():
 		_update_minigame(delta)
 		return
+	if guided_tutorial_active:
+		return
 	if open_market_active:
 		_update_open_market(delta)
 		return
@@ -352,6 +360,8 @@ func _process(delta: float) -> void:
 # 게임 초기화 (로비에서 호출)
 func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAULT_GAME_DURATION_SECONDS) -> void:
 	game_session_id += 1
+	guided_tutorial_active = false
+	guided_tutorial_step = ""
 	adventure_waiting_for_start = false
 	adventure_ready_players.clear()
 	_first_turn_requested = false
@@ -491,6 +501,8 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 
 func stop_game() -> void:
 	game_session_id += 1
+	guided_tutorial_active = false
+	guided_tutorial_step = ""
 	adventure_waiting_for_start = false
 	adventure_ready_players.clear()
 	_first_turn_requested = false
@@ -828,6 +840,8 @@ func _ai_roll_after_special(player_idx: int) -> void:
 
 # 주사위 굴리기 실행
 func execute_roll_dice(player_idx: int) -> void:
+	if guided_tutorial_active and guided_tutorial_step != "dice":
+		return
 	if adventure_waiting_for_start or current_state != TurnState.WAIT_ACTION or player_idx != current_turn_idx:
 		return
 	if NetworkManager.is_online and not NetworkManager.is_host:
@@ -835,7 +849,7 @@ func execute_roll_dice(player_idx: int) -> void:
 		return
 	dice_input_time_remaining = 0.0
 	_last_emitted_dice_input_seconds = -1
-	var roll_val = randi() % 6 + 1
+	var roll_val = 1 if guided_tutorial_active else randi() % 6 + 1
 	on_network_dice_rolled(player_idx, roll_val)
 
 func on_network_dice_rolled(player_idx: int, dice_val: int) -> void:
@@ -1060,6 +1074,8 @@ func _update_minigame(delta: float) -> void:
 			_start_minigame_countdown()
 			return
 		minigame_guide_timeout -= delta
+		if guided_tutorial_active:
+			minigame_guide_timeout = 45.0
 		if minigame_guide_timeout <= 0.0:
 			_start_minigame_countdown()
 		elif ceili(minigame_guide_timeout) != _last_minigame_guide_second:
@@ -1726,6 +1742,11 @@ static func quiz_result_reading_seconds(quiz: Dictionary, grade: int = 5) -> flo
 func end_turn() -> void:
 	if not is_game_active:
 		return
+	if guided_tutorial_active:
+		dice_input_time_remaining = 0.0
+		current_state = TurnState.WAIT_ACTION
+		tutorial_turn_finished.emit()
+		return
 	dice_input_time_remaining = 0.0
 	_last_emitted_dice_input_seconds = -1
 	total_turns += 1
@@ -1864,6 +1885,8 @@ func get_player_special_skill(player_idx: int) -> Dictionary:
 	return (SPECIAL_SKILLS_BY_ICON.get(icon_path, DEFAULT_SPECIAL_SKILL) as Dictionary).duplicate(true)
 
 func can_use_special_skill(player_idx: int) -> bool:
+	if guided_tutorial_active:
+		return false
 	if not is_game_active or adventure_waiting_for_start or village_construction_active or player_idx < 0 or player_idx >= players.size():
 		return false
 	if current_state != TurnState.WAIT_ACTION or current_turn_idx != player_idx:

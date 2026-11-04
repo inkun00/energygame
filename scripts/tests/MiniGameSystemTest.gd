@@ -430,17 +430,24 @@ func _run() -> void:
 			_check(float(school["school_door_open"]) == 1.0 and (school["school_door_left"] as Node3D).position.x < commute.SCHOOL_OFFSET + commute.SCHOOL_ENTRANCE_OFFSET - 0.13, "학생들이 들어갈 때 학교 문도 열려야 합니다.")
 			commute._animate_dropoff_students(0.1)
 			var visible_exits := 0
+			var scheduled_exits := 0
 			for exiting in commute.dropped_students:
+				if float(exiting["delay"]) <= 0.1:
+					scheduled_exits += 1
 				if is_instance_valid(exiting["node"]):
 					visible_exits += 1
-			_check(visible_exits == 3, "45명 하차 모델은 0.035초 간격으로 순서대로 등장해 초기 렌더링 부하를 제한해야 합니다.")
+			_check(visible_exits == scheduled_exits and visible_exits > 0 and visible_exits <= 3, "45명 하차 모델은 세 갈래 보행 경로의 출발 시각대로 소수씩 등장해 초기 렌더링 부하를 제한해야 합니다.")
 			commute._animate_dropoff_students(0.5)
 			var first_exit: Dictionary = commute.dropped_students[0]
 			if is_instance_valid(first_exit["node"]):
 				var first_node: Node3D = first_exit["node"]
-				var walking_direction := Vector3(float(first_exit["entrance_x"]) - float(first_exit["start_x"]), 0.0, -3.34)
+				# The marked route turns onto three entry lanes. Compare facing
+				# with actual movement over a short step, not the old straight line.
+				var previous_exit_position := first_node.position
+				commute._animate_dropoff_students(0.02)
+				var walking_direction := first_node.position - previous_exit_position
 				var expected_facing := atan2(-walking_direction.x, -walking_direction.z)
-				_check(first_node.position.z < 1.98 and is_equal_approx(first_node.rotation.y, expected_facing), "하차 학생은 실제 학교 입구 이동 방향을 바라보며 걸어가야 합니다.")
+				_check(walking_direction.length_squared() > 0.0 and first_node.position.z < 1.98 and absf(angle_difference(first_node.rotation.y, expected_facing)) < 0.005, "하차 학생은 실제 학교 입구 이동 방향을 바라보며 걸어가야 합니다.")
 			else:
 				_check(false, "하차 중인 첫 학생이 너무 일찍 사라지면 안 됩니다.")
 			commute._animate_dropoff_students(10.0)

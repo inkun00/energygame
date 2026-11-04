@@ -9,6 +9,8 @@ signal arcade_event(points: int, success: bool, message: String, count_correct: 
 const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
+const CARGO_CARD = preload("res://assets/open_source/kenney_adventure/panel_brown.webp")
+const COAL_ROCK = preload("res://assets/third_party/kenney/solar_dash/rock_largeA.glb")
 const SOURCES := [
 	{"name": "햇빛", "kind": 0, "shape": "sun", "reason": "햇빛은 다음 날에도 다시 비춰요."},
 	{"name": "바람", "kind": 0, "shape": "wind", "reason": "바람은 자연에서 다시 불어요."},
@@ -26,6 +28,10 @@ var viewport: SubViewport
 var world: Node3D
 var hero: Node3D
 var icon_anchor: Node3D
+var source_shape: Node3D
+var carried_name: Label3D
+var hand_link: MeshInstance3D
+var carry_direction := 1.0
 var left_light: MeshInstance3D
 var right_light: MeshInstance3D
 var item_label: Label
@@ -63,6 +69,7 @@ func setup(player_data: Dictionary, game_seed: int) -> void:
 	rng_seed = game_seed
 	item_step = 0
 	hero_x = 0.0
+	carry_direction = 1.0
 	visual_time = 0.0
 	cooldown = 0.0
 	waiting_for_release = false
@@ -73,6 +80,7 @@ func setup(player_data: Dictionary, game_seed: int) -> void:
 	icon_anchor.visible = true
 	_spawn_hero(player_data)
 	_next_item()
+	_update_carried_source()
 	running = true
 
 func set_running(value: bool) -> void:
@@ -126,6 +134,32 @@ func _build_world() -> void:
 	icon_anchor = Node3D.new()
 	icon_anchor.name = "CarriedEnergySource"
 	world.add_child(icon_anchor)
+	var card := Sprite3D.new()
+	card.name = "KenneyCargoCard"
+	card.texture = CARGO_CARD
+	card.pixel_size = 0.016
+	card.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	card.shaded = false
+	icon_anchor.add_child(card)
+	source_shape = Node3D.new()
+	source_shape.name = "SourceObject"
+	source_shape.position = Vector3(0, 0.12, 0.20)
+	source_shape.scale = Vector3.ONE * 0.52
+	icon_anchor.add_child(source_shape)
+	carried_name = Label3D.new()
+	carried_name.name = "CarriedSourceName"
+	carried_name.position = Vector3(0, -0.31, 0.50)
+	carried_name.font_size = 42
+	carried_name.pixel_size = 0.007
+	carried_name.outline_size = 5
+	carried_name.modulate = Color("fff3ce")
+	carried_name.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	carried_name.no_depth_test = true
+	carried_name.outline_modulate = Color("173744")
+	carried_name.outline_render_priority = 9
+	carried_name.render_priority = 10
+	icon_anchor.add_child(carried_name)
+	hand_link = _box("CarryingHandle", world, Vector3.ZERO, Vector3(0.42, 0.055, 0.06), Color("f5d590"))
 
 func _make_bin(x: float, color: Color, index: int) -> void:
 	_box("CollectionBin%d" % index, world, Vector3(x, 0.65, -0.65), Vector3(2.2, 1.3, 1.5), color)
@@ -185,39 +219,63 @@ func _next_item() -> void:
 	for label in answer_labels:
 		label.visible = item_step < 2
 	hint_label.text = "처음 두 물건은 목록을 참고해요 · A/← 왼쪽  D/→ 오른쪽" if item_step < 2 else "금방 다시 얻을 수 있나요? · A/← 왼쪽  D/→ 오른쪽"
-	for child in icon_anchor.get_children():
-		icon_anchor.remove_child(child)
+	carried_name.text = str(current_source["name"])
+	for child in source_shape.get_children():
+		source_shape.remove_child(child)
 		child.queue_free()
 	_build_source_shape(str(current_source["shape"]))
-	icon_anchor.position = Vector3(hero_x, 2.45, 1.55)
+	_update_carried_source()
+
+func _update_carried_source() -> void:
+	# The same named parcel stays beside the hero's hand, not floating in a
+	# separate display lane. No extra texture or mesh is created during motion.
+	icon_anchor.position = Vector3(hero_x + carry_direction * 0.86, 0.98 + sin(visual_time * 5.0) * 0.025, 1.80)
+	hand_link.position = Vector3(hero_x + carry_direction * 0.47, 0.86, 1.86)
+	hand_link.visible = icon_anchor.visible
 
 func _build_source_shape(shape: String) -> void:
 	match shape:
 		"sun":
-			_sphere("Sun", icon_anchor, Vector3.ZERO, 0.37, Color("ffd651"), true)
+			_sphere("Sun", source_shape, Vector3.ZERO, 0.37, Color("ffd651"), true)
 			for ray in range(8):
 				var angle := float(ray) * TAU / 8.0
-				var beam := _box("SunRay", icon_anchor, Vector3(cos(angle) * 0.59, sin(angle) * 0.59, 0), Vector3(0.30, 0.11, 0.10), Color("ffef92"), true)
+				var beam := _box("SunRay", source_shape, Vector3(cos(angle) * 0.59, sin(angle) * 0.59, 0), Vector3(0.30, 0.11, 0.10), Color("ffef92"), true)
 				beam.rotation.z = angle
 		"wind":
-			_sphere("WindHub", icon_anchor, Vector3.ZERO, 0.15, Color("d8faff"))
+			_sphere("WindHub", source_shape, Vector3.ZERO, 0.15, Color("d8faff"))
 			for blade in range(3):
 				var angle := float(blade) * TAU / 3.0
-				var vane := _box("WindBlade", icon_anchor, Vector3(sin(angle) * 0.39, cos(angle) * 0.39, 0), Vector3(0.16, 0.69, 0.10), Color("f3fcff"), true)
+				var vane := _box("WindBlade", source_shape, Vector3(sin(angle) * 0.39, cos(angle) * 0.39, 0), Vector3(0.16, 0.69, 0.10), Color("f3fcff"), true)
 				vane.rotation.z = -angle
 		"water":
-			var drop := _sphere("WaterDrop", icon_anchor, Vector3(0, -0.08, 0), 0.36, Color("5dbcf1"), true)
+			var drop := _sphere("WaterDrop", source_shape, Vector3(0, -0.08, 0), 0.36, Color("5dbcf1"), true)
 			drop.scale = Vector3(0.9, 1.1, 0.9)
-			_cylinder("WaterTip", icon_anchor, Vector3(0, 0.27, 0), 0.26, 0.42, Color("5dbcf1"))
+			_cylinder("WaterTip", source_shape, Vector3(0, 0.27, 0), 0.26, 0.42, Color("5dbcf1"))
 		"coal":
-			for rock in range(3):
-				_sphere("CoalRock", icon_anchor, Vector3((float(rock) - 1.0) * 0.25, -0.14 + float(rock % 2) * 0.21, 0), 0.26, Color("303c46"))
+			var rock := COAL_ROCK.instantiate() as Node3D
+			rock.name = "KenneyCoalRock"
+			source_shape.add_child(rock)
+			var bounds := AABB()
+			var found := false
+			var meshes := rock.find_children("*", "MeshInstance3D", true, false)
+			if rock is MeshInstance3D:
+				meshes.append(rock)
+			var coal_material := _material(Color("303c46"))
+			for mesh_node in meshes:
+				var mesh := mesh_node as MeshInstance3D
+				var local_bounds: AABB = (rock.global_transform.affine_inverse() * mesh.global_transform) * mesh.mesh.get_aabb()
+				bounds = bounds.merge(local_bounds) if found else local_bounds
+				found = true
+				mesh.material_override = coal_material
+			var fit := 0.98 / maxf(0.01, maxf(bounds.size.x, maxf(bounds.size.y, bounds.size.z)))
+			rock.scale = Vector3.ONE * fit
+			rock.position = -bounds.get_center() * fit
 		"oil":
-			_cylinder("OilBarrel", icon_anchor, Vector3.ZERO, 0.37, 0.83, Color("333a46"))
-			_cylinder("BarrelTop", icon_anchor, Vector3(0, 0.43, 0), 0.39, 0.08, Color("cd9d61"))
+			_cylinder("OilBarrel", source_shape, Vector3.ZERO, 0.37, 0.83, Color("333a46"))
+			_cylinder("BarrelTop", source_shape, Vector3(0, 0.43, 0), 0.39, 0.08, Color("cd9d61"))
 		"gas":
-			_cylinder("GasTank", icon_anchor, Vector3.ZERO, 0.33, 0.85, Color("96b7c4"))
-			_sphere("GasFlame", icon_anchor, Vector3(0, 0.57, 0), 0.18, Color("7edaf7"), true)
+			_cylinder("GasTank", source_shape, Vector3.ZERO, 0.33, 0.85, Color("96b7c4"))
+			_sphere("GasFlame", source_shape, Vector3(0, 0.57, 0), 0.18, Color("7edaf7"), true)
 
 func _process(delta: float) -> void:
 	visual_time += delta
@@ -226,8 +284,7 @@ func _process(delta: float) -> void:
 		flash.color = Color.TRANSPARENT
 	if not is_instance_valid(icon_anchor):
 		return
-	icon_anchor.position = Vector3(hero_x, 2.45 + sin(visual_time * 5.0) * 0.09, 1.55)
-	icon_anchor.rotation.y += delta * 0.7
+	_update_carried_source()
 	if not running:
 		return
 	var left_down := MINIGAME_INPUT.is_pressed(KEY_A) or MINIGAME_INPUT.is_pressed(KEY_LEFT)
@@ -250,6 +307,7 @@ func _process(delta: float) -> void:
 			returning_to_center = false
 			icon_anchor.visible = true
 			item_label.text = "운반: %s" % current_source["name"]
+		_update_carried_source()
 		return
 	if cooldown > 0.0:
 		cooldown -= delta
@@ -259,6 +317,9 @@ func _process(delta: float) -> void:
 		return
 	hint_label.text = "금방 다시 얻을 수 있나요? · A/← 왼쪽  D/→ 오른쪽"
 	hero_x = clampf(hero_x + axis * RUN_SPEED * delta, -DELIVERY_X, DELIVERY_X)
+	if axis != 0.0:
+		carry_direction = signf(axis)
+	_update_carried_source()
 	if is_instance_valid(hero):
 		hero.position.x = hero_x
 		if hero.is_moving != (axis != 0.0):
@@ -280,6 +341,7 @@ func _deliver(bin_kind: int) -> void:
 	flash_remaining = 0.22
 	returning_to_center = true
 	icon_anchor.visible = false
+	hand_link.visible = false
 	if correct:
 		item_step += 1
 		retrying_item = false

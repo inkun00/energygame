@@ -10,6 +10,8 @@ var session_open := false
 var exit_confirmation: ConfirmationDialog
 var standalone_minigames: CanvasLayer
 var recovery_overlay: CanvasLayer
+var guided_tutorial: GuidedTutorial
+var tutorial_player_configs: Array[Dictionary] = []
 
 func _create_exit_confirmation() -> void:
 	exit_confirmation = ConfirmationDialog.new()
@@ -34,6 +36,7 @@ func _set_session_open(value: bool) -> void:
 func request_game_exit() -> void:
 	if not session_open or exit_confirmation.visible:
 		return
+	exit_confirmation.dialog_text = "연습을 그만두고 로비로 돌아갈까요?\n튜토리얼은 언제든 처음부터 다시 시작할 수 있어요." if GameManager.guided_tutorial_active else "게임을 종료하고 로비로 돌아갈까요?\n진행 중인 게임으로 돌아올 수 없습니다.\n확인창을 보는 동안에도 게임 시간은 흐릅니다."
 	exit_confirmation.popup_centered(Vector2i(540, 210))
 	exit_confirmation.get_cancel_button().grab_focus()
 
@@ -55,11 +58,16 @@ func _input(event: InputEvent) -> void:
 
 func _ready() -> void:
 	_create_exit_confirmation()
+	guided_tutorial = preload("res://scripts/ui/GuidedTutorial.gd").new()
+	add_child(guided_tutorial)
+	guided_tutorial.leave_requested.connect(switch_to_lobby)
+	guided_tutorial.adventure_requested.connect(_start_adventure_after_tutorial)
 	recovery_overlay = preload("res://scripts/ui/NetworkRecoveryOverlay.gd").new()
 	add_child(recovery_overlay)
 	recovery_overlay.leave_requested.connect(switch_to_lobby)
 	if lobby_ui:
 		lobby_ui.start_game_requested.connect(_on_start_game_requested)
+		lobby_ui.tutorial_requested.connect(_on_tutorial_requested)
 	if NetworkManager:
 		if not NetworkManager.game_started_signal.is_connected(_on_network_game_started):
 			NetworkManager.game_started_signal.connect(_on_network_game_started)
@@ -102,9 +110,13 @@ func _finish_web_loading() -> void:
 		game_board.end_render_warmup()
 	else:
 		await RenderingServer.frame_post_draw
+	if not is_instance_valid(standalone_minigames) and bool(JavaScriptBridge.eval("new URLSearchParams(window.location.search).get('tutorial') === '1'", true)):
+		_on_tutorial_requested(lobby_ui._create_local_configs())
 	JavaScriptBridge.eval("if (window.energyGameReady) window.energyGameReady();")
 
 func switch_to_lobby() -> void:
+	if is_instance_valid(guided_tutorial):
+		guided_tutorial.stop()
 	_set_session_open(false)
 	if GameManager:
 		GameManager.stop_game()
@@ -122,6 +134,8 @@ func switch_to_lobby() -> void:
 			lobby_ui.reset_network_controls()
 
 func _on_start_game_requested(player_configs: Array[Dictionary], duration_seconds: int = GameManager.DEFAULT_GAME_DURATION_SECONDS) -> void:
+	if is_instance_valid(guided_tutorial):
+		guided_tutorial.stop()
 	_set_session_open(true)
 	if lobby_ui:
 		lobby_ui.visible = false
@@ -132,6 +146,24 @@ func _on_start_game_requested(player_configs: Array[Dictionary], duration_second
 			game_board.visible = true
 		if game_board.has_method("start_board_game"):
 			game_board.start_board_game(player_configs, duration_seconds)
+
+func _on_tutorial_requested(player_configs: Array[Dictionary]) -> void:
+	if NetworkManager.is_online:
+		NetworkManager.disconnect_network()
+	tutorial_player_configs = player_configs.duplicate(true)
+	_on_start_game_requested(player_configs, GameManager.DEFAULT_GAME_DURATION_SECONDS)
+	GameManager.guided_tutorial_active = true
+	GameManager.guided_tutorial_step = "dice"
+	game_board.hud.adventure_planner.tutorial_active = false
+	GameManager.start_first_turn()
+	GameManager.confirm_adventure_ready(0)
+	game_board.hud.adventure_planner._refresh_visibility()
+	guided_tutorial.begin(game_board)
+
+func _start_adventure_after_tutorial() -> void:
+	var configs := tutorial_player_configs.duplicate(true)
+	switch_to_lobby()
+	_on_start_game_requested(configs, int(lobby_ui.game_time_option_button.get_selected_metadata()))
 
 
 func _on_network_game_started(player_configs: Array[Dictionary], duration_seconds: int) -> void:

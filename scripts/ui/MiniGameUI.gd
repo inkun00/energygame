@@ -495,6 +495,8 @@ func _on_submission_changed(state: Dictionary) -> void:
 			submission_label.text = "점수 없는 조작 연습 · %d초 뒤 전체 자동 시작" % guide_seconds
 		elif is_guide_open():
 			guide_badge_label.text = "게임 방법 · %d명 준비 · %d초 뒤 자동 시작" % [ready_count, guide_seconds]
+			if GameManager.guided_tutorial_active:
+				guide_badge_label.text = "튜토리얼 · 준비 버튼을 누르면 시작해요"
 		else:
 			feedback_label.text = "준비 완료! 다른 플레이어를 기다리는 중…"
 			submission_label.text = "준비 %d / %d명 · %d초 뒤 자동 시작" % [ready_count, player_count, guide_seconds]

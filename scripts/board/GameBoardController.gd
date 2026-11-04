@@ -37,7 +37,7 @@ var camera_focus := Vector3(0, 0.0, 0.4)
 var camera_direction := Vector3(0.0, 13.0, 15.0).normalized()
 var camera_distance := 32.0
 var camera_yaw := 0.0
-var camera_pitch := deg_to_rad(41.0)
+var camera_pitch := deg_to_rad(52.0)
 var camera_dragging := false
 var camera_drag_button: int = MOUSE_BUTTON_NONE
 var left_drag_pending := false
@@ -54,6 +54,8 @@ var camera_restore_active := false
 var camera_restore_elapsed := 0.0
 var camera_restore_start_focus := Vector3.ZERO
 var camera_restore_start_distance := 32.0
+var board_active_player_idx := -1
+var movement_route_tiles: Array[int] = []
 
 ## 이전 최대 확대(220%)보다 정확히 30% 더 가까운 거리 = 286% 확대입니다.
 const CAMERA_MIN_DISTANCE := 6.53846
@@ -86,6 +88,7 @@ func _ready() -> void:
 	# 3D 보드·HUD·모달을 모두 명시적으로 끕니다.
 	set_board_active(false)
 	_configure_3d_camera()
+	_configure_board_lighting()
 	_build_energy_fairy_village_backdrop()
 	_build_3d_board_base()
 	_build_3d_path_guides()
@@ -172,6 +175,31 @@ func _configure_3d_camera() -> void:
 	camera3d.current = true
 	_apply_camera_distance(camera_distance)
 
+func _configure_board_lighting() -> void:
+	if world_environment and world_environment.environment:
+		var environment := world_environment.environment.duplicate() as Environment
+		world_environment.environment = environment
+		environment.background_mode = Environment.BG_COLOR
+		environment.background_color = VISUAL_STYLE.SKY
+		environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		environment.ambient_light_color = Color("c5d4c9")
+		environment.ambient_light_energy = 0.58
+		environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+		environment.glow_enabled = false
+		environment.ssao_enabled = false
+		environment.ssil_enabled = false
+		environment.sdfgi_enabled = false
+	var key_light := world3d.get_node_or_null("DirectionalLight3D") as DirectionalLight3D
+	if key_light:
+		key_light.light_color = Color("fff0da")
+		key_light.light_energy = 0.78
+		key_light.shadow_enabled = false
+	var fill_light := world3d.get_node_or_null("FillLight3D") as DirectionalLight3D
+	if fill_light:
+		fill_light.light_color = Color("b5d0cc")
+		fill_light.light_energy = 0.16
+		fill_light.shadow_enabled = false
+
 func _build_board_overview_button() -> void:
 	var rail := hud.get_node_or_null("RightRail") as VBoxContainer
 	if not rail:
@@ -214,6 +242,8 @@ func _apply_camera_transform() -> void:
 	camera_direction = Vector3(sin(camera_yaw) * horizontal, sin(camera_pitch), cos(camera_yaw) * horizontal).normalized()
 	camera3d.position = camera_focus + camera_direction * camera_distance
 	camera3d.look_at(camera_focus, Vector3.UP)
+	if is_instance_valid(energy_fairy_village):
+		energy_fairy_village.update_cutaway_view(camera3d.global_position, camera_focus, camera_distance < 25.0)
 
 func _zoom_board(direction: float) -> void:
 	_cancel_camera_follow()
@@ -293,6 +323,7 @@ func _finish_camera_follow() -> void:
 	camera_restore_start_distance = camera_distance
 	camera_restore_elapsed = 0.0
 	camera_restore_active = true
+	_refresh_board_player_focus(board_active_player_idx)
 
 func _cancel_camera_follow() -> void:
 	camera_follow_active = false
@@ -302,7 +333,37 @@ func _cancel_camera_follow() -> void:
 		camera_turn_focus_tween.kill()
 
 func _on_turn_changed(player_idx: int) -> void:
+	_refresh_board_player_focus(player_idx)
 	_focus_camera_on_player_turn(player_idx)
+
+func _clear_movement_route() -> void:
+	for index in movement_route_tiles:
+		if index >= 0 and index < tile_markers.size():
+			tile_markers[index].set_route_state(false, false, false)
+	movement_route_tiles.clear()
+
+func _refresh_board_player_focus(player_idx: int) -> void:
+	board_active_player_idx = player_idx
+	for index in range(player_pawns.size()):
+		player_pawns[index].set_board_current_turn(index == player_idx)
+	_clear_movement_route()
+	if player_idx >= 0 and player_idx < player_pawns.size():
+		var tile := player_pawns[player_idx].current_tile
+		if tile >= 0 and tile < tile_markers.size():
+			tile_markers[tile].set_route_state(true, false, false)
+			movement_route_tiles.append(tile)
+
+func _show_movement_route(from_tile: int, to_tile: int) -> void:
+	_clear_movement_route()
+	if BoardGrid.is_shortcut_transition(from_tile, to_tile):
+		movement_route_tiles.assign([from_tile, to_tile])
+	else:
+		var direction := 1 if to_tile >= from_tile else -1
+		for index in range(from_tile, to_tile + direction, direction):
+			movement_route_tiles.append(index)
+	for index in movement_route_tiles:
+		if index >= 0 and index < tile_markers.size():
+			tile_markers[index].set_route_state(index == from_tile, index == to_tile, true)
 
 func _focus_camera_on_player_turn(player_idx: int) -> void:
 	if player_idx < 0 or player_idx >= player_pawns.size():
@@ -581,8 +642,11 @@ func start_board_game(player_configs: Array[Dictionary], duration_seconds: int =
 		var pawn = PlayerPawn.new()
 		pawns_container.add_child(pawn)
 		pawn.setup_player(p_data)
+		var local_idx: int = NetworkManager.get_local_player_index() if NetworkManager.is_online else 0
+		pawn.set_board_presentation(true, str(p_data.get("name", "플레이어")), int(p_data.get("index", -1)) == local_idx)
 		VISUAL_STYLE.style_hero(pawn)
 		player_pawns.append(pawn)
+	_refresh_board_player_focus(GameManager.current_turn_idx)
 		
 	if hud and hud.has_method("initialize_hud"):
 		hud.initialize_hud()
@@ -630,8 +694,10 @@ func _on_player_moved(player_idx: int, from_tile: int, to_tile: int) -> void:
 		var pawn := player_pawns[player_idx]
 		if to_tile == 0 and from_tile > 1 and GameManager.current_state == GameManager.TurnState.TURN_END:
 			pawn.snap_to_tile(0)
+			_refresh_board_player_focus(player_idx)
 			_focus_camera_on_player_turn(player_idx)
 		else:
+			_show_movement_route(from_tile, to_tile)
 			pawn.animate_move_to_tile(to_tile)
 			_start_camera_follow(pawn, from_tile, to_tile)
 
@@ -682,7 +748,7 @@ func _on_village_construction_started(_inventories: Array) -> void:
 	camera_restore_active = false
 	camera_focus = Vector3(0, 0.0, 0.4)
 	camera_yaw = 0.0
-	camera_pitch = deg_to_rad(41.0)
+	camera_pitch = deg_to_rad(52.0)
 	_apply_camera_distance(32.0)
 
 func _reset_kingdom_visuals() -> void:
@@ -694,8 +760,8 @@ func _reset_kingdom_visuals() -> void:
 		board_base_material.albedo_color = Color("263136")
 		board_base_material.emission_enabled = false
 	if world_environment and world_environment.environment:
-		world_environment.environment.ambient_light_color = Color("5d6972")
-		world_environment.environment.ambient_light_energy = 0.55
+		world_environment.environment.ambient_light_color = Color("c5d4c9")
+		world_environment.environment.ambient_light_energy = 0.58
 
 func _on_kingdom_progress_changed(projects_built: int, total_projects: int, health: int) -> void:
 	var recovery := clampf(float(health) / 100.0, 0.0, 1.0)
@@ -704,8 +770,8 @@ func _on_kingdom_progress_changed(projects_built: int, total_projects: int, heal
 		board_base_material.emission_enabled = recovery > 0.0
 		board_base_material.emission = Color("1fbf80") * recovery * 0.32
 	if world_environment and world_environment.environment:
-		world_environment.environment.ambient_light_color = Color("5d6972").lerp(Color("e5eee2"), recovery)
-		world_environment.environment.ambient_light_energy = lerpf(0.55, 0.70, recovery)
+		world_environment.environment.ambient_light_color = Color("c5d4c9").lerp(Color("e5eee2"), recovery)
+		world_environment.environment.ambient_light_energy = lerpf(0.58, 0.64, recovery)
 	while built_landmark_count < projects_built and built_landmark_count < total_projects:
 		_add_renewable_landmark(built_landmark_count)
 		built_landmark_count += 1

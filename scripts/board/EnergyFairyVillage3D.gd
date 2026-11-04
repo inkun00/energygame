@@ -13,6 +13,35 @@ var water_material: StandardMaterial3D
 var wood_material: StandardMaterial3D
 var leaf_materials: Array[StandardMaterial3D] = []
 var glow_materials: Array[StandardMaterial3D] = []
+var scenery_groups: Array[Node3D] = []
+var cutaway_hidden_count := 0
+
+func update_cutaway_view(camera_position: Vector3, focus_position: Vector3, enabled: bool) -> void:
+	# Hide only tall decorative groups in the foreground sight corridor. A bool
+	# cutaway works in the low-end Compatibility renderer without alpha overdraw,
+	# extra viewports, raycasts, shadow maps or per-frame material duplication.
+	var sight := focus_position - camera_position
+	var distance := sight.length()
+	var direction := sight / maxf(distance, 0.001)
+	cutaway_hidden_count = 0
+	for group in scenery_groups:
+		if not is_instance_valid(group):
+			continue
+		var center := group.global_position + Vector3.UP * float(group.get_meta("cutaway_height", 1.1))
+		var offset := center - camera_position
+		var along := offset.dot(direction)
+		var radius := float(group.get_meta("cutaway_radius", 1.5))
+		var side_distance := (offset - direction * along).length()
+		var in_sight_corridor := along > 0.0 and along < distance - 0.25 and side_distance < radius + 3.0
+		var too_close := offset.length() < radius + 6.0
+		group.visible = not (enabled and (in_sight_corridor or too_close))
+		if not group.visible:
+			cutaway_hidden_count += 1
+
+func _register_scenery(group: Node3D, radius: float = 1.5, height: float = 1.1) -> void:
+	group.set_meta("cutaway_radius", radius)
+	group.set_meta("cutaway_height", height)
+	scenery_groups.append(group)
 
 func build_village() -> void:
 	name = "EnergyFairyVillageBackdrop"
@@ -39,15 +68,15 @@ func _process(delta: float) -> void:
 			light.rotation.y += delta * 0.34
 
 func _create_materials() -> void:
-	grass_material = _material(Color("204b35"), 0.92)
-	path_material = _material(Color("a98c58"), 0.86)
-	water_material = _material(Color("176f85"), 0.24, Color("12566d"), 0.22)
-	wood_material = _material(Color("744b2b"), 0.82)
+	grass_material = _material(Color("527b64"), 0.92)
+	path_material = _material(Color("b9ab85"), 0.90)
+	water_material = _material(Color("447f89"), 0.86)
+	wood_material = _material(Color("79664d"), 0.88)
 	leaf_materials = [
-		_material(Color("2d8d52"), 0.9),
-		_material(Color("49a85e"), 0.9),
-		_material(Color("58b47a"), 0.88),
-		_material(Color("6d9f4f"), 0.9)
+		_material(Color("557f64"), 0.9),
+		_material(Color("6f9472"), 0.9),
+		_material(Color("7ca18a"), 0.9),
+		_material(Color("87996c"), 0.9)
 	]
 	glow_materials = [
 		_material(Color("75f4cf"), 0.2, Color("45d8bd"), 0.3),
@@ -93,8 +122,8 @@ func _build_fairy_neighborhoods() -> void:
 		Vector3(-8.0, -0.2, 13.1), Vector3(0.2, -0.2, 13.2), Vector3(8.3, -0.2, 13.0),
 		Vector3(-7.4, -0.2, -13.0), Vector3(1.0, -0.2, -13.1), Vector3(8.8, -0.2, -12.8)
 	]
-	var wall_colors := [Color("eff0bf"), Color("bfe8d2"), Color("c9ddff"), Color("e8c7f4"), Color("f2d0a6")]
-	var roof_colors := [Color("e06752"), Color("437d6b"), Color("456fa5"), Color("8b5cad"), Color("d89b3d")]
+	var wall_colors := [Color("d9d7ba"), Color("b9d1bf"), Color("c3cdd6"), Color("d2c8d4"), Color("dbcbb2")]
+	var roof_colors := [Color("b56e5c"), Color("547d6e"), Color("58768d"), Color("89718f"), Color("ad8a53")]
 	for house_index in range(house_positions.size()):
 		_build_fairy_house(house_positions[house_index], wall_colors[house_index % wall_colors.size()], roof_colors[house_index % roof_colors.size()], house_index)
 	# 턴 카메라가 보드 모서리를 확대했을 때도 주택이 보이도록 보드 바로 바깥에 작은 집을 둡니다.
@@ -112,6 +141,7 @@ func _build_fairy_house(position_value: Vector3, wall_color: Color, roof_color: 
 	house.rotation.y = (house_index % 4) * PI * 0.5
 	house.scale = Vector3.ONE * scale_value
 	add_child(house)
+	_register_scenery(house, 1.5 * scale_value, 1.3 * scale_value)
 	var wall_material := _material(wall_color, 0.8)
 	var roof_material := _material(roof_color, 0.72)
 	_add_cylinder(house, Vector3(0, 0.88, 0), 1.05, 1.05, 1.7, wall_material, 10)
@@ -129,6 +159,7 @@ func _build_energy_gateway(position_value: Vector3, yaw: float) -> void:
 	gateway.position = position_value
 	gateway.rotation.y = yaw
 	add_child(gateway)
+	_register_scenery(gateway, 1.5, 1.4)
 	var stone := _material(Color("b8c7a3"), 0.8)
 	_add_box(gateway, Vector3(-1.0, 1.05, 0), Vector3(0.38, 2.3, 0.55), stone)
 	_add_box(gateway, Vector3(1.0, 1.05, 0), Vector3(0.38, 2.3, 0.55), stone)
@@ -153,6 +184,7 @@ func _build_wind_turbine(position_value: Vector3, yaw: float) -> void:
 	turbine.position = position_value
 	turbine.rotation.y = yaw
 	add_child(turbine)
+	_register_scenery(turbine, 1.7, 3.0)
 	var metal := _material(Color("d9ece4"), 0.5)
 	_add_cylinder(turbine, Vector3(0, 2.25, 0), 0.11, 0.24, 4.5, metal, 10)
 	var rotor := Node3D.new()
@@ -185,6 +217,7 @@ func _build_crystal_cluster(position_value: Vector3, crystal_index: int) -> void
 	cluster.position = position_value
 	cluster.scale = Vector3.ONE * 0.72
 	add_child(cluster)
+	_register_scenery(cluster, 0.8, 0.9)
 	var glow := glow_materials[crystal_index % glow_materials.size()]
 	for crystal_data in [[Vector3(-0.28, 0.55, 0.05), 0.22, 1.25], [Vector3(0.18, 0.78, 0), 0.28, 1.7], [Vector3(0.48, 0.43, 0.12), 0.18, 0.95]]:
 		var crystal := _add_cylinder(cluster, crystal_data[0], 0.0, float(crystal_data[1]), float(crystal_data[2]), glow, 6)
@@ -209,6 +242,7 @@ func _build_tree(position_value: Vector3, scale_value: float, tree_index: int) -
 	tree.position = position_value
 	tree.scale = Vector3.ONE * scale_value
 	add_child(tree)
+	_register_scenery(tree, 1.1 * scale_value, 1.4 * scale_value)
 	_add_cylinder(tree, Vector3(0, 0.72, 0), 0.20, 0.28, 1.45, wood_material, 8)
 	var leaves := leaf_materials[tree_index % leaf_materials.size()]
 	_add_sphere(tree, Vector3(0, 1.75, 0), 0.82, leaves, 10)
@@ -240,12 +274,14 @@ func _build_distant_hills() -> void:
 	var hill_materials := [_material(Color("365b43"), 1.0), _material(Color("3f684a"), 1.0), _material(Color("526f50"), 1.0)]
 	var hill_positions := [Vector3(-23.5, -0.5, -13.5), Vector3(-15.0, -0.5, -16.0), Vector3(-5.0, -0.5, -16.7), Vector3(6.0, -0.5, -16.5), Vector3(16.0, -0.5, -15.5), Vector3(23.0, -0.5, -12.8), Vector3(-23.5, -0.5, 13.2), Vector3(23.5, -0.5, 13.0)]
 	for hill_index in range(hill_positions.size()):
-		_add_cylinder(self, hill_positions[hill_index] + Vector3(0, 1.1 + (hill_index % 2) * 0.4, 0), 0.3, 3.2 + (hill_index % 3) * 0.7, 3.7 + (hill_index % 2), hill_materials[hill_index % hill_materials.size()], 9)
+		var hill := _add_cylinder(self, hill_positions[hill_index] + Vector3(0, 1.1 + (hill_index % 2) * 0.4, 0), 0.3, 3.2 + (hill_index % 3) * 0.7, 3.7 + (hill_index % 2), hill_materials[hill_index % hill_materials.size()], 9)
+		_register_scenery(hill, 4.0, 0.4)
 
 func _material(color: Color, roughness: float, emission_color: Color = Color.TRANSPARENT, emission_strength: float = 0.0) -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
 	material.albedo_color = color
 	material.roughness = roughness
+	material.metallic_specular = 0.22
 	if emission_strength > 0.0:
 		material.emission_enabled = true
 		material.emission = emission_color

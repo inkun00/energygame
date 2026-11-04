@@ -72,6 +72,8 @@ var overlay_label: Label
 var score_rule_label: Label
 var sun_timer_label: Label
 var panel_gate_index := 0
+var score_popup: Label
+var score_popup_tween: Tween
 
 func _ready() -> void:
 	stretch = true
@@ -98,6 +100,7 @@ func setup(player_data: Dictionary, game_seed: int) -> void:
 		_spawn_panel_gate(-8.0 - float(gate_index) * 8.0)
 	for obstacle_index in range(3):
 		_spawn_terrain_obstacle(-13.0 - float(obstacle_index) * 12.0)
+	_update_panel_guides()
 	running = true
 
 func set_running(value: bool) -> void:
@@ -232,7 +235,7 @@ func _build_overlay() -> void:
 
 	score_rule_label = Label.new()
 	score_rule_label.position = Vector2(14, 40)
-	score_rule_label.text = "파란 화살표 = 앞면 방향 · 노란 선 = 햇빛 방향"
+	score_rule_label.text = "다음 패널만 비교 · 파란 화살표 = 앞면 · 노란 선 = 햇빛"
 	score_rule_label.add_theme_font_size_override("font_size", 15)
 	score_rule_label.add_theme_color_override("font_color", Color("ffe66b"))
 	score_rule_label.add_theme_color_override("font_outline_color", Color("12313b"))
@@ -389,6 +392,7 @@ func _physics_process(delta: float) -> void:
 	_update_sun(delta)
 	_update_course(delta)
 	_update_spawning(delta)
+	_update_panel_guides()
 	distance += RUN_SPEED * delta
 	if is_instance_valid(sun):
 		sun.rotation.y += delta * 0.18
@@ -513,7 +517,8 @@ func _resolve_panel_gate(record: Dictionary) -> void:
 		if not lane_choice_made:
 			arcade_event.emit(0, true, "태양을 보고 패널 길을 골라 보세요. 기다린 기록은 점수가 아니에요.", false)
 			return
-		_spawn_energy_burst(hero_body.position + Vector3(0, 1.1, -0.2))
+		# Show the electricity leaving the selected panel before reaching the runner.
+		_spawn_energy_burst((panels[selected_lane] as Node3D).global_position + Vector3.UP * 0.75)
 		_show_score_popup(100, true, "햇빛 정면 → 전기 생산!")
 		arcade_event.emit(100, true, "패널이 빛을 정면으로 받아 전기를 만들었어요!", true)
 	else:
@@ -534,7 +539,27 @@ func _update_sun(delta: float) -> void:
 		sun.position = SUN_POSITIONS[previous].lerp(SUN_POSITIONS[sun_position_index], eased)
 	var seconds_left := ceili(maxf(0.0, SUN_MOVE_INTERVAL - sun_move_elapsed))
 	if is_instance_valid(sun_timer_label):
-		sun_timer_label.text = "태양 이동까지 %d초" % seconds_left
+		var moving := sun_move_count > 0 and sun_move_elapsed < SUN_TRANSITION_SECONDS
+		sun_timer_label.text = "태양 이동 중 · 앞면 다시 비교" if moving else ("곧 태양 이동 · 1초" if seconds_left <= 1 else "태양 이동까지 %d초" % seconds_left)
+		sun_timer_label.add_theme_color_override("font_color", Color("fff0a0") if moving or seconds_left <= 1 else Color("ffe66b"))
+
+func _update_panel_guides() -> void:
+	# All three lanes in ONE upcoming row get identical cues. Distant rows remain
+	# readable scenery instead of a forest of arrows; this never reveals a lane.
+	var nearest: Node3D
+	var nearest_z := -INF
+	var runner_z := hero_body.position.z if is_instance_valid(hero_body) else PLAYER_Z
+	for record in panel_gates:
+		var gate := record.get("node") as Node3D
+		if is_instance_valid(gate) and not bool(record.get("resolved", false)) and gate.position.z < runner_z - 0.2 and gate.position.z > nearest_z:
+			nearest = gate
+			nearest_z = gate.position.z
+	for record in panel_gates:
+		var focused: bool = record.get("node") == nearest
+		for marker in record.get("front_markers", []):
+			(marker as Node3D).visible = focused
+		for beam in record.get("beams", []):
+			(beam as Node3D).visible = focused
 
 func _update_panel_gate_for_sun(record: Dictionary) -> void:
 	var gate := record.get("node") as Node3D
@@ -601,6 +626,11 @@ func _show_collision_flash() -> void:
 	tween.tween_callback(flash.queue_free)
 
 func _show_score_popup(points: int, success: bool, message: String) -> void:
+	if is_instance_valid(score_popup_tween):
+		score_popup_tween.kill()
+	if is_instance_valid(score_popup):
+		score_popup.hide()
+		score_popup.queue_free()
 	var popup := Label.new()
 	popup.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	popup.offset_left = -260.0
@@ -614,8 +644,10 @@ func _show_score_popup(points: int, success: bool, message: String) -> void:
 	popup.add_theme_color_override("font_outline_color", Color("041019"))
 	popup.add_theme_constant_override("outline_size", 9)
 	add_child(popup)
+	score_popup = popup
 	var tween := create_tween().set_parallel(true)
-	tween.tween_property(popup, "position:y", popup.position.y - 34.0, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	score_popup_tween = tween
+	tween.tween_property(popup, "position:y", popup.position.y - 10.0, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tween.tween_property(popup, "modulate:a", 0.0, 0.65).set_delay(0.7)
 	tween.chain().tween_callback(popup.queue_free)
 
@@ -640,7 +672,8 @@ func _spawn_energy_burst(burst_position: Vector3) -> void:
 	world.add_child(burst)
 	var tween := create_tween().set_parallel(true)
 	tween.tween_property(burst, "scale", Vector3.ONE * 3.2, 0.38).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(burst, "position:y", burst.position.y + 1.1, 0.38)
+	var destination := hero_body.position + Vector3.UP * 1.0 if is_instance_valid(hero_body) else burst.position + Vector3.UP
+	tween.tween_property(burst, "position", destination, 0.38)
 	tween.tween_property(burst, "transparency", 1.0, 0.38)
 	tween.chain().tween_callback(burst.queue_free)
 

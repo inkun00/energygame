@@ -58,6 +58,12 @@ var turbine: Node3D
 var generator_light: MeshInstance3D
 var city_light: MeshInstance3D
 var power_line: MeshInstance3D
+var generator_shaft: MeshInstance3D
+var electric_pulses: Array[MeshInstance3D] = []
+var city_windows: Array[MeshInstance3D] = []
+var city_window_material: StandardMaterial3D
+var city_window_dark_material: StandardMaterial3D
+var visual_power_fraction := 0.0
 
 var selected_gate := -1
 var open_gate := -1
@@ -119,6 +125,8 @@ func _ready() -> void:
 	_build_viewport()
 	_build_world()
 	_build_overlay()
+	resized.connect(_fit_camera_to_chain)
+	_fit_camera_to_chain()
 	set_process(true)
 
 func setup(player_data: Dictionary, game_seed: int) -> void:
@@ -254,6 +262,15 @@ func _build_world() -> void:
 	gate_closed_material = _material(Color("a7b3bc"), false)
 	_build_dam()
 
+func _fit_camera_to_chain() -> void:
+	if not is_instance_valid(camera) or size.x <= 0.0 or size.y <= 0.0:
+		return
+	# A taller arena must not crop the generator/city off the right edge.
+	# Preserve the hydraulic geometry; only fit the entire educational chain.
+	camera.size = maxf(8.2, 21.8 / (size.x / size.y))
+	camera.position = Vector3(-0.8, 6.0, 17.0)
+	camera.look_at(Vector3(-0.8, 2.9, 0.0), Vector3.UP)
+
 func _build_dam() -> void:
 	_box("Ground", Vector3(0, -0.30, -0.6), Vector3(24, 0.45, 9), VISUAL_STYLE.FIELD)
 	_box("ReservoirBack", Vector3(-6.4, 3.0, -1.6), Vector3(10.3, 6.2, 0.45), Color("a0b4ac"))
@@ -280,9 +297,12 @@ func _build_dam() -> void:
 		var gate_label := Label3D.new()
 		gate_label.position = Vector3(-2.1, gate_y + 0.12, 1.2)
 		gate_label.text = "%s %d%%" % [GATE_NAMES[gate_index], roundi(GATE_LEVELS[gate_index])]
-		gate_label.font_size = 45
-		gate_label.pixel_size = 0.006
+		gate_label.font_size = 50
+		gate_label.pixel_size = 0.007
 		gate_label.outline_size = 8
+		gate_label.outline_modulate = Color("12313b")
+		gate_label.render_priority = 10
+		gate_label.outline_render_priority = 9
 		gate_label.no_depth_test = true
 		world.add_child(gate_label)
 		gate_labels.append(gate_label)
@@ -320,20 +340,37 @@ func _build_dam() -> void:
 		blade.rotation_degrees.z = float(blade_index) * 90.0
 		blade.position = Vector3(sin(float(blade_index) * PI / 2.0) * 0.46, cos(float(blade_index) * PI / 2.0) * 0.46, 0)
 	_box("Generator", Vector3(6.45, 1.0, 0.8), Vector3(1.15, 1.2, 1.1), Color("566d79"))
+	generator_shaft = _box("TurbineGeneratorShaft", Vector3(5.65, TAILWATER_Y, 1.05), Vector3(1.5, 0.13, 0.13), Color("d9ecf0"))
 	generator_light = _sphere("GeneratorPower", Vector3(6.45, 1.8, 1.25), 0.28, Color("ffe872"), true)
 	# Keep the entire turbine → generator → city chain inside laptop viewports.
 	power_line = _box("PowerToCity", Vector3(7.6, 2.0, 0.4), Vector3(2.4, 0.10, 0.12), Color("ffe872"), true)
+	for pulse_index in range(4):
+		electric_pulses.append(_sphere("ElectricityToCity%d" % pulse_index, Vector3(6.45, 2.0, 0.65), 0.10, Color("fff4a1"), true))
+	city_window_material = _material(Color("ffe58b"), true)
+	city_window_dark_material = _material(Color("516171"), false)
 	for house_x in [7.6, 8.8]:
 		_box("CityHouse", Vector3(house_x, 0.8, -0.3), Vector3(1.1, 1.6, 1.0), Color("e7dbbb"))
+		for floor_index in range(2):
+			var window := _box("CityWindow", Vector3(house_x, 0.45 + floor_index * 0.58, 0.23), Vector3(0.64, 0.24, 0.04), Color("516171"))
+			city_windows.append(window)
 	city_light = _sphere("CityLight", Vector3(8.2, 1.8, 0.75), 0.33, Color("ffe872"), true)
 	var city_label := Label3D.new()
 	city_label.position = Vector3(8.2, 3.1, 0.5)
 	city_label.text = "도시 전력"
 	city_label.font_size = 51
-	city_label.pixel_size = 0.006
+	city_label.pixel_size = 0.007
 	city_label.outline_size = 8
 	city_label.no_depth_test = true
 	world.add_child(city_label)
+	for station in [{"name": "터빈", "where": Vector3(4.8, 2.55, 1.0)}, {"name": "발전기", "where": Vector3(6.45, 2.55, 1.0)}]:
+		var station_label := Label3D.new()
+		station_label.text = str(station["name"])
+		station_label.position = station["where"]
+		station_label.font_size = 44
+		station_label.pixel_size = 0.008
+		station_label.outline_size = 8
+		station_label.no_depth_test = true
+		world.add_child(station_label)
 	head_marker = _box("HeadDistance", Vector3(-10.45, 2.4, 1.45), Vector3(0.10, 2.5, 0.10), Color("ffe073"), true)
 
 func _spawn_hero(player_data: Dictionary) -> void:
@@ -582,14 +619,20 @@ func _animate_world(delta: float) -> void:
 			hero.call("_set_avatar_animation_state", moving)
 		if absf(hero_move_axis) > 0.01 and hero.avatar_sprite:
 			hero.avatar_sprite.flip_h = hero_move_axis < 0.0
-	if open_gate < 0:
+	var current_power := power_for_gate(water_level, open_gate)
+	if current_power <= 0.0:
 		return
 	turbine.rotation_degrees.z += (180.0 + flow_for_gate(water_level, open_gate) * 3.0) * delta
+	generator_shaft.rotation.x += delta * (3.0 + visual_power_fraction * 8.0)
 	generator_light.scale = Vector3.ONE * (0.85 + 0.18 * sin(visual_time * 10.0))
 	for pulse_index in range((channel_pulses[open_gate] as Array).size()):
 		var pulse := channel_pulses[open_gate][pulse_index] as MeshInstance3D
-		var progress := fposmod(visual_time * 1.35 + float(pulse_index) * 0.25, 1.0)
+		var flow_speed := 0.65 + clampf(flow_for_gate(water_level, open_gate) / 50.0, 0.0, 1.0) * 1.1
+		var progress := fposmod(visual_time * flow_speed + float(pulse_index) * 0.25, 1.0)
 		pulse.position = Vector3(-0.65, GATE_Y[open_gate], 0.8).lerp(Vector3(4.65, TAILWATER_Y, 0.8), progress)
+	for pulse_index in range(electric_pulses.size()):
+		var progress := fposmod(visual_time * (0.55 + visual_power_fraction * 1.2) + float(pulse_index) * 0.25, 1.0)
+		electric_pulses[pulse_index].position = Vector3(6.45, 2.0, 0.65).lerp(Vector3(8.8, 2.0, 0.65), progress)
 
 func _update_visuals() -> void:
 	if not is_instance_valid(water):
@@ -611,9 +654,21 @@ func _update_visuals() -> void:
 		active_channels[gate_index].visible = opened
 		for pulse in channel_pulses[gate_index]:
 			(pulse as MeshInstance3D).visible = opened
-	generator_light.visible = open_gate >= 0
-	city_light.visible = open_gate >= 0
-	power_line.visible = open_gate >= 0
+	# Blue water reaches the turbine, its shaft drives the generator, and yellow
+	# electricity travels to real windows. The same hydraulic power drives every
+	# downstream cue; an open but dry gate must never light the city.
+	visual_power_fraction = clampf(current_power / 16.0, 0.0, 1.0)
+	var generating := current_power > 0.0
+	generator_light.visible = generating
+	city_light.visible = generating
+	power_line.visible = generating
+	city_light.scale = Vector3.ONE * lerpf(0.55, 1.0, visual_power_fraction)
+	city_window_material.emission_energy_multiplier = lerpf(0.15, 0.85, visual_power_fraction)
+	for window in city_windows:
+		window.material_override = city_window_material if generating else city_window_dark_material
+	for pulse in electric_pulses:
+		pulse.visible = generating
+		pulse.scale = Vector3.ONE * lerpf(0.5, 1.0, visual_power_fraction)
 	level_label.text = "물 높이 %d%%  %s" % [roundi(water_level), "넘침 위험!" if water_level >= 86.0 else ("↓ 방류 중" if open_gate >= 0 else "↑ 물 모으기")]
 	level_label.add_theme_color_override("font_color", Color("ff8675") if water_level >= 86.0 else Color("fff0b4"))
 	energy_label.text = "생산  %.1f kWh" % generated_kwh

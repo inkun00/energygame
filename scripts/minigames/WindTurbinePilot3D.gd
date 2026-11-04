@@ -65,6 +65,11 @@ var storm_banner_style: StyleBoxFlat
 var score_popup: Label
 var score_popup_tween: Tween
 var score_popup_success := false
+var direction_gauge: Panel
+var direction_caption: Label
+var wind_pointer: ColorRect
+var turbine_pointer: ColorRect
+var direction_gauge_style: StyleBoxFlat
 
 func _ready() -> void:
 	stretch = true
@@ -380,6 +385,57 @@ func _build_overlay() -> void:
 	storm_warning_label.add_theme_constant_override("outline_size", 5)
 	storm_warning_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	storm_banner.add_child(storm_warning_label)
+	_build_direction_gauge()
+
+func _build_direction_gauge() -> void:
+	direction_gauge = Panel.new()
+	direction_gauge.name = "WindTurbineComparison"
+	direction_gauge.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	direction_gauge.offset_left = -270.0
+	direction_gauge.offset_top = -164.0
+	direction_gauge.offset_right = -14.0
+	direction_gauge.offset_bottom = -52.0
+	direction_gauge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	direction_gauge_style = StyleBoxFlat.new()
+	direction_gauge_style.bg_color = Color("12343bef")
+	direction_gauge_style.border_color = Color("82c6d4")
+	direction_gauge_style.set_border_width_all(2)
+	direction_gauge_style.set_corner_radius_all(9)
+	direction_gauge.add_theme_stylebox_override("panel", direction_gauge_style)
+	add_child(direction_gauge)
+	direction_caption = _comparison_label("바람과 터빈을 겹쳐요", Vector2(8, 5), 240, direction_gauge)
+	var track := ColorRect.new()
+	track.position = Vector2(22, 63)
+	track.size = Vector2(212, 2)
+	track.color = Color("b8d1cf")
+	track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	direction_gauge.add_child(track)
+	wind_pointer = ColorRect.new()
+	wind_pointer.size = Vector2(4, 20)
+	wind_pointer.position.y = 44.0
+	wind_pointer.color = Color("ffd977")
+	wind_pointer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	direction_gauge.add_child(wind_pointer)
+	_comparison_label("바람", Vector2(-25, -17), 54, wind_pointer)
+	turbine_pointer = ColorRect.new()
+	turbine_pointer.size = Vector2(4, 20)
+	turbine_pointer.position.y = 64.0
+	turbine_pointer.color = Color("8de8ff")
+	turbine_pointer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	direction_gauge.add_child(turbine_pointer)
+	_comparison_label("터빈", Vector2(-25, 19), 54, turbine_pointer)
+
+func _comparison_label(value: String, where: Vector2, width: float, parent: Control) -> Label:
+	var label := Label.new()
+	label.text = value
+	label.position = where
+	label.size.x = width
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_color_override("font_color", Color("f1fff5"))
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(label)
+	return label
 
 func _spawn_hero(player_data: Dictionary) -> void:
 	if is_instance_valid(hero):
@@ -538,7 +594,7 @@ func _update_rotor(delta: float, power_percent: float) -> void:
 	# 발전 효율은 낮고, 위험 돌풍에서는 브레이크 전까지 가장 빠르게 회전합니다.
 	var wind_factor := clampf((float(wind_speed) - 7.0) / 25.0, 0.0, 1.0)
 	var capture_factor := 1.0 if storm_phase else 0.38 + clampf(power_percent / 100.0, 0.0, 1.0) * 0.62
-	var spin_speed := 0.10 if brake_active else lerpf(1.35, 7.2, wind_factor) * capture_factor
+	var spin_speed := 0.0 if brake_active else lerpf(1.35, 7.2, wind_factor) * capture_factor
 	rotor.rotation.z -= delta * spin_speed
 	for background_rotor in background_rotors:
 		if is_instance_valid(background_rotor):
@@ -590,6 +646,7 @@ func _break_turbine_blades() -> void:
 		shake.tween_property(camera, "position", base_position, 0.08)
 
 func _update_hud(alignment: float, power_percent: float) -> void:
+	_update_direction_feedback(alignment, power_percent)
 	if is_instance_valid(phase_bar):
 		phase_bar.value = WIND_PHASE_SECONDS - phase_elapsed
 	if is_instance_valid(power_bar):
@@ -618,6 +675,8 @@ func _update_hud(alignment: float, power_percent: float) -> void:
 			instruction_label.text = "A/D로 한 번 조절해 시작 · 풍향에 맞추면 점수가 쌓여요"
 		else:
 			instruction_label.text = "A/D 터빈 회전 · 풍향에 맞춘 동안 점수가 쌓여요"
+		if phase_index % 4 == 3 and phase_elapsed >= WIND_PHASE_SECONDS - 1.0:
+			instruction_label.text = "돌풍 접근! 다음 바람에서는 SPACE로 터빈을 멈춰요"
 	if storm_phase and is_instance_valid(storm_warning_label):
 		if brake_active:
 			storm_warning_label.text = "안전! 브레이크 성공 · 터빈 정지"
@@ -631,6 +690,32 @@ func _update_hud(alignment: float, power_percent: float) -> void:
 			storm_border.modulate.a = pulse
 			storm_banner.modulate.a = 0.86 + pulse * 0.14
 			storm_tint.modulate.a = 0.48 + pulse * 0.32
+
+func _update_direction_feedback(alignment: float, power_percent: float) -> void:
+	if not is_instance_valid(direction_gauge):
+		return
+	# The large storm banner is the only central stop instruction. Do not add a
+	# second empty comparison card while direction no longer matters.
+	direction_gauge.visible = not storm_phase
+	# The upper wind pin and lower turbine pin share the SAME angle scale.
+	# Their positions convey the cause, while the rotor/output show the result.
+	wind_pointer.position.x = 20.0 + inverse_lerp(-YAW_LIMIT, YAW_LIMIT, wind_angle) * 212.0
+	turbine_pointer.position.x = 20.0 + inverse_lerp(-YAW_LIMIT, YAW_LIMIT, turbine_yaw) * 212.0
+	wind_pointer.visible = not storm_phase and not rotor_broken
+	turbine_pointer.visible = wind_pointer.visible
+	var safe_stop := storm_phase and brake_active
+	direction_gauge_style.border_color = Color("70f1b2") if safe_stop or alignment >= 0.8 else Color("82c6d4")
+	if storm_phase:
+		direction_gauge_style.border_color = Color("70f1b2") if safe_stop else Color("ff8071")
+		direction_caption.text = "브레이크 → 안전 정지" if safe_stop else "SPACE → 회전을 멈춰요"
+	elif rotor_broken:
+		direction_caption.text = "날개 수리 중 · 발전 멈춤"
+	elif brake_active:
+		direction_caption.text = "SPACE 놓기 → 다시 발전"
+	elif not yaw_choice_made:
+		direction_caption.text = "A/D 조절 → 발전 시작"
+	else:
+		direction_caption.text = "정렬 유지 → 발전 %d%%" % roundi(power_percent) if alignment >= 0.8 else "두 방향이 가까울수록 발전"
 
 func _set_storm_overlay(active: bool, safe: bool) -> void:
 	if not is_instance_valid(storm_tint):

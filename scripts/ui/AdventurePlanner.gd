@@ -1,4 +1,5 @@
 extends Control
+signal goal_selected(project_index: int)
 
 ## Local presentation only: choosing a goal never consumes or reserves materials.
 const UI = preload("res://scripts/ui/CommercialUI.gd")
@@ -53,7 +54,7 @@ func _ready() -> void:
 	GameManager.village_construction_started.connect(func(_data: Array): end_exploration())
 	GameManager.game_over.connect(func(_rankings: Array): end_exploration())
 
-func _label(text_value: String, font_size: int = 16, color: Color = UI.TEXT) -> Label:
+func _label(text_value: String, font_size: int = 20, color: Color = UI.TEXT) -> Label:
 	var label := Label.new()
 	label.text = text_value
 	label.add_theme_font_size_override("font_size", font_size)
@@ -64,7 +65,7 @@ func _label(text_value: String, font_size: int = 16, color: Color = UI.TEXT) -> 
 func _button(text_value: String, action: Callable) -> Button:
 	var button := Button.new()
 	button.text = text_value
-	button.add_theme_font_size_override("font_size", 15)
+	button.add_theme_font_size_override("font_size", 20)
 	UI.apply_secondary_button(button)
 	button.pressed.connect(action)
 	return button
@@ -80,25 +81,28 @@ func _image(path: String, dimensions: Vector2) -> TextureRect:
 
 func _build_summary() -> void:
 	summary = PanelContainer.new()
-	summary.position = Vector2(12, 648)
-	summary.size = Vector2(1256, 60)
+	summary.position = Vector2(12, 634)
+	summary.size = Vector2(1256, 74)
 	summary.add_theme_stylebox_override("panel", UI.padded_panel(UI.INK, UI.TEAL_DARK, 8))
 	add_child(summary)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 24)
 	summary.add_child(row)
 	var heading := VBoxContainer.new()
-	heading.custom_minimum_size.x = 250
+	heading.custom_minimum_size.x = 270
 	row.add_child(heading)
-	heading.add_child(_label("팀 마을에 쓸 내 재료", 14, UI.TEAL))
-	goal_name = _label("재료를 모아보세요", 18)
+	heading.add_child(_label("함께 건설할 내 재료", 18, UI.TEAL))
+	goal_name = _label("재료를 모아보세요", 22)
+	goal_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	heading.add_child(goal_name)
 	var materials := VBoxContainer.new()
 	summary_details = materials
 	materials.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	materials.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_child(materials)
-	goal_materials = _label("모험에서 재료를 모아 종료 후 마을을 건설해요", 16)
+	goal_materials = _label("모험에서 재료를 모아 종료 후 마을을 건설해요", 20)
+	goal_materials.custom_minimum_size.x = 420
+	goal_materials.custom_minimum_size.y = 50
 	materials.add_child(goal_materials)
 	goal_progress = ProgressBar.new()
 	goal_progress.custom_minimum_size.y = 8
@@ -110,11 +114,11 @@ func _build_summary() -> void:
 	summary_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(summary_spacer)
 	summary_toggle = _button("재료 펼치기", toggle_summary)
-	summary_toggle.custom_minimum_size = Vector2(140, 40)
+	summary_toggle.custom_minimum_size = Vector2(150, 44)
 	summary_toggle.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(summary_toggle)
 	catalog_open_button = _button("재료 가방 & 건설 도감", open_catalog)
-	catalog_open_button.custom_minimum_size = Vector2(220, 40)
+	catalog_open_button.custom_minimum_size = Vector2(260, 44)
 	catalog_open_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(catalog_open_button)
 	_apply_summary_layout()
@@ -125,8 +129,8 @@ func toggle_summary() -> void:
 
 func _apply_summary_layout() -> void:
 	summary_details.visible = summary_expanded
-	summary.position.y = 612 if summary_expanded else 648
-	summary.size.y = 96 if summary_expanded else 60
+	summary.position.y = 580 if summary_expanded else 634
+	summary.size.y = 128 if summary_expanded else 74
 	summary_toggle.text = "재료 접기" if summary_expanded else "재료 펼치기"
 	# Keep the bag button on the right when the detail column is collapsed.
 	summary_spacer.visible = not summary_expanded
@@ -155,24 +159,24 @@ func _build_catalog() -> void:
 	header.add_child(title)
 	catalog_close_button = _button("닫기  ×", close_catalog)
 	header.add_child(catalog_close_button)
-	content.add_child(_label("재료를 모아 탐험과 교환이 끝난 뒤 함께 건설해요. 준비 완료 시설부터 확인하세요.", 16, UI.TEXT_MUTED))
+	content.add_child(_label("내 재료로 만들 시설을 골라요. 탐험 뒤에는 친구 재료도 합쳐 함께 건설해요.", 20, UI.TEXT_MUTED))
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 22)
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(columns)
 	var bag := VBoxContainer.new()
-	bag.custom_minimum_size.x = 250
-	bag.add_theme_constant_override("separation", 2)
+	bag.custom_minimum_size.x = 280
+	bag.add_theme_constant_override("separation", 6)
 	columns.add_child(bag)
 	for id in GameManager.ITEM_DEFINITIONS:
 		var data: Dictionary = GameManager.ITEM_DEFINITIONS[id]
 		var row := HBoxContainer.new()
 		bag.add_child(row)
-		row.add_child(_image(str(data["asset"]), Vector2(28, 28)))
-		var name_label := _label(str(data["name"]), 15)
+		row.add_child(_image(str(data["asset"]), Vector2(32, 32)))
+		var name_label := _label(str(data["name"]), 20)
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(name_label)
-		var count := _label("0개", 15, UI.GOLD)
+		var count := _label("0개", 20, UI.GOLD)
 		row.add_child(count)
 		inventory_labels[id] = count
 	var recipe_scroll := ScrollContainer.new()
@@ -181,7 +185,9 @@ func _build_catalog() -> void:
 	recipe_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	columns.add_child(recipe_scroll)
 	var grid := GridContainer.new()
-	grid.columns = 2
+	# One readable recipe column is more useful than ten tiny text-heavy tiles.
+	# Scrolling preserves all facilities without shrinking words on a laptop.
+	grid.columns = 1
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.add_theme_constant_override("h_separation", 10)
 	grid.add_theme_constant_override("v_separation", 8)
@@ -189,27 +195,33 @@ func _build_catalog() -> void:
 	for index in range(GameManager.CONSTRUCTION_PROJECTS.size()):
 		var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[index]
 		var card := PanelContainer.new()
-		card.custom_minimum_size = Vector2(350, 108)
+		card.custom_minimum_size = Vector2(680, 144)
 		card.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL_RAISED, UI.PANEL_SOFT, 6, 8))
 		grid.add_child(card)
 		recipe_cards.append(card)
 		var row := HBoxContainer.new()
 		card.add_child(row)
-		row.add_child(_image(str(project["image"]), Vector2(46, 46)))
+		row.add_theme_constant_override("separation", 12)
+		row.add_child(_image(str(project["image"]), Vector2(64, 64)))
 		var details := VBoxContainer.new()
 		details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(details)
-		details.add_child(_label(str(project["name"]), 16))
-		var counts := _label("", 14, UI.TEXT_MUTED)
+		var project_title := _label(str(project["name"]), 22)
+		project_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		project_title.custom_minimum_size.y = 28
+		details.add_child(project_title)
+		var counts := _label("", 20, UI.TEXT)
+		counts.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		counts.custom_minimum_size.y = 50
 		details.add_child(counts)
 		recipe_labels.append(counts)
-		var status := _label("재료 부족", 14, UI.TEXT_MUTED)
+		var status := _label("재료 부족", 20, UI.TEXT_MUTED)
 		status.name = "Status"
 		details.add_child(status)
-		var choose := _button("선택", select_goal.bind(index))
-		choose.add_theme_font_size_override("font_size", 12)
+		var choose := _button("목표 선택", select_goal.bind(index))
+		choose.custom_minimum_size = Vector2(124, 44)
 		choose.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		choose.visible = false
+		choose.visible = true
 		row.add_child(choose)
 		goal_buttons.append(choose)
 	catalog.hide()
@@ -266,6 +278,7 @@ func select_goal(index: int) -> void:
 	record_step("goal", local_index)
 	refresh(inventory)
 	close_catalog()
+	goal_selected.emit(index)
 
 func missing_materials(index: int) -> Dictionary:
 	var missing := {}
@@ -290,7 +303,7 @@ func refresh(new_inventory: Dictionary) -> void:
 		status.text = "건설 준비 완료" if ready else "재료 %d개 더 모아요" % missing_count
 		status.add_theme_color_override("font_color", UI.SUCCESS if ready else UI.TEXT_MUTED)
 		recipe_cards[index].add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL_RAISED, UI.SUCCESS if ready else UI.PANEL_SOFT, 6, 8))
-		goal_buttons[index].text = "목표 ✓" if index == selected_goal else "선택"
+		goal_buttons[index].text = "현재 목표" if index == selected_goal else "목표 선택"
 	# Stable ordering keeps matching labels/cards while making ready recipes easy to find.
 	var recipe_grid := recipe_cards[0].get_parent() if not recipe_cards.is_empty() else null
 	if recipe_grid:
@@ -322,14 +335,16 @@ func refresh(new_inventory: Dictionary) -> void:
 			var preview := ", ".join(ready_names.slice(0, 2))
 			if ready_names.size() > 2:
 				preview += " 외 %d종" % (ready_names.size() - 2)
-			goal_materials.text = "즉시 건설 가능: %s · 모험 종료 후 건설해요" % preview
+			goal_materials.text = "건설할 준비가 된 시설 %d종\n건설 도감에서 확인하세요" % ready_count
+			goal_materials.tooltip_text = "준비 완료: " + preview
 			goal_materials.add_theme_color_override("font_color", UI.SUCCESS)
 			goal_progress.max_value = maxi(GameManager.CONSTRUCTION_PROJECTS.size(), 1)
 			goal_progress.value = ready_count
 		else:
 			goal_name.text = "보유 재료 총 %d개" % total_materials if total_materials > 0 else "재료를 모아보세요"
 			goal_name.add_theme_color_override("font_color", UI.TEXT)
-			goal_materials.text = "모험에서 재료를 모아 종료 후 마을에 자유롭게 건설해요"
+			goal_materials.text = "재료를 모아 모험 뒤에 함께 건설해요"
+			goal_materials.tooltip_text = ""
 			goal_materials.add_theme_color_override("font_color", UI.TEXT_MUTED)
 			goal_progress.max_value = 10
 			goal_progress.value = mini(total_materials, 10)
@@ -344,7 +359,8 @@ func refresh(new_inventory: Dictionary) -> void:
 		total += int(project["requirements"][id])
 		owned += mini(int(inventory.get(id, 0)), int(project["requirements"][id]))
 	for id in missing: parts.append("%s %d개" % [GameManager.ITEM_DEFINITIONS[id]["name"], missing[id]])
-	goal_materials.text = "준비 완료! 모험 종료 후 건설할 수 있어요" if missing.is_empty() else "더 모을 재료  ·  " + " · ".join(parts)
+	goal_materials.text = "준비 완료!\n모험 뒤에 함께 건설해요" if missing.is_empty() else "더 모을 재료\n" + "\n".join(parts)
+	goal_materials.tooltip_text = ""
 	goal_materials.add_theme_color_override("font_color", UI.SUCCESS if missing.is_empty() else UI.TEXT)
 	goal_progress.max_value = maxi(total, 1)
 	goal_progress.value = owned
@@ -358,17 +374,17 @@ func _build_tutorial() -> void:
 	add_child(preparation_dimmer)
 	tutorial = PanelContainer.new()
 	tutorial.z_index = 15
-	tutorial.position = Vector2(18, 150)
-	tutorial.custom_minimum_size = Vector2(322, 0)
+	tutorial.position = Vector2(18, 140)
+	tutorial.custom_minimum_size = Vector2(340, 0)
 	tutorial.add_theme_stylebox_override("panel", UI.padded_panel(UI.INK, UI.TEAL_DARK, 14))
 	add_child(tutorial)
 	var content := VBoxContainer.new()
 	content.add_theme_constant_override("separation", 8)
 	tutorial.add_child(content)
-	tutorial_title = _label("첫 모험 안내", 17, UI.TEAL)
+	tutorial_title = _label("첫 모험 안내", 20, UI.TEAL)
 	content.add_child(tutorial_title)
-	tutorial_body = _label("", 15)
-	tutorial_body.custom_minimum_size.x = 290
+	tutorial_body = _label("", 20)
+	tutorial_body.custom_minimum_size.x = 308
 	tutorial_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(tutorial_body)
 	tutorial_button = _button("안내 그만 보기", dismiss_tutorial)
@@ -399,7 +415,7 @@ func _refresh_tutorial() -> void:
 	if exploration_active and GameManager.adventure_waiting_for_start:
 		tutorial.position = Vector2(340, 170)
 		tutorial.custom_minimum_size.x = 600
-		tutorial_body.custom_minimum_size = Vector2(568, 168)
+		tutorial_body.custom_minimum_size = Vector2(568, 192)
 		tutorial_body.text = "내 차례에는 주사위를 굴려 재료를 모아요.\n퀴즈를 맞히면 에너지와 특수기술 SP를 받아요.\n미니게임에서는 모두 동시에 도전하고 보너스를 받아요.\n탐험 뒤에는 재료를 나눠 마을에 시설을 지어요.\n\n안내를 보는 동안 탐험 시간은 줄어들지 않아요."
 		var state := GameManager.get_adventure_preparation_state()
 		tutorial_title.text = "모험 시작 전  ·  준비 %d / %d명" % [state["ready_count"], state["player_count"]]
@@ -407,10 +423,10 @@ func _refresh_tutorial() -> void:
 		tutorial_button.text = "친구 준비 기다리는 중" if tutorial_button.disabled else "준비 완료 · 모험 시작"
 		_refresh_visibility()
 		return
-	tutorial.position = Vector2(18, 150)
-	tutorial.custom_minimum_size.x = 322
-	tutorial_body.custom_minimum_size = Vector2(290, 0)
-	tutorial.size = Vector2(322, 0)
+	tutorial.position = Vector2(18, 140)
+	tutorial.custom_minimum_size.x = 340
+	tutorial_body.custom_minimum_size = Vector2(308, 0)
+	tutorial.size = Vector2(340, 0)
 	tutorial_button.disabled = false
 	tutorial_button.text = "안내 그만 보기"
 	var descriptions := ["내 턴에 오른쪽 주사위를 눌러 이동해 보세요.", "도착한 칸의 재료를 모아보세요. 재료는 자동으로 가방에 들어와요.", "하단 ‘건설 도감’을 눌러 필요한 재료와 시설 목록을 확인해 보세요.", "퀴즈 정답으로 SP를 모으고, 내 턴에 특수기술 버튼을 눌러보세요."]
@@ -431,11 +447,11 @@ func _fit_compact_tutorial() -> void:
 	# Shrink after that pass so the preparation card does not leave a blank sidebar.
 	await get_tree().process_frame
 	if is_inside_tree() and not GameManager.adventure_waiting_for_start:
-		tutorial.size = Vector2(322, 0)
+		tutorial.size = Vector2(340, 0)
 
 func _refresh_visibility() -> void:
 	if not is_instance_valid(tutorial): return
 	summary.visible = exploration_active and not quiz_open
 	var preparing := exploration_active and GameManager.adventure_waiting_for_start
 	preparation_dimmer.visible = preparing and not catalog.visible
-	tutorial.visible = exploration_active and (preparing or (tutorial_active and GameManager.current_turn_idx == local_index)) and not quiz_open and not catalog.visible
+	tutorial.visible = exploration_active and (preparing or (tutorial_active and GameManager.current_turn_idx == local_index)) and not quiz_open and not catalog.visible and not GameManager.guided_tutorial_active

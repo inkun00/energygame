@@ -4,6 +4,7 @@ class_name LobbyUI
 ## Commercial-style title screen and four-player game setup.
 
 signal start_game_requested(player_configs, duration_seconds)
+signal tutorial_requested(player_configs)
 
 const UI = preload("res://scripts/ui/CommercialUI.gd")
 
@@ -48,6 +49,9 @@ var characters: Array[Dictionary] = [
 ]
 
 var _character_buttons: Array[Button] = []
+var character_gallery: Control
+var character_choose_button: Button
+var opening_next_button: Button
 var learning_grade_option: OptionButton
 var _room_popup: Control
 var _room_cards: HBoxContainer
@@ -96,9 +100,13 @@ func _ready() -> void:
 	_on_character_selected(0)
 	_fit_hero_badge.call_deferred()
 	_on_mode_selected(0)
-	# 항상 보이는 드롭다운으로 캐릭터 선택을 보장합니다.
-	char_option_button.visible = true
+	char_option_button.visible = false
 	character_strip.get_parent().visible = false
+	_build_character_gallery()
+	_build_opening_next_button()
+	help_button.text = "튜토리얼"
+	help_button.custom_minimum_size.x = 120
+	$TopBar/TopActions.offset_left = -228
 	if opening_story:
 		opening_story.visible = false
 		opening_story.gui_input.connect(_on_opening_story_input)
@@ -224,6 +232,131 @@ func _setup_character_selector() -> void:
 func _select_character_from_button(index: int) -> void:
 	char_option_button.select(index)
 	_on_character_selected(index)
+	if is_instance_valid(character_choose_button):
+		character_choose_button.text = characters[index]["name"] + "  ·  변경"
+	if is_instance_valid(character_gallery):
+		character_gallery.hide()
+		character_choose_button.grab_focus()
+
+func _build_character_gallery() -> void:
+	character_choose_button = Button.new()
+	character_choose_button.name = "ChooseHeroButton"
+	character_choose_button.text = characters[0]["name"] + "  ·  변경"
+	character_choose_button.custom_minimum_size.y = 46
+	character_choose_button.add_theme_font_size_override("font_size", 21)
+	UI.apply_secondary_button(character_choose_button)
+	var content := char_option_button.get_parent()
+	content.add_child(character_choose_button)
+	content.move_child(character_choose_button, char_option_button.get_index())
+	character_gallery = Control.new()
+	character_gallery.name = "CharacterGallery"
+	character_gallery.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	character_gallery.z_index = 80
+	add_child(character_gallery)
+	var dimmer := ColorRect.new()
+	dimmer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dimmer.color = Color("04131ddd")
+	character_gallery.add_child(dimmer)
+	var card := PanelContainer.new()
+	card.position = Vector2(275, 65)
+	card.size = Vector2(730, 590)
+	card.add_theme_stylebox_override("panel", UI.padded_panel(UI.INK, UI.TEAL, 20, 18))
+	character_gallery.add_child(card)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 12)
+	card.add_child(column)
+	var title := Label.new()
+	title.text = "함께 모험할 히어로를 골라요"
+	title.add_theme_font_size_override("font_size", 27)
+	column.add_child(title)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	column.add_child(grid)
+	for index in range(_character_buttons.size()):
+		var button := _character_buttons[index]
+		button.reparent(grid)
+		button.custom_minimum_size = Vector2(222, 140)
+		button.focus_mode = Control.FOCUS_ALL
+		var skill: Dictionary = GameManager.SPECIAL_SKILLS_BY_ICON.get(str(characters[index]["icon"]), GameManager.DEFAULT_SPECIAL_SKILL)
+		button.tooltip_text = "%s\n%s · SP %d\n%s" % [characters[index]["name"], skill["name"], int(skill["cost"]), skill["description"]]
+		var portrait := button.get_child(0) as TextureRect
+		portrait.offset_bottom = -55
+		var caption := Label.new()
+		caption.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+		caption.offset_top = -52
+		caption.offset_bottom = -26
+		caption.text = characters[index]["name"]
+		caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		caption.add_theme_font_size_override("font_size", 19)
+		caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		button.add_child(caption)
+		var skill_tag := Label.new()
+		skill_tag.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+		skill_tag.offset_top = -27
+		skill_tag.offset_bottom = -5
+		skill_tag.text = str(skill["name"])
+		skill_tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		skill_tag.add_theme_font_size_override("font_size", 16)
+		skill_tag.add_theme_color_override("font_color", UI.TEAL)
+		skill_tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		button.add_child(skill_tag)
+	var close := Button.new()
+	close.text = "선택 유지 · 돌아가기"
+	close.custom_minimum_size.y = 44
+	close.add_theme_font_size_override("font_size", 20)
+	UI.apply_secondary_button(close)
+	close.pressed.connect(func():
+		character_gallery.hide()
+		character_choose_button.grab_focus()
+	)
+	column.add_child(close)
+	var focus_ring: Array[Control] = []
+	for button in _character_buttons:
+		focus_ring.append(button)
+	focus_ring.append(close)
+	for index in range(focus_ring.size()):
+		focus_ring[index].focus_next = focus_ring[(index + 1) % focus_ring.size()].get_path()
+		focus_ring[index].focus_previous = focus_ring[posmod(index - 1, focus_ring.size())].get_path()
+	for index in range(_character_buttons.size()):
+		var button := _character_buttons[index]
+		button.focus_neighbor_left = _character_buttons[(index / 3) * 3 + posmod(index - 1, 3)].get_path()
+		button.focus_neighbor_right = _character_buttons[(index / 3) * 3 + (index + 1) % 3].get_path()
+		button.focus_neighbor_top = _character_buttons[posmod(index - 3, 9)].get_path()
+		button.focus_neighbor_bottom = _character_buttons[(index + 3) % 9].get_path()
+	close.focus_neighbor_top = _character_buttons[7].get_path()
+	close.focus_neighbor_bottom = _character_buttons[1].get_path()
+	close.focus_neighbor_left = _character_buttons[6].get_path()
+	close.focus_neighbor_right = _character_buttons[8].get_path()
+	character_choose_button.pressed.connect(func():
+		character_gallery.show()
+		_character_buttons[char_option_button.selected].grab_focus()
+	)
+	character_gallery.hide()
+
+func _build_opening_next_button() -> void:
+	opening_next_button = Button.new()
+	opening_next_button.name = "NextStoryButton"
+	opening_next_button.position = Vector2(966, 644)
+	opening_next_button.size = Vector2(246, 48)
+	opening_next_button.add_theme_font_size_override("font_size", 21)
+	UI.apply_primary_button(opening_next_button)
+	opening_next_button.pressed.connect(_advance_opening_story)
+	opening_story.add_child(opening_next_button)
+	opening_step_label.offset_right = 944
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not visible:
+		return
+	if character_gallery and character_gallery.visible and event.is_action_pressed("ui_cancel"):
+		character_gallery.hide()
+		character_choose_button.grab_focus()
+		get_viewport().set_input_as_handled()
+	elif opening_story.visible and event.is_action_pressed("ui_accept"):
+		_advance_opening_story()
+		get_viewport().set_input_as_handled()
 
 func _setup_mode_selector() -> void:
 	mode_option_button.clear()
@@ -403,6 +536,12 @@ func _on_mode_selected(idx: int) -> void:
 func _on_local_start_pressed() -> void:
 	_apply_learning_grade()
 	_commit_line_edit_ime(nickname_edit)
+	var configs := _create_local_configs()
+	_pending_game_duration_seconds = int(game_time_option_button.get_selected_metadata())
+	status_label.text = "탐험 %d분 준비 중 · 미니게임과 함께 짓는 시간은 별도예요." % (_pending_game_duration_seconds / 60)
+	_begin_opening_story(configs)
+
+func _create_local_configs() -> Array[Dictionary]:
 	var my_name := nickname_edit.text.strip_edges().left(6)
 	if my_name.is_empty():
 		my_name = "에코 히어로"
@@ -416,9 +555,7 @@ func _on_local_start_pressed() -> void:
 		var character := characters[character_index]
 		configs.append({"name": character["name"] + " (AI)", "is_ai": true, "char_icon": character["icon"], "char_color": character["color"]})
 
-	_pending_game_duration_seconds = int(game_time_option_button.get_selected_metadata())
-	status_label.text = "탐험 %d분 준비 중 · 미니게임과 함께 짓는 시간은 별도예요." % (_pending_game_duration_seconds / 60)
-	_begin_opening_story(configs)
+	return configs
 
 func _on_host_pressed() -> void:
 	if NetworkManager.is_online and NetworkManager.is_host:
@@ -510,6 +647,8 @@ func _on_room_state_changed(players_data: Dictionary) -> void:
 
 
 func reset_network_controls(message: String = "") -> void:
+	if is_instance_valid(character_gallery):
+		character_gallery.hide()
 	if _room_popup:
 		_room_popup.hide()
 	mode_option_button.disabled = false
@@ -706,10 +845,11 @@ func _online_mode_hint() -> String:
 	return "방장이 만든 6자리 코드를 같은 네트워크의 친구가 입력하면 자동으로 참가합니다. 빈 자리는 AI가 채웁니다."
 
 func _on_help_pressed() -> void:
-	status_label.text = "퀴즈는 에너지와 SP, 길에서 만나는 부품은 공동 건설에 써요. 탐험 시간 외에 미니게임·건설 시간이 있어요."
-	var tween := create_tween()
-	tween.tween_property(status_label, "modulate", Color(1.0, 0.9, 0.38, 1.0), 0.14)
-	tween.tween_property(status_label, "modulate", Color.WHITE, 0.35)
+	if is_instance_valid(character_gallery):
+		character_gallery.hide()
+	_apply_learning_grade()
+	_commit_line_edit_ime(nickname_edit)
+	tutorial_requested.emit(_create_local_configs())
 
 func _on_sound_pressed() -> void:
 	_sound_enabled = not _sound_enabled
@@ -743,12 +883,9 @@ func _show_opening_step() -> void:
 	opening_image.visible = true
 	opening_image.modulate = Color.WHITE
 	opening_caption.text = step["caption"]
-	opening_step_label.text = "STORY  %d / %d   •   클릭하여 다음  |  언제든 게임 바로 시작" % [_opening_step + 1, OPENING_STORY.size()]
-	var sequence := _opening_sequence
-	get_tree().create_timer(3.4).timeout.connect(func():
-		if sequence == _opening_sequence and opening_story.visible:
-			_advance_opening_story()
-	)
+	opening_step_label.text = "이야기  %d / %d  ·  읽은 뒤 다음을 눌러요" % [_opening_step + 1, OPENING_STORY.size()]
+	opening_next_button.text = "모험 준비로" if _opening_step == OPENING_STORY.size() - 1 else "다음 이야기  →"
+	opening_next_button.grab_focus()
 
 func _on_opening_story_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:

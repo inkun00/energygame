@@ -29,6 +29,16 @@ var shield_elapsed := 0.0
 var last_animation_position := Vector3.ZERO
 var animation_speed := 0.0
 var animation_position_ready := false
+var board_presentation_enabled := false
+var board_current_turn := false
+var board_display_name := ""
+var board_is_local := false
+var board_turn_ring: MeshInstance3D
+var board_turn_label: Label3D
+var board_turn_material: StandardMaterial3D
+
+const BOARD_AVATAR_SCALE := 1.35
+const BOARD_ACTIVE_AVATAR_SCALE := 1.60
 
 # 원본 스프라이트 첫 프레임의 투명 여백(약 0.047)을 포함해 실제 발끝이
 # 타일 윗면에 닿도록 맞춘 중심 높이입니다. 루트는 타일 윗면에 놓입니다.
@@ -189,6 +199,70 @@ func setup_player(p_data: Dictionary) -> void:
 	# 시작 위치를 타일 중심이 아닌 실제 윗면으로 계산합니다.
 	_place_on_tile(0)
 
+func set_board_presentation(enabled: bool, display_name: String = "", is_local: bool = false) -> void:
+	# Arcade pawns deliberately keep their original contact size and prompts.
+	board_presentation_enabled = enabled
+	board_display_name = display_name
+	board_is_local = is_local
+	if enabled and board_turn_ring == null:
+		board_turn_ring = MeshInstance3D.new()
+		board_turn_ring.name = "ActivePlayerRing"
+		var mesh := TorusMesh.new()
+		mesh.inner_radius = 0.37
+		mesh.outer_radius = 0.45
+		mesh.rings = 24
+		mesh.ring_segments = 4
+		board_turn_ring.mesh = mesh
+		board_turn_ring.position.y = 0.035
+		board_turn_material = StandardMaterial3D.new()
+		board_turn_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		board_turn_material.albedo_color = Color("ffd166")
+		board_turn_ring.material_override = board_turn_material
+		add_child(board_turn_ring)
+		board_turn_label = Label3D.new()
+		board_turn_label.name = "ActivePlayerName"
+		board_turn_label.font_size = 42
+		board_turn_label.pixel_size = 0.006
+		board_turn_label.outline_size = 8
+		board_turn_label.modulate = Color("fff1b6")
+		board_turn_label.outline_modulate = Color("14333c")
+		board_turn_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		board_turn_label.no_depth_test = true
+		add_child(board_turn_label)
+	set_board_current_turn(board_current_turn)
+
+func set_board_current_turn(active: bool) -> void:
+	board_current_turn = active and board_presentation_enabled
+	if board_turn_ring:
+		board_turn_ring.visible = board_current_turn
+	if board_turn_label:
+		board_turn_label.visible = board_current_turn
+		board_turn_label.text = ("내 캐릭터 · " if board_is_local else "진행 중 · ") + board_display_name.left(12)
+		board_turn_label.position.y = 1.32
+	if avatar_sprite:
+		avatar_sprite.no_depth_test = board_current_turn
+		_apply_avatar_contact_scale()
+
+func _board_avatar_scale() -> float:
+	if not board_presentation_enabled:
+		return 1.0
+	return BOARD_ACTIVE_AVATAR_SCALE if board_current_turn else BOARD_AVATAR_SCALE
+
+func _apply_avatar_contact_scale(stretch_y: float = 1.0) -> void:
+	if avatar_sprite:
+		var visual_scale := _board_avatar_scale()
+		avatar_sprite.scale = Vector3(visual_scale / sqrt(stretch_y), visual_scale * stretch_y, 1.0)
+		avatar_sprite.position.y = AVATAR_CENTER_HEIGHT * visual_scale * stretch_y
+
+func _face_board_step(from_position: Vector3, to_position: Vector3) -> void:
+	if not board_presentation_enabled:
+		return
+	var direction := to_position - from_position
+	use_side_run_sprite = absf(direction.x) > absf(direction.z)
+	use_back_run_sprite = not use_side_run_sprite and direction.z < 0.0
+	avatar_sprite.flip_h = use_side_run_sprite and direction.x < 0.0
+	_set_avatar_animation_state(true)
+
 func animate_move_to_tile(to_tile_idx: int) -> void:
 	var from_tile := current_tile
 	current_tile = to_tile_idx
@@ -206,6 +280,7 @@ func animate_move_to_tile(to_tile_idx: int) -> void:
 		var jump_duration: float = BoardGrid.SHORTCUT_MOVE_SECONDS
 		
 		# 3D 포물선 도약 트윈
+		_face_board_step(from_pos, to_pos)
 		move_tween.tween_method(
 			_update_hop_position.bind(from_pos, to_pos, 2.2),
 			0.0, 1.0, jump_duration
@@ -223,6 +298,7 @@ func animate_move_to_tile(to_tile_idx: int) -> void:
 		var start_p := _get_tile_contact_position(previous_tile, pawn_offset)
 		var target_p := _get_tile_contact_position(step_tile, pawn_offset)
 		var step_dur: float = BoardGrid.MOVE_STEP_SECONDS
+		move_tween.tween_callback(_face_board_step.bind(start_p, target_p))
 		
 		move_tween.tween_method(
 			_update_hop_position.bind(start_p, target_p, 0.68),
@@ -279,8 +355,7 @@ func _update_hop_position(progress: float, from_position: Vector3, to_position: 
 	_update_ground_shadow(ground.y, lift)
 	if avatar_sprite:
 		var stretch_y := 1.0 + sin(progress * TAU) * 0.07
-		avatar_sprite.scale = Vector3(1.0 / sqrt(stretch_y), stretch_y, 1.0)
-		avatar_sprite.position.y = AVATAR_CENTER_HEIGHT * stretch_y
+		_apply_avatar_contact_scale(stretch_y)
 
 func _get_tile_contact_position(tile_index: int, pawn_offset: Vector3 = Vector3.ZERO) -> Vector3:
 	var tile_position := BoardGrid.get_tile_position_3d(tile_index) + pawn_offset
@@ -292,8 +367,7 @@ func _place_on_tile(tile_index: int) -> void:
 	position = _get_tile_contact_position(current_tile, PAWN_OFFSETS_3D[player_index % 4])
 	_update_ground_shadow(position.y, 0.0)
 	if avatar_sprite:
-		avatar_sprite.scale = Vector3.ONE
-		avatar_sprite.position.y = AVATAR_CENTER_HEIGHT
+		_apply_avatar_contact_scale()
 
 func _update_ground_shadow(surface_y: float, lift: float) -> void:
 	if shadow_mesh == null:

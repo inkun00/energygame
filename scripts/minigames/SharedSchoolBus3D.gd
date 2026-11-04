@@ -27,6 +27,7 @@ const BRAKE := 15.0
 const COAST_DRAG := 1.3
 const START_ENERGY := 3.0
 const ENERGY_PER_DISTANCE := 0.15
+const DROPOFF_SECONDS := 1.8
 
 var viewport: SubViewport
 var world: Node3D
@@ -34,6 +35,7 @@ var camera: Camera3D
 var bus: Node3D
 var bus_door_left: Node3D
 var bus_door_right: Node3D
+var parking_reference: Label3D
 var bus_door_open := 0.0
 var segments: Dictionary = {}
 var dropped_students: Array[Dictionary] = []
@@ -111,7 +113,7 @@ func has_pending_finish_animation() -> bool:
 func get_finish_animation_seconds() -> float:
 	var remaining := 0.0
 	for entry in dropped_students:
-		remaining = maxf(remaining, float(entry["delay"]) + 1.8 - float(entry["age"]))
+		remaining = maxf(remaining, float(entry["delay"]) + DROPOFF_SECONDS - float(entry["age"]))
 	for entry in boarding_students:
 		remaining = maxf(remaining, float(entry["delay"]) + 0.75 - float(entry["age"]))
 	return maxf(0.0, remaining)
@@ -178,6 +180,11 @@ func _build_world() -> void:
 	bus.add_child(model)
 	VISUAL_STYLE.prepare_imported(model)
 	_build_bus_door()
+	parking_reference = _label3d(bus, "▼", Vector3(0, 0.18, 1.08), Color("fff2b0"))
+	parking_reference.name = "BusCentreReference"
+	parking_reference.font_size = 52
+	parking_reference.pixel_size = 0.009
+	parking_reference.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_update_camera_and_bus()
 
 func _build_bus_door() -> void:
@@ -251,6 +258,7 @@ func _build_segment(index: int) -> Dictionary:
 		_box(stop_root, Vector3(stop_x, 1.22, -1.4), Vector3(0.12, 1.9, 0.12), Color("739094"))
 		_box(stop_root, Vector3(stop_x, 2.14, -1.4), Vector3(4.7, 0.16, 1.6), Color("6fb5c9"))
 		var stop_marker := _box(group, Vector3(stop_x, 0.055, 1.1), Vector3(PICKUP_REACH * 2.0, 0.07, 2.45), Color("e5d98c"), true)
+		_build_parking_outline(group, stop_x, PICKUP_REACH)
 		var student_nodes: Array[Node3D] = []
 		var student_states: Array[Dictionary] = []
 		for student_index in range(count):
@@ -268,12 +276,25 @@ func _build_segment(index: int) -> Dictionary:
 	var entrance_x := school_x + SCHOOL_ENTRANCE_OFFSET
 	_box(group, Vector3(entrance_x, 1.10, -2.0), Vector3(2.35, 2.18, 1.55), Color("ead5b1"))
 	_box(group, Vector3(entrance_x, 2.31, -2.0), Vector3(2.55, 0.24, 1.8), Color("b5796b"))
-	_box(group, Vector3(entrance_x, 0.58, -1.17), Vector3(0.54, 1.12, 0.07), Color("617d8a"))
-	var school_door_left := _box(group, Vector3(entrance_x - 0.13, 0.58, -1.10), Vector3(0.25, 1.08, 0.045), Color("c4e6d8"))
-	var school_door_right := _box(group, Vector3(entrance_x + 0.13, 0.58, -1.10), Vector3(0.25, 1.08, 0.045), Color("c4e6d8"))
+	_box(group, Vector3(entrance_x, 0.80, -1.17), Vector3(1.55, 1.50, 0.07), Color("617d8a"))
+	var school_door_left := _box(group, Vector3(entrance_x - 0.38, 0.80, -1.10), Vector3(0.73, 1.46, 0.045), Color("c4e6d8"))
+	var school_door_right := _box(group, Vector3(entrance_x + 0.38, 0.80, -1.10), Vector3(0.73, 1.46, 0.045), Color("c4e6d8"))
+	# A wide marked walkway connects the stopped bus door with all three entry
+	# lanes. Pupils fan out on it instead of overlapping on one diagonal line.
+	_box(group, Vector3(school_x + 2.3, 0.265, -0.68), Vector3(3.6, 0.025, 1.08), Color("e7ddb7"))
+	for stripe in range(5):
+		_box(group, Vector3(school_x + 2.3, 0.105, 1.83 - float(stripe) * 0.39), Vector3(2.8, 0.025, 0.18), Color("f2edcf"))
 	_label3d(group, "학교 · 노란 구역에 정차", Vector3(entrance_x, 2.95, -0.8), Color("fff2c6"))
 	_box(group, Vector3(school_x, 0.055, 1.1), Vector3(SCHOOL_REACH * 2.0, 0.07, 2.45), Color("e5d98c"), true)
+	_build_parking_outline(group, school_x, SCHOOL_REACH)
 	return {"root": group, "stops": stops, "school_x": school_x, "entrance_x": entrance_x, "school_served": false, "school_missed_notice": false, "school_door_left": school_door_left, "school_door_right": school_door_right, "school_door_open": 0.0}
+
+func _build_parking_outline(parent: Node3D, target_x: float, reach: float) -> void:
+	for side in [-1.0, 1.0]:
+		var edge := _box(parent, Vector3(target_x + side * reach, 0.105, 1.1), Vector3(0.065, 0.025, 2.45), Color("fff5bc"), true)
+		edge.name = "ParkingToleranceEdge"
+	var center := _box(parent, Vector3(target_x, 0.107, 1.1), Vector3(0.055, 0.025, 2.45), Color("466c72"))
+	center.name = "ParkingTargetCentre"
 
 func _build_overlay() -> void:
 	passenger_label = _overlay_label(Vector2(24, 8), Vector2(300, 39), "승객 0 / 45명", Color("fff2b8"), 22)
@@ -491,11 +512,26 @@ func _unload_at_school(school_x: float) -> void:
 	trip_index += 1
 
 func _spawn_dropoff_students(school_x: float, count: int) -> void:
-	# 한 명씩 버스 문에서 나와 학교 입구로 걸어가게 하고 동시 모델 수도 제한합니다.
+	# Three separated lanes let all 45 pupils visibly enter in under four
+	# seconds, without stretching the competition or changing awarded points.
 	for student_index in range(count):
-		var local_index := student_index % 9
-		var start_x := school_x + 1.1 + (float(local_index % 3) - 1.0) * 0.16
-		dropped_students.append({"node": null, "age": 0.0, "delay": float(student_index) * 0.035, "start_x": start_x, "school_x": school_x, "entrance_x": school_x + SCHOOL_ENTRANCE_OFFSET, "variant": student_index % 2})
+		var lane := student_index % 3 - 1
+		var start_x := bus_x + 1.08 + float(lane) * 0.08
+		var delay := float(int(student_index / 3)) * 0.12 + float(student_index % 3) * 0.055
+		dropped_students.append({"node": null, "age": 0.0, "delay": delay, "start_x": start_x, "lane": lane, "school_x": school_x, "entrance_x": school_x + SCHOOL_ENTRANCE_OFFSET, "variant": student_index % 2})
+
+static func dropoff_path_position(record: Dictionary, progress: float) -> Vector3:
+	var lane := float(record.get("lane", 0))
+	var start := Vector3(float(record["start_x"]), 0.335, 1.98)
+	var pavement := Vector3(float(record["start_x"]) + 0.55 + lane * 0.72, 0.255, 0.58 + lane * 0.55)
+	var entry_lane := Vector3(float(record["entrance_x"]) + lane * 0.62, 0.255, -0.60)
+	var finish := Vector3(float(record["entrance_x"]) + lane * 0.48, 0.255, -1.36)
+	var t := clampf(progress, 0.0, 1.0)
+	if t < 0.25:
+		return start.lerp(pavement, t / 0.25)
+	if t < 0.78:
+		return pavement.lerp(entry_lane, (t - 0.25) / 0.53)
+	return entry_lane.lerp(finish, (t - 0.78) / 0.22)
 
 func _face_student(student: Node3D, direction: Vector3) -> void:
 	if direction.length_squared() > 0.0001:
@@ -536,11 +572,9 @@ func _animate_dropoff_students(delta: float) -> void:
 				animator.play("walk")
 			record["node"] = new_student
 		var student := record["node"] as Node3D
-		var progress := clampf((float(record["age"]) - float(record["delay"])) / 1.8, 0.0, 1.0)
-		student.position.z = lerpf(1.98, -1.36, progress)
-		student.position.x = lerpf(float(record["start_x"]), float(record["entrance_x"]), progress)
-		student.position.y = lerpf(0.335, 0.255, minf(1.0, progress * 5.0))
-		_face_student(student, Vector3(float(record["entrance_x"]) - float(record["start_x"]), 0.0, -3.34))
+		var progress := clampf((float(record["age"]) - float(record["delay"])) / DROPOFF_SECONDS, 0.0, 1.0)
+		student.position = dropoff_path_position(record, progress)
+		_face_student(student, dropoff_path_position(record, minf(1.0, progress + 0.01)) - student.position)
 		if progress >= 1.0:
 			student.queue_free()
 			dropped_students.remove_at(index)
@@ -557,8 +591,8 @@ func _animate_school_doors(delta: float) -> void:
 				break
 		var open_amount := move_toward(float(route["school_door_open"]), 1.0 if entering else 0.0, delta * 2.5)
 		route["school_door_open"] = open_amount
-		(route["school_door_left"] as Node3D).position.x = entrance_x - 0.13 - 0.28 * open_amount
-		(route["school_door_right"] as Node3D).position.x = entrance_x + 0.13 + 0.28 * open_amount
+		(route["school_door_left"] as Node3D).position.x = entrance_x - 0.38 - 0.48 * open_amount
+		(route["school_door_right"] as Node3D).position.x = entrance_x + 0.38 + 0.48 * open_amount
 
 func _notice(message: String) -> void:
 	notice = message
@@ -571,8 +605,10 @@ func _update_visuals() -> void:
 		efficiency_label.text = "도착 · 1인당 %.1f" % last_trip_per_person
 	var direction := "후진" if bus_speed < -STOP_SPEED_LIMIT else "전진" if bus_speed > STOP_SPEED_LIMIT else "정차"
 	route_label.text = "%s %.1f · 에너지 %.1f" % [direction, absf(bus_speed), route_energy(route_distance)]
-	action_label.text = "학생 %d명이 학교로 들어가는 중 · 안전하게 기다려요" % dropped_students.size() if not dropped_students.is_empty() else ("학생 %d명 승차 중 · 문 앞을 비우면 출발해요" % boarding_students.size() if not boarding_students.is_empty() else (notice if notice_remaining > 0.0 else "D/A 길게 가속 · S 정차 · 정류장 Space · 학교 정차 시 하차"))
+	action_label.text = "학생 %d명이 학교로 들어가는 중 · 안전하게 기다려요" % dropped_students.size() if not dropped_students.is_empty() else ("학생 %d명 승차 중 · 문 앞을 비우면 출발해요" % boarding_students.size() if not boarding_students.is_empty() else (notice if notice_remaining > 0.0 else "차량 ▼를 노란 선 안으로 · D 전진 / A 후진 · S 정차"))
 	var next := get_next_service_point()
+	parking_reference.visible = not next.is_empty() and absf(float(next["x"]) - bus_x) <= 10.0
+	parking_reference.modulate = Color("a8ffe0") if not next.is_empty() and absf(float(next["x"]) - bus_x) <= float(next["reach"]) else Color("fff2b0")
 	if not dropped_students.is_empty():
 		next_stop_label.text = "학교 입장 마무리 · 남은 %d명" % dropped_students.size()
 		service_label.text = "잠시 기다려요"
@@ -583,7 +619,8 @@ func _update_visuals() -> void:
 		var distance := float(next["x"]) - bus_x
 		var where := "후진 %.1f칸" % absf(distance) if distance < -float(next["reach"]) else "앞으로 %.1f칸" % maxf(0.0, distance)
 		next_stop_label.text = "학교 · " + where if bool(next["school"]) else "다음 정류장 · %s · 대기 %d명 / 뛰는 중 %d명" % [where, int(next["waiting"]), int(next["late"])]
-		service_label.text = "학교 자동 하차" if absf(distance) <= SCHOOL_REACH and bool(next["school"]) else ("S 정차 → Space" if absf(distance) <= float(next["reach"]) else "노란 정차선 확인")
+		var aligned := absf(distance) <= float(next["reach"])
+		service_label.text = ("중앙 맞음 · S 정차" if absf(bus_speed) > STOP_SPEED_LIMIT else ("학교 자동 하차" if bool(next["school"]) else "정차 완료 · Space")) if aligned else "차량 ▼를 정차선 안으로"
 	else:
 		next_stop_label.text = "앞으로 달려 다음 구간으로 가요"
 		service_label.text = "D 전진"

@@ -4,6 +4,7 @@ class_name QuizUIController
 ## QuizUIController: 모든 퀴즈를 4지선다 버튼 방식으로 표시합니다.
 
 signal quiz_completed(is_correct)
+signal review_completed
 
 const PLAYER_QUIZ_SECONDS := 19.5
 const SPECTATOR_CLUE_SECONDS := 0.65
@@ -75,6 +76,9 @@ func _process(delta: float) -> void:
 		cancel_quiz()
 		return
 	if result_visible and visible:
+		if GameManager.guided_tutorial_active:
+			timer_label.text = "연습 중 · 이유를 읽고 다음을 눌러요"
+			return
 		# The shared review SceneTreeTimer stops during network recovery pause.
 		# Use the same active-play delta so reconnecting never consumes reading
 		# time while the result is inaccessible behind the recovery overlay.
@@ -94,6 +98,9 @@ func _process(delta: float) -> void:
 			if GameManager and GameManager.has_method("resolve_ai_quiz_if_pending"):
 				GameManager.resolve_ai_quiz_if_pending(target_player_idx)
 	elif is_active:
+		if GameManager.guided_tutorial_active:
+			timer_label.text = "연습 중 · 천천히 답을 골라요"
+			return
 		timer_seconds -= delta
 		if timer_bar:
 			timer_bar.value = maxf(timer_seconds, 0.0)
@@ -162,6 +169,7 @@ func display_quiz(player_idx: int, quiz_data: Dictionary) -> void:
 	is_active = not spectator_mode
 
 	title_label.text = ("%s님의 문제 풀이" % player_name) if spectator_mode else "에코 에너지 퀴즈"
+	title_label.add_theme_color_override("font_color", UI.GOLD)
 	category_badge.text = "  %s  " % str(current_quiz.get("category", "에너지 상식"))
 	question_label.text = str(current_quiz.get("question", "문제를 불러오지 못했습니다. 다시 시도해 주세요."))
 	if question_label.text.strip_edges().is_empty():
@@ -179,6 +187,8 @@ func display_quiz(player_idx: int, quiz_data: Dictionary) -> void:
 	_build_choice_buttons(spectator_mode and not _can_submit_spectator_guess())
 	# 모든 콘텐츠를 구성한 다음 팝업을 노출해 빈 화면이 한 프레임 보이지 않게 합니다.
 	visible = true
+	if is_active and choice_container.get_child_count() > 0:
+		choice_container.get_child(0).grab_focus()
 	panel.modulate = Color(1, 1, 1, 0)
 	panel.scale = Vector2(0.96, 0.96)
 	panel.pivot_offset = panel.size * 0.5
@@ -191,6 +201,7 @@ func display_quiz(player_idx: int, quiz_data: Dictionary) -> void:
 
 func _build_choice_buttons(disabled: bool) -> void:
 	for child in choice_container.get_children():
+		choice_container.remove_child(child)
 		child.queue_free()
 
 	var options: Array = current_quiz.get("options", [])
@@ -207,12 +218,18 @@ func _build_choice_buttons(disabled: bool) -> void:
 		button.set_meta("answer_value", option_value)
 		button.custom_minimum_size = Vector2(0, 50 + display_text.count("\n") * 20)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.add_theme_font_size_override("font_size", 18)
+		button.add_theme_font_size_override("font_size", 21)
 		button.add_theme_constant_override("outline_size", 2)
 		button.disabled = disabled
 		UI.apply_secondary_button(button, choice_accents[option_index])
 		button.pressed.connect(_on_choice_pressed.bind(option_value))
 		choice_container.add_child(button)
+	var choices := choice_container.get_children()
+	for index in range(choices.size()):
+		choices[index].focus_next = choices[(index + 1) % choices.size()].get_path()
+		choices[index].focus_previous = choices[posmod(index - 1, choices.size())].get_path()
+		choices[index].focus_neighbor_bottom = choices[index].focus_next
+		choices[index].focus_neighbor_top = choices[index].focus_previous
 
 
 func _format_option_text(option: String, option_index: int) -> String:
@@ -438,11 +455,16 @@ func _show_result(is_correct: bool, prefix: String = "", should_submit_result: b
 	var result_owner := "내" if local_result else "%s님" % str(GameManager.players[target_player_idx].get("name", "친구"))
 	if is_correct:
 		var reward_energy: int = current_quiz.get("reward_energy", 2)
-		explanation_label.text = "%s%s%s 정답 보상: 에너지 +%d · 특수 에너지(SP) +%d\n동점 비교용 퀴즈 점수 +%d\n정답: %s\n\n%s" % [prefix_line, selection_line, result_owner, reward_energy, reward_energy, GameManager.QUIZ_CORRECT_SCORE, answer, explanation]
+		title_label.text = "정답!  ·  에너지 +%d  ·  SP +%d" % [reward_energy, reward_energy]
+		title_label.add_theme_color_override("font_color", UI.SUCCESS)
+		explanation_label.text = "%s\n\n정답: %s\n\n%s%s%s 정답 보상: 에너지 +%d · 특수 에너지(SP) +%d\n동점 비교용 퀴즈 점수 +%d" % [explanation, answer, prefix_line, selection_line, result_owner, reward_energy, reward_energy, GameManager.QUIZ_CORRECT_SCORE]
 	else:
 		var shielded := target_player_idx >= 0 and target_player_idx < GameManager.players.size() and bool(GameManager.players[target_player_idx].get("shield", false))
 		var penalty := "방패를 사용해 후퇴를 막았어요." if shielded else "게임판에서 1칸 뒤로 이동해요."
-		explanation_label.text = "%s%s오답 · 정답: %s\n%s 에너지와 SP 보상 +0 · %s\n\n%s" % [prefix_line, selection_line, answer, result_owner, penalty, explanation]
+		title_label.text = "다음에는 이렇게 해봐요"
+		title_label.add_theme_color_override("font_color", UI.GOLD)
+		explanation_label.text = "%s\n\n정답: %s\n\n%s%s오답 · %s 에너지와 SP 보상 +0\n%s" % [explanation, answer, prefix_line, selection_line, result_owner, penalty]
+	category_badge.text = "왜 그럴까요?  ·  " + str(current_quiz.get("category", "에너지 상식"))
 	# Reward/result words remain distinguishable, while the longer explanation
 	# stays high contrast instead of a red/green block of small body text.
 	explanation_label.add_theme_color_override("font_color", UI.TEXT)
@@ -465,6 +487,7 @@ func _show_result(is_correct: bool, prefix: String = "", should_submit_result: b
 	result_seconds_remaining = result_duration_seconds
 	timer_label.text = "해설 읽기 · %d초 뒤 보드로" % ceili(result_seconds_remaining)
 	next_button.visible = true
+	next_button.grab_focus()
 	# Submit once, now. Reading/dismissing this overlay must never delay a
 	# network answer or resubmit one after market/construction has started.
 	if should_submit_result and not _exploration_has_ended() and GameManager.current_state == GameManager.TurnState.RESOLVING_QUIZ and GameManager.active_quiz_player_idx == target_player_idx:
@@ -486,6 +509,7 @@ func _dismiss_result() -> void:
 	result_visible = false
 	next_button.visible = false
 	visible = false
+	review_completed.emit()
 
 
 func close_top_overlay() -> bool:
@@ -498,14 +522,16 @@ func close_top_overlay() -> bool:
 func _set_result_layout(show_result: bool) -> void:
 	if not result_scroll:
 		return
+	question_label.visible = not show_result
+	hint_label.visible = not show_result
 	result_scroll.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	result_scroll.offset_left = 50.0
-	result_scroll.offset_top = 266.0 if show_result else 528.0
+	result_scroll.offset_top = 120.0 if show_result else 528.0
 	result_scroll.offset_right = -50.0
 	result_scroll.offset_bottom = 564.0 if show_result else 602.0
 	result_scroll.scroll_vertical = 0
 	explanation_label.custom_minimum_size.y = 60.0
-	explanation_label.add_theme_font_size_override("font_size", 21 if show_result else 18)
+	explanation_label.add_theme_font_size_override("font_size", 24 if show_result else 20)
 	timer_label.offset_top = -36.0 if show_result else -48.0
 	timer_label.offset_bottom = -8.0 if show_result else -20.0
 

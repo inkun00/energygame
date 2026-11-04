@@ -34,6 +34,10 @@ var battery_light: MeshInstance3D
 var city_light: MeshInstance3D
 var transfer_pulses: Array[MeshInstance3D] = []
 var city_label: Label3D
+var battery_state_label: Label3D
+var flow_step_labels: Array[Label] = []
+var charging_remaining := 0.0
+var supply_remaining := 0.0
 var phase_label: Label
 var phase_timer_label: Label
 var charge_label: Label
@@ -83,6 +87,8 @@ func setup(player_data: Dictionary, round_seed: int) -> void:
 	city_flash_remaining = 0.0
 	city_energy_remaining = 0.0
 	flash_remaining = 0.0
+	charging_remaining = 0.0
+	supply_remaining = 0.0
 	notice = "햇빛이 많아요. 왼쪽에서 남는 전기를 가져오세요!"
 	notice_remaining = 2.7
 	_spawn_hero(player_data)
@@ -147,6 +153,12 @@ func _build_world() -> void:
 		var pulse := _sphere("TransportPulse%d" % index, world, Vector3.ZERO, 0.06, Color("ffe477"), true)
 		pulse.visible = false
 		transfer_pulses.append(pulse)
+	for source_x in [SOLAR_X, BATTERY_X]:
+		var destination_x: float = BATTERY_X if source_x == SOLAR_X else CITY_X
+		_box("EnergyTransferLane", world, Vector3((float(source_x) + destination_x) * 0.5, 0.11, 2.08), Vector3(destination_x - float(source_x) - 0.65, 0.035, 0.06), Color("789a94"))
+		for wing in [-1.0, 1.0]:
+			var arrow := _box("FlowArrow", world, Vector3(destination_x - 0.44, 0.12, 2.08 + wing * 0.10), Vector3(0.30, 0.035, 0.045), Color("fff0b4"))
+			arrow.rotation.y = wing * PI * 0.25
 
 func _build_solar_station() -> void:
 	_box("SolarBase", world, Vector3(SOLAR_X, 0.35, -0.8), Vector3(2.45, 0.7, 1.9), Color("66a778"))
@@ -174,9 +186,9 @@ func _build_battery_station() -> void:
 		battery_cells.append(cell)
 	battery_light = _sphere("BatteryIndicator", world, Vector3(0, 2.56, -0.50), 0.16, Color("8ee8ff"), true)
 	_box("StoragePad", world, Vector3(0, 0.06, 1.65), Vector3(1.45, 0.12, 1.20), Color("c7e2bf"), true)
-	var name_label := _label3d("배터리", Vector3(0, 2.98, 0.30), Color("c4ffe1"))
-	name_label.font_size = 34
-	name_label.pixel_size = 0.007
+	battery_state_label = _label3d("배터리\n저장 0칸", Vector3(0, 3.15, 0.30), Color("c4ffe1"))
+	battery_state_label.font_size = 34
+	battery_state_label.pixel_size = 0.007
 
 func _build_city_station() -> void:
 	_box("CityBase", world, Vector3(CITY_X, 0.32, -0.8), Vector3(2.55, 0.65, 1.9), Color("a4b4aa"))
@@ -215,6 +227,27 @@ func _build_overlay() -> void:
 	phase_timer_label = _overlay_label(Vector2(352, 40), Vector2(608, 68), "구름까지 5초", Color("effff7"), 17)
 	charge_label = _overlay_label(Vector2(680, 7), Vector2(945, 40), "배터리 1/4칸", Color("a4ffe0"), 20)
 	cargo_label = _overlay_label(Vector2(14, 7), Vector2(280, 40), "운반: 없음", Color("fff3bc"), 18)
+	var flow_row := HBoxContainer.new()
+	flow_row.name = "ChargeStoreDischargeFlow"
+	flow_row.anchor_left = 0.08
+	flow_row.anchor_right = 0.92
+	flow_row.offset_top = 73.0
+	flow_row.offset_bottom = 103.0
+	flow_row.add_theme_constant_override("separation", 12)
+	flow_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(flow_row)
+	for step in range(3):
+		var label := Label.new()
+		label.name = "FlowStep%d" % step
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.clip_text = true
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.add_theme_font_size_override("font_size", 17)
+		label.add_theme_constant_override("outline_size", 5)
+		label.add_theme_color_override("font_outline_color", Color("173744"))
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		flow_row.add_child(label)
+		flow_step_labels.append(label)
 	instruction_label = _overlay_label(Vector2(90, 260), Vector2(870, 285), "A/D로 달리기 · 태양광 → 배터리 → 도시", Color("fff1ac"), 16)
 	instruction_label.anchor_top = 1.0
 	instruction_label.anchor_bottom = 1.0
@@ -230,6 +263,8 @@ func _process(delta: float) -> void:
 	visual_time += delta
 	flash_remaining = maxf(0.0, flash_remaining - delta)
 	city_flash_remaining = maxf(0.0, city_flash_remaining - delta)
+	charging_remaining = maxf(0.0, charging_remaining - delta)
+	supply_remaining = maxf(0.0, supply_remaining - delta)
 	if flash_remaining <= 0.0:
 		flash.color = Color.TRANSPARENT
 	if is_instance_valid(cargo_orb):
@@ -276,6 +311,9 @@ func _try_station_action() -> void:
 	elif absf(hero_x - BATTERY_X) <= STATION_REACH and cargo == 1:
 		cargo = 0
 		battery_units += 1
+		charging_remaining = 0.9
+		notice = "배터리에 전기 1칸 저장 · 흐릴 때 꺼내요"
+		notice_remaining = 1.5
 		arcade_event.emit(STORE_POINTS, true, "남는 전기 1칸을 배터리에 저장. 흐릴 때 도시로 보내요.", false)
 		_flash(Color("67f7b145"))
 		interaction_cooldown = 0.23
@@ -293,6 +331,9 @@ func _try_station_action() -> void:
 		cargo = 0
 		city_energy_remaining = minf(3.0, city_energy_remaining + 1.0)
 		city_flash_remaining = 0.45
+		supply_remaining = 0.9
+		notice = "저장 전기를 도시로 공급 · 불빛이 유지돼요"
+		notice_remaining = 1.5
 		arcade_event.emit(SUPPLY_POINTS, true, "저장 전기로 도시의 불을 켰어요", true)
 		_flash(Color("ffe77b45"))
 		interaction_cooldown = 0.23
@@ -306,6 +347,13 @@ func _update_visuals() -> void:
 		return
 	var phase_info := phase_for_time(elapsed, game_seed)
 	var sunny := bool(phase_info["sunny"])
+	var flow := get_flow_stage()
+	var active_step := 0 if flow == "collect" else (1 if flow in ["charge", "stored"] else (2 if flow in ["discharge", "supply", "hold"] else -1))
+	var step_texts := ["① 햇빛 · 전기 받기", "② 충전 → 저장 %d칸" % battery_units, "③ 구름 · 도시 공급"]
+	for index in range(flow_step_labels.size()):
+		flow_step_labels[index].text = ("▶ " if index == active_step else "") + str(step_texts[index])
+		flow_step_labels[index].add_theme_color_override("font_color", Color("fff0a8") if index == active_step else Color("bed9d7"))
+	battery_state_label.text = "배터리\n충전 → 저장" if flow == "charge" else ("배터리\n저장 전기 꺼내기" if flow == "discharge" else "배터리\n저장 %d칸" % battery_units)
 	city_label.text = "도시\n태양광 직접 공급" if sunny else "도시 저장 %.1f칸\n약 %.1f초 유지" % [city_energy_remaining, get_city_supply_seconds()]
 	city_label.font_size = 34
 	city_label.pixel_size = 0.007
@@ -324,11 +372,13 @@ func _update_visuals() -> void:
 		cargo_orb.material_override = solar_material if cargo == 1 else stored_material
 	for index in range(transfer_pulses.size()):
 		var pulse := transfer_pulses[index]
-		pulse.visible = cargo != 0
-		if cargo != 0:
+		var show_charging := cargo == 1 or charging_remaining > 0.0
+		var show_supply := (cargo == 2 and not sunny) or supply_remaining > 0.0
+		pulse.visible = show_charging or show_supply
+		if pulse.visible:
 			var progress := fposmod(visual_time * 1.2 + float(index) / 4.0, 1.0)
-			pulse.position = Vector3(lerpf(SOLAR_X if cargo == 1 else BATTERY_X, BATTERY_X if cargo == 1 else CITY_X, progress), 0.16, 2.05)
-			pulse.material_override = solar_material if cargo == 1 else stored_material
+			pulse.position = Vector3(lerpf(SOLAR_X if show_charging else BATTERY_X, BATTERY_X if show_charging else CITY_X, progress), 0.16, 2.08)
+			pulse.material_override = solar_material if show_charging else stored_material
 	phase_label.text = "햇빛 · 태양광 발전 충분" if sunny else "구름 · 태양광 발전 부족"
 	phase_label.add_theme_color_override("font_color", Color("ffe386") if sunny else Color("b8ecff"))
 	phase_timer_label.text = "%s까지 %.1f초" % ["구름" if sunny else "햇빛", float(phase_info["remaining"])]
@@ -348,6 +398,19 @@ func _update_visuals() -> void:
 func get_city_supply_seconds() -> float:
 	var current_demand := float(phase_for_time(elapsed, game_seed)["demand"]) * 0.22
 	return city_energy_remaining / maxf(0.001, current_demand)
+
+func get_flow_stage() -> String:
+	if cargo == 1:
+		return "charge"
+	if cargo == 2:
+		return "hold" if is_sunny_at(elapsed, game_seed) else "discharge"
+	if charging_remaining > 0.0 or (is_sunny_at(elapsed, game_seed) and battery_units >= BATTERY_CAPACITY):
+		return "stored"
+	if not is_sunny_at(elapsed, game_seed):
+		if supply_remaining > 0.0 or city_energy_remaining > 0.0:
+			return "supply"
+		return "discharge" if battery_units > 0 else "waiting"
+	return "collect"
 
 func _box(node_name: String, parent: Node3D, where: Vector3, dimensions: Vector3, color: Color, glowing: bool = false) -> MeshInstance3D:
 	var mesh := BoxMesh.new()

@@ -115,6 +115,7 @@ func _ready() -> void:
 		village_map.project_drop_requested.connect(_on_village_project_dropped)
 		village_map.project_drop_rejected.connect(_on_village_project_drop_rejected)
 	if center_dice_button:
+		center_dice_button.focus_mode = Control.FOCUS_ALL
 		center_dice_button.pressed.connect(_on_center_dice_pressed)
 	if special_skill_button:
 		special_skill_button.pressed.connect(_on_special_skill_pressed)
@@ -206,7 +207,7 @@ func initialize_hud() -> void:
 
 func _create_player_panel(p_data: Dictionary) -> Control:
 	var p_box = PanelContainer.new()
-	p_box.custom_minimum_size = Vector2(296, 64)
+	p_box.custom_minimum_size = Vector2(296, 92)
 	p_box.mouse_filter = Control.MOUSE_FILTER_STOP
 	p_box.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	p_box.tooltip_text = "%s의 상세 상태 보기" % p_data.get("name", "플레이어")
@@ -223,12 +224,12 @@ func _create_player_panel(p_data: Dictionary) -> Control:
 
 	var turn_marker = Label.new()
 	turn_marker.name = "TurnMarker"
-	turn_marker.custom_minimum_size = Vector2(26, 0)
+	turn_marker.custom_minimum_size = Vector2(18, 0)
 	turn_marker.text = "▶"
 	turn_marker.visible = false
 	turn_marker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	turn_marker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	turn_marker.add_theme_font_size_override("font_size", 13) # 기존 10 -> 13
+	turn_marker.add_theme_font_size_override("font_size", 18)
 	turn_marker.add_theme_color_override("font_color", Color(1.0, 0.86, 0.22))
 	turn_marker.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	turn_marker.add_theme_constant_override("outline_size", 3)
@@ -244,6 +245,7 @@ func _create_player_panel(p_data: Dictionary) -> Control:
 	h_box.add_child(avatar)
 	
 	var v_info = VBoxContainer.new()
+	v_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v_info.alignment = BoxContainer.ALIGNMENT_CENTER
 	v_info.add_theme_constant_override("separation", 1)
 	h_box.add_child(v_info)
@@ -253,7 +255,7 @@ func _create_player_panel(p_data: Dictionary) -> Control:
 	name_lbl.text = p_data.get("name", "")
 	name_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	name_lbl.custom_minimum_size = Vector2(155, 0)
-	name_lbl.add_theme_font_size_override("font_size", 17)
+	name_lbl.add_theme_font_size_override("font_size", 20)
 	name_lbl.add_theme_color_override("font_color", Color(1, 1, 1))
 	name_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.95))
 	name_lbl.add_theme_constant_override("outline_size", 3)
@@ -262,7 +264,7 @@ func _create_player_panel(p_data: Dictionary) -> Control:
 	var stat_lbl = Label.new()
 	stat_lbl.name = "StatLabel"
 	stat_lbl.text = "에너지 %d  ·  SP %d" % [p_data.get("energy", 0), p_data.get("skill_energy", 0)]
-	stat_lbl.add_theme_font_size_override("font_size", 14)
+	stat_lbl.add_theme_font_size_override("font_size", 20)
 	stat_lbl.add_theme_color_override("font_color", Color(0.48, 0.98, 0.90))
 	stat_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	stat_lbl.add_theme_constant_override("outline_size", 2)
@@ -575,7 +577,9 @@ func _create_open_market_panel() -> void:
 	open_market_status_label = Label.new()
 	open_market_status_label.name = "OpenMarketStatus"
 	open_market_status_label.text = "부품을 선택하세요."
-	open_market_status_label.add_theme_font_size_override("font_size", 13)
+	open_market_status_label.add_theme_font_size_override("font_size", 18)
+	open_market_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	open_market_status_label.custom_minimum_size.y = 44
 	open_market_status_label.add_theme_color_override("font_color", UI.TEXT_MUTED)
 	open_market_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	subheader_row.add_child(open_market_status_label)
@@ -584,7 +588,7 @@ func _create_open_market_panel() -> void:
 	open_market_quota_label.name = "OpenMarketQuota"
 	open_market_quota_label.text = ""
 	open_market_quota_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	open_market_quota_label.add_theme_font_size_override("font_size", 13)
+	open_market_quota_label.add_theme_font_size_override("font_size", 18)
 	open_market_quota_label.add_theme_color_override("font_color", UI.TEXT_BRIGHT)
 	subheader_row.add_child(open_market_quota_label)
 
@@ -605,7 +609,7 @@ func _create_open_market_panel() -> void:
 	open_market_guide_label = Label.new()
 	open_market_guide_label.name = "OpenMarketGuideLabel"
 	open_market_guide_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	open_market_guide_label.add_theme_font_size_override("font_size", 13)
+	open_market_guide_label.add_theme_font_size_override("font_size", 18)
 	open_market_guide_label.add_theme_color_override("font_color", UI.TEXT_BRIGHT)
 	guide_margin.add_child(open_market_guide_label)
 
@@ -635,7 +639,7 @@ func _create_open_market_panel() -> void:
 	open_market_inspect_label = Label.new()
 	open_market_inspect_label.name = "OpenMarketInspectLabel"
 	open_market_inspect_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	open_market_inspect_label.add_theme_font_size_override("font_size", 13)
+	open_market_inspect_label.add_theme_font_size_override("font_size", 18)
 	open_market_inspect_label.add_theme_color_override("font_color", UI.GOLD)
 	open_market_inspect_label.text = "부품 위에 마우스를 올리면 사용처와 완공 가능성을 분석해 드립니다."
 	inspect_margin.add_child(open_market_inspect_label)
@@ -1056,6 +1060,8 @@ func _create_open_market_item_button(item_id: String, label_text: String, tag_te
 	var item_data: Dictionary = GameManager.ITEM_DEFINITIONS[item_id]
 	var button := Button.new()
 	button.custom_minimum_size = Vector2(265, 74)
+	button.add_theme_font_size_override("font_size", 18)
+	button.add_theme_constant_override("icon_max_width", 38)
 	button.text = ("[%s] " % tag_text if not tag_text.is_empty() else "") + label_text
 	button.icon = load(str(item_data["asset"]))
 	button.expand_icon = true
@@ -1137,9 +1143,11 @@ func _refresh_special_skill_button() -> void:
 	var target_label := "자신" if skill.get("target_type") == "self" else ("플레이어" if skill.get("target_type") == "player" else "게임판 타일")
 	special_skill_button.tooltip_text = "%s\n대상: %s · 퀴즈 특수 에너지 %d / %d" % [skill["description"], target_label, skill_energy, cost]
 	var local_is_human := not bool(local_player.get("is_ai", false))
-	special_skill_button.disabled = not local_is_human or not GameManager.can_use_special_skill(local_idx)
+	special_skill_button.disabled = not local_is_human or not GameManager.can_use_special_skill(local_idx) or GameManager.guided_tutorial_active
 
 func _on_special_skill_pressed() -> void:
+	if GameManager.guided_tutorial_active:
+		return
 	var local_idx := _local_player_index()
 	if not GameManager.can_use_special_skill(local_idx):
 		_show_event_banner("특수기술은 내 턴에, 퀴즈 정답으로 모은 특수 에너지가 충분할 때 사용할 수 있습니다.")
@@ -1164,7 +1172,7 @@ func _on_special_skill_pressed() -> void:
 		special_skill_target_panel.visible = true
 	special_skill_button.disabled = true
 	_refresh_primary_action_controls()
-	_show_event_banner("%s: %s" % [active_special_skill["name"], special_skill_target_hint_label.text])
+	# The target picker itself remains visible until confirmation/cancel.
 
 func _is_special_skill_player_targeting() -> bool:
 	return active_special_skill_player_idx >= 0 and str(active_special_skill.get("target_type", "")) == "player"
@@ -1197,6 +1205,10 @@ func _cancel_special_skill_targeting() -> void:
 
 
 func close_top_overlay() -> bool:
+	if village_map and village_map.cancel_selection():
+		if build_instruction_label:
+			build_instruction_label.text = "시설 선택 → 빛나는 칸 클릭 · 드래그도 가능해요"
+		return true
 	if open_market_recipe_popover and open_market_recipe_popover.visible:
 		open_market_recipe_popover.visible = false
 		return true
@@ -1213,6 +1225,15 @@ func _refresh_primary_action_controls() -> void:
 		var local_idx := _local_player_index()
 		is_local_turn = local_idx >= 0 and GameManager.current_turn_idx == local_idx and not bool(GameManager.players[local_idx].get("is_ai", false))
 		action_ready = is_local_turn and GameManager.current_state == GameManager.TurnState.WAIT_ACTION and active_special_skill_player_idx < 0
+		if GameManager.guided_tutorial_active:
+			action_ready = action_ready and GameManager.guided_tutorial_step == "dice"
+	# The dice face / target picker are the action surfaces. Do not repeat the
+	# same instruction in a large banner across the middle of the board.
+	if turn_prompt_label:
+		turn_prompt_label.visible = false
+	var turn_plate := get_node_or_null("TurnPromptPlate") as Control
+	if turn_plate:
+		turn_plate.hide()
 	# 굴림 중에는 결과 연출이 끝날 때까지 오른쪽 주사위를 유지합니다.
 	if GameManager and GameManager.current_state == GameManager.TurnState.ROLLING_DICE:
 		_set_center_dice_visible(true, false)
@@ -1344,12 +1365,11 @@ func update_all_player_panels() -> void:
 			var panel = player_panel_nodes[i]
 			var stat_lbl = panel.find_child("StatLabel", true, false)
 			if stat_lbl:
-				var shield_tag = "  ·  방패" if p_data.get("shield", false) else ""
 				var energy_rank := 1
 				for other in GameManager.players:
 					if int(other.get("energy", 0)) > int(p_data.get("energy", 0)): energy_rank += 1
-				stat_lbl.text = "에너지 %d  ·  현재 %d위\nSP %d  ·  %d번 칸%s" % [p_data.get("energy", 0), energy_rank, p_data.get("skill_energy", 0), p_data["position"], shield_tag]
-				panel.tooltip_text = "현재 에너지 순위 · 종료 시 이동 보상이 합산됩니다. 클릭하면 상세 상태를 볼 수 있어요."
+				stat_lbl.text = "에너지 %d · %d위\nSP %d · %d번 칸" % [p_data.get("energy", 0), energy_rank, p_data.get("skill_energy", 0), p_data["position"]]
+				panel.tooltip_text = "%s · 현재 에너지 순위\n종료 시 이동 보상이 합산됩니다.\n%s클릭하면 상세 상태를 볼 수 있어요." % [str(p_data.get("name", "")), "방패 보유 · " if p_data.get("shield", false) else ""]
 			var name_label := panel.find_child("NameLabel", true, false) as Label
 			if name_label:
 				name_label.text = str(p_data.get("name", "")) + (" · 나" if i == _local_player_index() else "")
@@ -1369,7 +1389,7 @@ func update_all_player_panels() -> void:
 					sb.bg_color = Color("102832")
 					sb.border_color = player_color.darkened(0.25)
 					sb.set_border_width_all(2)
-					panel.modulate = Color(0.78, 0.84, 0.88)
+					panel.modulate = Color.WHITE
 			if turn_marker:
 				turn_marker.visible = is_current
 	_refresh_special_skill_button()
@@ -1400,6 +1420,8 @@ func _on_turn_changed(turn_idx: int) -> void:
 func _on_center_dice_pressed() -> void:
 	var local_idx := _local_player_index()
 	if not GameManager or GameManager.current_turn_idx != local_idx or GameManager.current_state != GameManager.TurnState.WAIT_ACTION:
+		return
+	if GameManager.guided_tutorial_active and GameManager.guided_tutorial_step != "dice":
 		return
 	_set_center_dice_visible(true, false)
 	if turn_prompt_label:
@@ -1444,7 +1466,7 @@ func _on_dice_rolled(_p_idx: int, val: int) -> void:
 func _on_dice_input_time_changed(player_idx: int, remaining_seconds: int) -> void:
 	if player_idx != _local_player_index() or not dice_value_label or not GameManager or GameManager.current_state != GameManager.TurnState.WAIT_ACTION:
 		return
-	dice_value_label.text = "클릭해서 굴리기  ·  %d초" % maxi(remaining_seconds, 0)
+	dice_value_label.text = "연습용 주사위" if GameManager.guided_tutorial_active else "클릭 · %d초 남음" % maxi(remaining_seconds, 0)
 	dice_value_label.add_theme_color_override("font_color", UI.DANGER if remaining_seconds <= 3 else UI.GOLD)
 
 func _set_dice_roll_frame(rolling_value: int) -> void:
@@ -1457,6 +1479,8 @@ func _show_dice_result(value: int) -> void:
 	dice_value_label.text = "결과  ·  %d" % value
 
 func _set_center_dice_visible(should_show: bool, clickable: bool) -> void:
+	if GameManager.guided_tutorial_active and GameManager.guided_tutorial_step != "dice":
+		clickable = false
 	if center_dice_panel:
 		center_dice_panel.visible = should_show
 	if center_dice_button:
@@ -1466,17 +1490,20 @@ func _set_center_dice_visible(should_show: bool, clickable: bool) -> void:
 		dice_face.rotation = 0.0
 		dice_face.scale = Vector2.ONE
 		var remaining_seconds := ceili(GameManager.dice_input_time_remaining) if GameManager else 20
-		dice_value_label.text = "클릭해서 굴리기  ·  %d초" % maxi(remaining_seconds, 0)
+		dice_value_label.text = "연습용 주사위" if GameManager.guided_tutorial_active else "클릭 · %d초 남음" % maxi(remaining_seconds, 0)
 		dice_value_label.add_theme_color_override("font_color", UI.DANGER if remaining_seconds <= 3 else UI.GOLD)
 
 func _on_status_message_posted(msg: String) -> void:
 	if status_ticker_label:
 		status_ticker_label.text = _readable_status(msg)
-	# 턴 안내는 하단 행동 안내와 상단 상태줄만 사용합니다. 매 턴 같은 내용을
-	# 중앙 배너로 한 번 더 띄우면 게임판과 이동 경로가 가려집니다.
+	var status_panel := get_node_or_null("TopHUD/StatusTicker") as Control
+	if status_panel:
+		status_panel.hide()
+	# Current-turn cards and the dice already communicate routine progress.
+	# Meaningful events get one readable banner, not three simultaneous copies.
 	if msg.contains("턴입니다") or msg.contains("주사위") or msg.contains("생각 중"):
 		return
-	if GameManager.adventure_waiting_for_start:
+	if GameManager.adventure_waiting_for_start or GameManager.guided_tutorial_active:
 		return
 	_show_event_banner(msg)
 
@@ -1589,9 +1616,11 @@ func _refresh_construction_choices() -> void:
 		child.queue_free()
 	construction_list.add_theme_constant_override("separation", 10)
 	for project_index in range(GameManager.CONSTRUCTION_PROJECTS.size()):
+		if GameManager.guided_tutorial_active and GameManager.guided_tutorial_step == "build" and project_index != adventure_planner.selected_goal:
+			continue
 		var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[project_index]
 		var build_button: Button = VILLAGE_DRAG_CARD.new()
-		build_button.custom_minimum_size = Vector2(300, 162)
+		build_button.custom_minimum_size = Vector2(300, 176)
 		build_button.text = ""
 		build_button.clip_contents = true
 		var already_built := project_index in GameManager.built_project_ids
@@ -1630,6 +1659,7 @@ func _refresh_construction_choices() -> void:
 		building_image.modulate = Color(0.55, 0.62, 0.62, 0.72) if builder_idx < 0 and not already_built else Color.WHITE
 		thumbnail_center.add_child(building_image)
 		build_button.call("configure", project_index, builder_idx, building_image.texture, not already_built and builder_idx >= 0)
+		build_button.pressed.connect(_select_construction_project.bind(project_index, builder_idx))
 
 		var info := VBoxContainer.new()
 		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1643,7 +1673,7 @@ func _refresh_construction_choices() -> void:
 		# AUTOWRAP labels otherwise report a 1px minimum height before width is
 		# assigned by the nested containers. Reserve a real line for the title.
 		project_label.custom_minimum_size = Vector2(0, 27)
-		project_label.add_theme_font_size_override("font_size", 18)
+		project_label.add_theme_font_size_override("font_size", 20)
 		project_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		project_label.add_theme_color_override("font_color", UI.GOLD if builder_idx >= 0 or already_built else UI.TEXT_MUTED)
 		info.add_child(project_label)
@@ -1651,7 +1681,7 @@ func _refresh_construction_choices() -> void:
 		effect_label.name = "ProjectEffect"
 		effect_label.text = "마을 친환경 지수 +%d" % int(project["health"])
 		effect_label.custom_minimum_size.y = 23
-		effect_label.add_theme_font_size_override("font_size", 15)
+		effect_label.add_theme_font_size_override("font_size", 18)
 		effect_label.add_theme_color_override("font_color", UI.TEXT)
 		info.add_child(effect_label)
 
@@ -1668,9 +1698,10 @@ func _refresh_construction_choices() -> void:
 			requirements_row.add_child(requirement_box)
 			requirement_box.add_child(_create_asset_texture_rect(str(item["asset"]), Vector2(28, 28)))
 			var amount_label := Label.new()
-			amount_label.text = "%d/%d" % [int(GameManager.get_team_inventory().get(item_id, 0)), int(project["requirements"][item_id])]
+			amount_label.text = "%d / %d" % [int(GameManager.get_team_inventory().get(item_id, 0)), int(project["requirements"][item_id])]
+			amount_label.tooltip_text = "%s · 팀 보유 / 필요한 수" % item["name"]
 			amount_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			amount_label.add_theme_font_size_override("font_size", 15)
+			amount_label.add_theme_font_size_override("font_size", 20)
 			amount_label.add_theme_color_override("font_color", UI.TEXT)
 			requirement_box.add_child(amount_label)
 
@@ -1679,20 +1710,30 @@ func _refresh_construction_choices() -> void:
 		if already_built and completed_owner_idx >= 0 and completed_owner_idx < GameManager.players.size():
 			owner_label.text = "완공 · " + str(GameManager.players[completed_owner_idx]["name"])
 		else:
-			owner_label.text = "지도에 끌어 놓기" if builder_idx >= 0 else ("완공" if already_built else "팀 재료가 부족해요")
+			owner_label.text = "선택 후 지도 클릭" if builder_idx >= 0 else ("완공" if already_built else "팀 재료가 부족해요")
 		owner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		owner_label.add_theme_font_size_override("font_size", 15)
+		owner_label.add_theme_font_size_override("font_size", 18)
 		owner_label.add_theme_color_override("font_color", UI.SUCCESS if builder_idx >= 0 or already_built else UI.DANGER)
 		info.add_child(owner_label)
 		_set_descendant_mouse_filter_ignore(margin)
 		construction_list.add_child(build_button)
 	if build_instruction_label:
-		build_instruction_label.text = "시설 카드를 지도의 빛나는 칸으로 끌어 놓으세요."
-		build_instruction_label.add_theme_font_size_override("font_size", 17)
+		build_instruction_label.text = "시설 선택 → 빛나는 칸 클릭 · 재료: 팀 보유 / 필요"
+		build_instruction_label.add_theme_font_size_override("font_size", 19)
+		build_instruction_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		build_instruction_label.offset_bottom = 626
 		build_instruction_label.tooltip_text = "오른쪽 목록을 스크롤해서 시설을 골라요. 팀 재료로 함께 건설하고, 모두 ‘내 건설 마침’을 누르면 결과를 확인해요."
 	if evaluate_button:
 		evaluate_button.disabled = GameManager.village_finished_players.has(_local_player_index())
 		evaluate_button.text = "친구 건설 기다리는 중" if evaluate_button.disabled else "내 건설 마침 · 결과 확인"
+		if GameManager.guided_tutorial_active:
+			evaluate_button.visible = false
+
+func _select_construction_project(project_index: int, builder_idx: int) -> void:
+	if not GameManager.can_build_village_project(project_index, builder_idx):
+		return
+	village_map.select_project(project_index, builder_idx)
+	build_instruction_label.text = "%s · 빛나는 칸 클릭 / 방향키 + Enter · Esc 취소" % GameManager.CONSTRUCTION_PROJECTS[project_index]["name"]
 
 func _create_asset_texture_rect(asset_path: String, minimum_size: Vector2) -> TextureRect:
 	var texture_rect := TextureRect.new()
@@ -1762,7 +1803,7 @@ func _refresh_ranking_cards(rankings: Array) -> void:
 		name_label.text = str(player.get("name", "플레이어"))
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		name_label.add_theme_font_size_override("font_size", 17)
+		name_label.add_theme_font_size_override("font_size", 20)
 		name_label.add_theme_color_override("font_color", UI.TEXT)
 		row.add_child(name_label)
 		var score_row := HBoxContainer.new()
@@ -1778,14 +1819,14 @@ func _refresh_ranking_cards(rankings: Array) -> void:
 		movement_label.name = "MovementReward"
 		movement_label.text = "이동 보상 +%d" % int(player.get("movement_reward_energy", 0))
 		movement_label.tooltip_text = "이번 판 총 %d칸 이동. 이동 보상은 20·15·10·5입니다." % int(player.get("total_tiles_moved", 0))
-		movement_label.add_theme_font_size_override("font_size", 15)
+		movement_label.add_theme_font_size_override("font_size", 18)
 		movement_label.add_theme_color_override("font_color", UI.TEXT)
 		score_row.add_child(movement_label)
 		var contribution_label := Label.new()
 		contribution_label.name = "SessionContribution"
 		contribution_label.text = "이번 판: 퀴즈 %d · 재료 %d · 완공 %d" % [int(player.get("quiz_correct", 0)), int(player.get("construction_contribution", 0)), int(player.get("project_completion_bonus", 0))]
 		contribution_label.tooltip_text = "이번 모험에서 정답을 맞힌 횟수 · 얻은 재료 개수 · 완공한 시설 수입니다. 건설자 +5, 실제 부품 제공자 1개당 +2. 에너지 동점이면 이동·퀴즈·재료 공헌 점수로 비교합니다. 기록을 저장하지 않습니다."
-		contribution_label.add_theme_font_size_override("font_size", 15)
+		contribution_label.add_theme_font_size_override("font_size", 18)
 		contribution_label.add_theme_color_override("font_color", UI.TEXT)
 		content.add_child(contribution_label)
 
@@ -1855,14 +1896,31 @@ func _apply_commercial_ui() -> void:
 	var status_panel := get_node_or_null("TopHUD/StatusTicker") as PanelContainer
 	if status_panel:
 		status_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("0d2834"), Color("285465"), 5.0, 8))
+		status_panel.hide()
 	var mission_panel := get_node_or_null("MissionPanel") as PanelContainer
 	if mission_panel:
 		mission_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color(0.035, 0.13, 0.17, 0.96), UI.TEAL_DARK, 10.0, 12))
 	if game_time_panel:
 		game_time_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("0d2834f2"), UI.GOLD_DARK, 10.0, 10))
+		game_time_panel.position = Vector2(1010, 108)
+		game_time_panel.size.x = 196
+	var clock_title := get_node_or_null("GameTimePanel/VBox/Title") as Label
+	if clock_title:
+		clock_title.add_theme_font_size_override("font_size", 18)
+	var dice_prompt := get_node_or_null("CenterDicePanel/VBox/PromptLabel") as Label
+	if dice_prompt:
+		dice_prompt.text = "주사위 선택 · Enter"
+		dice_prompt.add_theme_font_size_override("font_size", 18)
+	if dice_value_label:
+		dice_value_label.add_theme_font_size_override("font_size", 18)
+	if special_skill_button:
+		special_skill_button.position = Vector2(1010, 402)
+		special_skill_button.size = Vector2(196, 68)
+		special_skill_button.add_theme_font_size_override("font_size", 19)
 	var turn_plate := get_node_or_null("TurnPromptPlate") as Panel
 	if turn_plate:
 		turn_plate.add_theme_stylebox_override("panel", UI.panel(Color(0.025, 0.12, 0.16, 0.94), UI.GOLD_DARK, 12, 2, 6))
+		turn_plate.hide()
 	var dice_panel := get_node_or_null("CenterDicePanel") as PanelContainer
 	if dice_panel:
 		dice_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("122f3b"), Color("4d7280"), 8.0, 11))
@@ -1873,6 +1931,7 @@ func _apply_commercial_ui() -> void:
 	if turn_prompt_label:
 		turn_prompt_label.add_theme_font_size_override("font_size", 21)
 		turn_prompt_label.add_theme_constant_override("outline_size", 3)
+		turn_prompt_label.hide()
 	if victory_modal:
 		victory_modal.add_theme_stylebox_override("panel", UI.padded_panel(Color("102d37"), UI.TEAL_DARK, 18.0, 18))
 	var preview_frame := get_node_or_null("VictoryModal/KingdomPreviewFrame") as Panel
@@ -1922,7 +1981,7 @@ func _show_event_banner(message: String) -> void:
 	event_banner_tween.set_parallel(true)
 	event_banner_tween.tween_property(event_banner, "modulate", Color.WHITE, 0.16)
 	event_banner_tween.tween_property(event_banner, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	event_banner_tween.chain().tween_interval(1.25)
+	event_banner_tween.chain().tween_interval(clampf(1.5 + float(message.length()) * 0.035, 2.5, 6.0))
 	event_banner_tween.chain().tween_property(event_banner, "modulate", Color(1, 1, 1, 0), 0.24)
 	event_banner_tween.chain().tween_callback(func(): event_banner.visible = false)
 
