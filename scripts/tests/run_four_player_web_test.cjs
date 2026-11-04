@@ -233,10 +233,11 @@ async function main() {
     await waitFor(all => all.every(s => s.construction), 'all four plan confirmations -> construction');
     ss = await states(); equalAll(ss, s => s.players.map(p => p.inventory), 'shared inventories');
     await capture('21-construction');
-    const card = ss[1].cards.find(c => c.x !== undefined && !c.disabled);
+    const storageActor = ss.findIndex(s => s.local === 1);
+    const card = ss[storageActor].cards.find(c => c.x !== undefined && !c.disabled && c.text === '에너지 저장소');
     assert(card, 'remote player has buildable card');
-    await pages[1].mouse.click(card.x, card.y, { delay: 100 });
-    await pages[1].keyboard.press('Enter', { delay: 180 });
+    await pages[storageActor].mouse.click(card.x, card.y, { delay: 100 });
+    await pages[storageActor].keyboard.press('Enter', { delay: 180 });
     ss = await waitFor(all => all.every(s => s.built.length > 0), 'remote keyboard construction');
     const solarCard = ss[0].cards.find(c => c.x !== undefined && !c.disabled && c.text.includes('태양광'));
     assert(solarCard, 'host can add generation to the recommended storage facility');
