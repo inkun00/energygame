@@ -20,6 +20,8 @@ Godot의 `network/room_directory_url`에도 위 주소가 설정되어 있다.
 
 실제 브라우저 검사는 `scenes/tests/NetworkRecoveryWebHarness.tscn`을 임시 시작 씬으로 지정해 `.godot/recovery-web/index.html`로 Web 디버그 내보내기를 한 뒤, 시작 씬을 `scenes/Main.tscn`으로 되돌리고 `node scripts/tests/run_network_web_test.cjs`를 실행한다(명령은 저장소 루트 기준). Node 22 이상과 Playwright/Chromium이 필요하다. 선택적으로 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`를 지정할 수 있다. 이 검사는 로컬 SQLite 방 서비스와 브라우저 2개만 사용하며, 공개 게임방 서비스에는 접속하지 않는다.
 
+4인 전체 화면 검사는 저장소 루트에서 `node scripts/tests/export_four_player_web.cjs` 다음 `node scripts/tests/run_four_player_web_test.cjs`로 실행한다. 별도 테스트 프로젝트를 사용하므로 실제 시작 씬을 바꾸지 않는다. 독립 브라우저 4개, 로컬 Worker/D1, 실제 WebRTC와 키보드 입력으로 9종 미니게임 및 준비·재접속·시장·건설·엔딩을 검사한다. 자세한 범위와 fixture는 [4인 검증 보고서](../../docs/four-player-online-verification.md)를 참고한다.
+
 WebRTC 테이블은 `schema.sql`에 포함되어 있으며 Worker가 첫 WebRTC 요청에서 `IF NOT EXISTS`로 준비한다. 현재 STUN만 설정되어 있어 직접 P2P 통신을 차단하는 학교·회사 네트워크에서는 연결이 실패할 수 있다. 이러한 환경까지 지원하려면 TURN 중계 서버가 필요하다. 데스크톱 ENet 방과 웹 WebRTC 방 사이의 교차 접속은 지원하지 않는다.
 
 ## 다른 계정으로 다시 배포할 때

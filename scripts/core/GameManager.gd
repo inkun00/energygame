@@ -82,6 +82,7 @@ const MINIGAME_SCORE_LIMIT := 5000
 const MINIGAME_NETWORK_CLOCK_TOLERANCE_SECONDS := 0.5
 const MINIGAME_NETWORK_EVENT_LIMIT := 4096
 const MINIGAME_RANK_REWARDS: Array[int] = [20, 10, 5, 1]
+const VILLAGE_PLACEMENT_RULES = preload("res://scripts/core/VillagePlacementRules.gd")
 const STANDBY_POWER_HUNT = preload("res://scripts/minigames/StandbyPowerHunt3D.gd")
 const SMART_GRID_BALANCE = preload("res://scripts/minigames/SmartGridBalance3D.gd")
 const HYDRO_GATE_RUN = preload("res://scripts/minigames/HydroGateRun3D.gd")
@@ -2397,6 +2398,11 @@ func build_village_project(project_index: int, player_idx: int = -1, map_positio
 	if not can_build_village_project(project_index, player_idx):
 		return false
 	var project: Dictionary = CONSTRUCTION_PROJECTS[project_index]
+	# Validate the shared cell before spending any team material. Two remote
+	# builders may select the same free pad before either receives the other's RPC.
+	var placement := VILLAGE_PLACEMENT_RULES.resolve_placement(project, map_position, built_project_placements)
+	if placement == VILLAGE_PLACEMENT_RULES.INVALID_POSITION:
+		return false
 	village_finished_players.erase(player_idx)
 	# The builder contributes first, then the team supplies the missing parts.
 	var contributor_order: Array[int] = [player_idx]
@@ -2419,8 +2425,7 @@ func build_village_project(project_index: int, player_idx: int = -1, map_positio
 			if remaining == 0:
 				break
 	built_project_ids.append(project_index)
-	if map_position.x >= 0.0 and map_position.y >= 0.0:
-		built_project_placements[project_index] = map_position
+	built_project_placements[project_index] = placement
 	built_project_owners[project_index] = player_idx
 	players[player_idx]["project_completion_bonus"] += 1
 	players[player_idx]["energy"] += CONSTRUCTION_COMPLETION_REWARD

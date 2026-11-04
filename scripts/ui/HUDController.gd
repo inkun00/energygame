@@ -123,6 +123,7 @@ func _ready() -> void:
 	_create_special_skill_target_panel()
 	_create_lap_reward_panel()
 	_create_open_market_panel()
+	NetworkManager.game_action_rejected.connect(_on_network_action_rejected)
 	if help_button:
 		help_button.pressed.connect(_on_help_pressed)
 	if sound_button:
@@ -152,6 +153,21 @@ func _ready() -> void:
 		GameManager.lap_reward_requested.connect(_on_lap_reward_requested)
 		GameManager.lap_reward_completed.connect(_on_lap_reward_completed)
 		GameManager.open_market_state_changed.connect(_on_open_market_state_changed)
+
+
+func restore_online_ui() -> void:
+	# Recovery replaces state without replaying every event missed in transit.
+	# Clear obsolete local layers before the board reopens the current phase.
+	_hide_lap_reward_panel()
+	if not GameManager.open_market_active:
+		_hide_open_market_panel()
+	for project_index in village_map.pending_project_cells.keys():
+		village_map.cancel_project_placement(int(project_index))
+	adventure_planner.quiz_open = GameManager.current_state == GameManager.TurnState.RESOLVING_QUIZ and not GameManager.active_quiz_data.is_empty()
+	if GameManager.open_market_active or GameManager.village_construction_active or not GameManager.is_game_active:
+		adventure_planner.end_exploration()
+	else:
+		adventure_planner._refresh_tutorial()
 
 func _create_construction_scroll() -> void:
 	if not victory_modal or not construction_list:
@@ -1509,6 +1525,7 @@ func _on_status_message_posted(msg: String) -> void:
 
 func _on_game_over(rankings: Array) -> void:
 	_hide_lap_reward_panel()
+	_hide_open_market_panel()
 	_set_center_dice_visible(false, false)
 	if turn_prompt_label:
 		turn_prompt_label.visible = false
@@ -1554,6 +1571,7 @@ func _show_game_over_results(_rankings: Array) -> void:
 	modal_tween.tween_property(victory_modal, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _on_village_construction_started(_inventories: Array) -> void:
+	_hide_open_market_panel()
 	if turn_prompt_label:
 		turn_prompt_label.visible = false
 	if special_skill_button:
@@ -1847,6 +1865,16 @@ func _on_village_project_dropped(project_index: int, player_idx: int, map_positi
 
 func _on_village_project_drop_rejected(message: String) -> void:
 	_show_event_banner("이 시설은 %s" % message)
+
+func _on_network_action_rejected(action: String, payload: Dictionary) -> void:
+	if action != "build_project" or not village_map:
+		return
+	var project_index := int(payload.get("project_index", -1))
+	var was_pending: bool = village_map.pending_project_cells.has(project_index)
+	village_map.cancel_project_placement(project_index)
+	if was_pending:
+		_show_event_banner("친구가 먼저 건설했거나 팀 재료가 바뀌었어요. 시설과 빈 칸을 다시 골라 주세요.")
+	_refresh_construction_choices()
 
 func _on_evaluate_village_pressed() -> void:
 	if NetworkManager.is_online:

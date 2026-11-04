@@ -62,6 +62,7 @@ var board_render_warmup := false
 var board_presentation_suspended := true
 var board_snapshot_pending := false
 var board_snapshot_session := -1
+var board_snapshot_completion := Callable()
 
 ## 이전 최대 확대(220%)보다 정확히 30% 더 가까운 거리 = 286% 확대입니다.
 const CAMERA_MIN_DISTANCE := 6.53846
@@ -79,8 +80,7 @@ func set_board_active(is_active: bool) -> void:
 	board_surface_active = is_active
 	board_render_warmup = false
 	if not is_active:
-		board_snapshot_pending = false
-		board_snapshot_session = -1
+		_cancel_board_snapshot()
 	visible = is_active
 	if is_instance_valid(minigame_modal):
 		minigame_modal.set_surface_enabled(is_active)
@@ -131,21 +131,35 @@ func _request_board_snapshot() -> void:
 	var session := GameManager.game_session_id
 	if board_snapshot_pending and board_snapshot_session == session:
 		return
+	_cancel_board_snapshot()
 	board_snapshot_pending = true
 	board_snapshot_session = session
 	_refresh_board_render_budget()
-	var completed := _on_board_snapshot_completed.bind(session)
+	board_snapshot_completion = _on_board_snapshot_completed.bind(session)
 	if DisplayServer.get_name() == "headless":
 		# CI has no drawn pixels; model the single presentation tick explicitly.
-		get_tree().process_frame.connect(completed, CONNECT_ONE_SHOT)
+		get_tree().process_frame.connect(board_snapshot_completion, CONNECT_ONE_SHOT)
 	else:
-		RenderingServer.frame_post_draw.connect(completed, CONNECT_ONE_SHOT)
+		RenderingServer.frame_post_draw.connect(board_snapshot_completion, CONNECT_ONE_SHOT)
+
+func _cancel_board_snapshot() -> void:
+	# A tutorial can be left and restarted before the queued presentation tick.
+	# Remove its actual callback as well as the pending flag.
+	if board_snapshot_completion.is_valid():
+		if get_tree().process_frame.is_connected(board_snapshot_completion):
+			get_tree().process_frame.disconnect(board_snapshot_completion)
+		if RenderingServer.frame_post_draw.is_connected(board_snapshot_completion):
+			RenderingServer.frame_post_draw.disconnect(board_snapshot_completion)
+	board_snapshot_completion = Callable()
+	board_snapshot_pending = false
+	board_snapshot_session = -1
 
 func _on_board_snapshot_completed(session: int) -> void:
 	if session != GameManager.game_session_id or session != board_snapshot_session:
 		return
 	board_snapshot_pending = false
 	board_snapshot_session = -1
+	board_snapshot_completion = Callable()
 	if board_presentation_suspended:
 		viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
@@ -202,6 +216,7 @@ func _ready() -> void:
 
 func _on_session_restored() -> void:
 	_cancel_camera_follow()
+	hud.restore_online_ui()
 	for player_idx in range(mini(player_pawns.size(), GameManager.players.size())):
 		player_pawns[player_idx].snap_to_tile(int(GameManager.players[player_idx]["position"]))
 		_on_player_state_changed(player_idx)

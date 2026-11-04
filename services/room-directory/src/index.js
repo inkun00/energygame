@@ -275,30 +275,43 @@ async function joinWebRtcRoom(request, env, code) {
       return json({error: "비밀번호가 올바르지 않습니다."}, 403);
     }
   }
+  // Peer numbers are reused in the lobby. Their old offers/answers must not
+  // become signaling for a different child who receives that same number.
+  await env.DB.prepare(`DELETE FROM webrtc_signals WHERE code = ?1 AND (
+    from_peer IN (SELECT peer_id FROM webrtc_peers WHERE code = ?1 AND expires_at <= ?2 AND peer_id != 1)
+    OR to_peer IN (SELECT peer_id FROM webrtc_peers WHERE code = ?1 AND expires_at <= ?2 AND peer_id != 1)
+  )`).bind(code, now).run();
   await env.DB.prepare("DELETE FROM webrtc_peers WHERE code = ?1 AND expires_at <= ?2 AND peer_id != 1").bind(code, now).run();
-
-  const result = await env.DB.prepare(
-    "SELECT peer_id FROM webrtc_peers WHERE code = ?1 AND expires_at > ?2 ORDER BY peer_id"
-  ).bind(code, now).all();
-  const used = new Set((result.results || []).map((peer) => Number(peer.peer_id)));
-  let peerId = 0;
-  for (let candidate = 2; candidate <= (settings?.max_players || 4); candidate += 1) {
-    if (!used.has(candidate)) {
-      peerId = candidate;
-      break;
-    }
-  }
-  if (!peerId) return json({ error: "게임방 인원이 가득 찼습니다." }, 409);
 
   const tokenHash = await sha256Hex(payload.peer_token);
   const expiresAt = now + WEBRTC_ROOM_TTL_SECONDS;
   try {
-    await env.DB.prepare(
-      "INSERT INTO webrtc_peers (code, peer_id, token_hash, expires_at) VALUES (?1, ?2, ?3, ?4)"
-    ).bind(code, peerId, tokenHash, expiresAt).run();
+    // Choosing and reserving a seat must be one database operation. Separate
+    // SELECT/INSERT calls made simultaneous classmates all choose peer 2.
+    // The credential check also makes an HTTP retry reuse its original seat.
+    await env.DB.prepare(`INSERT INTO webrtc_peers (code, peer_id, token_hash, expires_at)
+      SELECT ?1, seats.peer_id, ?2, ?3
+      FROM (SELECT 2 AS peer_id UNION ALL SELECT 3 UNION ALL SELECT 4) seats
+      WHERE seats.peer_id <= ?4
+        AND NOT EXISTS (SELECT 1 FROM webrtc_peers p WHERE p.code = ?1 AND p.peer_id = seats.peer_id)
+        AND NOT EXISTS (SELECT 1 FROM webrtc_peers p WHERE p.code = ?1 AND p.token_hash = ?2)
+        AND NOT EXISTS (SELECT 1 FROM webrtc_started_rooms s WHERE s.code = ?1)
+        AND EXISTS (SELECT 1 FROM webrtc_rooms r WHERE r.code = ?1 AND r.expires_at > ?5)
+      ORDER BY seats.peer_id LIMIT 1`
+    ).bind(code, tokenHash, expiresAt, settings?.max_players || 4, now).run();
   } catch {
     return json({ error: "참가자 번호를 배정하지 못했습니다. 다시 시도해 주세요." }, 409);
   }
+  const assigned = await env.DB.prepare(
+    "SELECT peer_id FROM webrtc_peers WHERE code = ?1 AND token_hash = ?2 AND peer_id != 1 AND expires_at > ?3"
+  ).bind(code, tokenHash, now).first();
+  if (!assigned) return json({ error: "게임방이 가득 찼거나 이미 시작되었습니다." }, 409);
+  const peerId = Number(assigned.peer_id);
+  // A successful retry advertises a fresh connection window. Renew the same
+  // credential's stored seat too, without letting an older request shorten it.
+  await env.DB.prepare(
+    "UPDATE webrtc_peers SET expires_at = MAX(expires_at, ?1) WHERE code = ?2 AND peer_id = ?3 AND token_hash = ?4"
+  ).bind(expiresAt, code, peerId, tokenHash).run();
   return json({ code, peer_id: peerId, host_peer_id: 1, expires_at: expiresAt,
     title: settings?.title || "에너지 모험", max_players: settings?.max_players || 4 }, 201);
 }

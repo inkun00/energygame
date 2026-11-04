@@ -9,31 +9,9 @@ const BUILDING_SIZE := Vector2(76, 62)
 const MAP_PADDING := Vector2(12, 12)
 const RECOVERY_VISUAL_TARGET := 70.0
 const MAP_TEXTURE: Texture2D = preload("res://assets/maps/energy_village_diorama.png")
-const TERRAIN_ZONES := {
-	"wind_plain": {"label": "바람 초원", "rect": Rect2(0.08, 0.06, 0.33, 0.30), "color": Color("78d9ba")},
-	"wind_coast": {"label": "바람 해안 절벽", "rect": Rect2(0.05, 0.28, 0.27, 0.34), "color": Color("58c4dd")},
-	"solar_field": {"label": "햇빛 평야", "rect": Rect2(0.60, 0.06, 0.35, 0.29), "color": Color("ffd362")},
-	"riverbank": {"label": "산골 강변", "rect": Rect2(0.42, 0.06, 0.19, 0.55), "color": Color("55bff2")},
-	"eco_city": {"label": "친환경 마을", "rect": Rect2(0.62, 0.33, 0.31, 0.29), "color": Color("88d77b")},
-	"grid_hub": {"label": "다리 옆 전력 광장", "rect": Rect2(0.39, 0.40, 0.23, 0.20), "color": Color("9aaeff")},
-	"tidal_lagoon": {"label": "바닷가 조력 석호", "rect": Rect2(0.05, 0.63, 0.40, 0.32), "color": Color("35d8d0")},
-	"nuclear_site": {"label": "안전 관리 고원", "rect": Rect2(0.37, 0.60, 0.28, 0.31), "color": Color("b9d3e6")},
-	"geothermal_field": {"label": "화산 지열 산지", "rect": Rect2(0.66, 0.59, 0.30, 0.35), "color": Color("f2a567")}
-}
-
-# 작은 건물 크기에 맞춰 각 지형을 여러 개의 세부 건설 셀로 나눕니다. 드롭
-# 위치는 가장 가까운 빈 셀로 스냅되어 길이나 강을 크게 덮지 않습니다.
-const PLACEMENT_CELLS := {
-	"wind_plain": [Vector2(0.18, 0.15), Vector2(0.31, 0.18), Vector2(0.20, 0.29), Vector2(0.34, 0.30)],
-	"wind_coast": [Vector2(0.19, 0.29), Vector2(0.30, 0.35), Vector2(0.22, 0.44), Vector2(0.16, 0.53)],
-	"solar_field": [Vector2(0.65, 0.18), Vector2(0.81, 0.13), Vector2(0.79, 0.23), Vector2(0.88, 0.31)],
-	"riverbank": [Vector2(0.48, 0.17), Vector2(0.53, 0.31), Vector2(0.47, 0.45), Vector2(0.54, 0.56)],
-	"eco_city": [Vector2(0.71, 0.36), Vector2(0.81, 0.41), Vector2(0.68, 0.51), Vector2(0.79, 0.49)],
-	"grid_hub": [Vector2(0.44, 0.44), Vector2(0.56, 0.44), Vector2(0.45, 0.55), Vector2(0.57, 0.55)],
-	"tidal_lagoon": [Vector2(0.14, 0.71), Vector2(0.29, 0.72), Vector2(0.16, 0.86), Vector2(0.34, 0.85)],
-	"nuclear_site": [Vector2(0.45, 0.64), Vector2(0.55, 0.64), Vector2(0.45, 0.72), Vector2(0.55, 0.72)],
-	"geothermal_field": [Vector2(0.77, 0.73), Vector2(0.85, 0.75), Vector2(0.78, 0.81), Vector2(0.90, 0.86)]
-}
+const PLACEMENT_RULES = preload("res://scripts/core/VillagePlacementRules.gd")
+const TERRAIN_ZONES = PLACEMENT_RULES.TERRAIN_ZONES
+const PLACEMENT_CELLS = PLACEMENT_RULES.PLACEMENT_CELLS
 
 var environment_health_visual := 0.0
 var placed_project_nodes: Dictionary = {}
@@ -100,9 +78,12 @@ func sync_projects(projects: Array, built_project_ids: Array[int], placements: D
 		var requested_position: Vector2 = placements.get(project_index, Vector2(-1, -1))
 		if requested_position.x < 0.0 or requested_position.y < 0.0:
 			requested_position = _default_position(project_index)
-		var cell_id := str(pending_project_cells.get(project_index, ""))
-		if cell_id.is_empty():
-			cell_id = _get_closest_cell_id(project_index, requested_position, true)
+		else:
+			requested_position *= size
+		# A different player may have won the same facility at another cell.
+		# Local reservations are requests; only the host's placement is final.
+		cancel_project_placement(project_index)
+		var cell_id := _get_closest_cell_id(project_index, requested_position, true)
 		if not cell_id.is_empty():
 			occupied_cell_ids[cell_id] = project_index
 			reserved_cell_ids.erase(cell_id)
@@ -132,9 +113,9 @@ func get_terrain_build_cell_center(terrain_id: String, cell_index: int = 0) -> V
 	return Vector2(cells[cell_index]) * size
 
 func cancel_project_placement(project_index: int) -> void:
-	var cell_id := str(pending_project_cells.get(project_index, ""))
-	if not cell_id.is_empty():
-		reserved_cell_ids.erase(cell_id)
+	for cell_id in reserved_cell_ids.keys():
+		if int(reserved_cell_ids[cell_id]) == project_index:
+			reserved_cell_ids.erase(cell_id)
 	pending_project_cells.erase(project_index)
 	queue_redraw()
 
@@ -217,7 +198,7 @@ func _drop_data(at_position: Vector2, data: Variant) -> void:
 	var snapped_position: Vector2 = candidate["position"]
 	selected_project_payload.clear()
 	_clear_drag_state()
-	project_drop_requested.emit(project_index, int(data["player_idx"]), snapped_position)
+	project_drop_requested.emit(project_index, int(data["player_idx"]), snapped_position / size)
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_DRAG_END:
@@ -340,7 +321,7 @@ func _has_valid_project_payload(data: Variant) -> bool:
 	if not drop_enabled or not data is Dictionary or data.get("kind", "") != "village_project":
 		return false
 	var project_index := int(data.get("project_index", -1))
-	return project_index >= 0 and project_index < GameManager.CONSTRUCTION_PROJECTS.size() and int(data.get("player_idx", -1)) >= 0 and not placed_project_nodes.has(project_index)
+	return project_index >= 0 and project_index < GameManager.CONSTRUCTION_PROJECTS.size() and int(data.get("player_idx", -1)) >= 0 and not placed_project_nodes.has(project_index) and not pending_project_cells.has(project_index)
 
 func _get_project_terrains(project_index: int) -> Array:
 	if project_index < 0 or project_index >= GameManager.CONSTRUCTION_PROJECTS.size():

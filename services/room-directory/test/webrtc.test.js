@@ -92,3 +92,78 @@ test("started rooms stay available for authenticated signaling but reject new ar
   await req("/123456", "DELETE", undefined, host);
   assert.equal(env.DB.db.prepare("SELECT COUNT(*) AS count FROM webrtc_started_rooms").get().count, 0);
 });
+
+test("three classmates can join together without competing for the same empty seat", async () => {
+  const env = { DB: new SqliteD1() }, req = client(env);
+  await req("", "POST", {code: "345678", host_token: host, max_players: 4});
+  const responses = await Promise.all(["a", "b", "c"].map(letter =>
+    req("/345678/join", "POST", {peer_token: letter.repeat(48)})));
+  assert.deepEqual(responses.map(response => response.status), [201, 201, 201]);
+  const peers = await Promise.all(responses.map(response => response.json()));
+  assert.deepEqual(peers.map(peer => peer.peer_id).sort(), [2, 3, 4]);
+  assert.equal((await (await req("")).json()).rooms[0].player_count, 4);
+});
+
+test("retried join requests reserve only one seat per participant credential", async () => {
+  const env = { DB: new SqliteD1() }, req = client(env);
+  await req("", "POST", {code: "345678", host_token: host, max_players: 4});
+  const responses = await Promise.all(Array.from({length: 3}, () =>
+    req("/345678/join", "POST", {peer_token: guest})));
+  assert.deepEqual(responses.map(response => response.status), [201, 201, 201]);
+  const peers = await Promise.all(responses.map(response => response.json()));
+  assert.deepEqual(peers.map(peer => peer.peer_id), [2, 2, 2]);
+  assert.equal((await (await req("/345678/join", "POST", {peer_token: guest})).json()).peer_id, 2);
+  assert.equal((await (await req("")).json()).rooms[0].player_count, 2);
+});
+
+test("retrying a join near expiration renews the stored seat until the advertised deadline", async t => {
+  let now = 1_793_824_800_000;
+  t.mock.method(Date, "now", () => now);
+  const env = { DB: new SqliteD1() }, req = client(env);
+  await req("", "POST", {code: "345678", host_token: host, max_players: 4});
+  const original = await (await req("/345678/join", "POST", {peer_token: guest})).json();
+  now += 119_000;
+  assert.equal((await req("/345678/signals", "GET", undefined, host)).status, 200);
+  const retried = await (await req("/345678/join", "POST", {peer_token: guest})).json();
+  assert.equal(retried.peer_id, original.peer_id);
+  assert.equal(retried.expires_at, Math.floor(now / 1000) + 120);
+  const stored = env.DB.db.prepare("SELECT expires_at FROM webrtc_peers WHERE code = '345678' AND peer_id = 2").get();
+  assert.equal(stored.expires_at, retried.expires_at);
+  now += 2_000;
+  assert.ok(Math.floor(now / 1000) > original.expires_at);
+  assert.equal((await req("/345678/signals", "GET", undefined, guest)).status, 200);
+  assert.equal((await (await req("")).json()).rooms[0].player_count, 2);
+});
+
+test("reusing an expired seat cannot deliver the previous participant's queued signaling", async () => {
+  const env = { DB: new SqliteD1() }, req = client(env);
+  await req("", "POST", {code: "345678", host_token: host, max_players: 4});
+  await req("/345678/join", "POST", {peer_token: guest});
+  await req("/345678/signals", "POST", {to_peer: 1, type: "offer", data: {sdp: "old-offer"}}, guest);
+  await req("/345678/signals", "POST", {to_peer: 2, type: "answer", data: {sdp: "old-answer"}}, host);
+  env.DB.db.exec("UPDATE webrtc_peers SET expires_at = 0 WHERE peer_id = 2");
+  const replacement = "r".repeat(48);
+  assert.equal((await (await req("/345678/join", "POST", {peer_token: replacement})).json()).peer_id, 2);
+  assert.deepEqual((await (await req("/345678/signals", "GET", undefined, replacement)).json()).signals, []);
+  assert.deepEqual((await (await req("/345678/signals", "GET", undefined, host)).json()).signals, []);
+  assert.equal((await req("/345678/signals", "GET", undefined, guest)).status, 401);
+});
+
+test("a game starting while a join is being prepared cannot admit an extra participant", async () => {
+  const env = { DB: new SqliteD1() }, req = client(env);
+  await req("", "POST", {code: "345678", host_token: host, max_players: 4});
+  const prepare = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = sql => {
+    const statement = prepare(sql);
+    if (sql.startsWith("INSERT INTO webrtc_peers")) {
+      const run = statement.run.bind(statement);
+      statement.run = async () => {
+        env.DB.db.exec("INSERT INTO webrtc_started_rooms (code) VALUES ('345678')");
+        return run();
+      };
+    }
+    return statement;
+  };
+  assert.equal((await req("/345678/join", "POST", {peer_token: guest})).status, 409);
+  assert.equal(env.DB.db.prepare("SELECT COUNT(*) AS count FROM webrtc_peers").get().count, 1);
+});

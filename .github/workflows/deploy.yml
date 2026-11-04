@@ -57,7 +57,7 @@ jobs:
             for pid in "${pids[@]}"; do wait "$pid" || result=1; done
             for role in "$@"; do
               cat "$role.log"
-              if grep -Eq 'SCRIPT ERROR|Parse Error|\[FAIL\]' "$role.log"; then result=1; fi
+              if grep -Eq 'SCRIPT ERROR|Parse Error|\[FAIL\]|^ERROR:' "$role.log"; then result=1; fi
             done
             return "$result"
           }
@@ -101,10 +101,19 @@ jobs:
             MiniGamesCauseEffectTest \
             MiniGamesBClarityTest \
             UiFlowRegressionTest \
+            FourPlayerUiStateTest \
+            FourPlayerConstructionRulesTest \
             FullGameSimulation; do
             godot --headless --path . --script "scripts/tests/${test}.gd" 2>&1 | tee "${test}.log"
-            if grep -Eq 'SCRIPT ERROR|Parse Error|\[FAIL\]' "${test}.log"; then exit 1; fi
+            if grep -Eq 'SCRIPT ERROR|Parse Error|\[FAIL\]|^ERROR:' "${test}.log"; then exit 1; fi
           done
+
+      - name: Verify four-player complete rules and simultaneous recovery
+        env:
+          GODOT_BIN: godot
+        run: |
+          node scripts/tests/run_four_player_online_test.cjs
+          node scripts/tests/run_four_player_transport_test.cjs
 
   build-and-deploy:
     needs: validate

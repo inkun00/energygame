@@ -17,6 +17,7 @@ signal room_list_received(rooms)
 signal room_list_failed(message)
 signal recovery_state_changed(state)
 signal session_restored
+signal game_action_rejected(action: String, payload: Dictionary)
 
 const DEFAULT_PORT: int = 8910
 const DISCOVERY_PORT: int = 8911
@@ -109,6 +110,11 @@ var _network_session := 0
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# All game actions go through the host. Relaying client-to-client traffic
+	# also sends peer notifications to already-closing ENet peers during a
+	# simultaneous connection loss; no game feature needs that relay.
+	if multiplayer is SceneMultiplayer:
+		(multiplayer as SceneMultiplayer).server_relay = false
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	multiplayer.connected_to_server.connect(_on_connected_to_server)
@@ -1242,6 +1248,8 @@ func _recovery_seconds_left() -> int:
 
 
 func _publish_recovery_state() -> void:
+	if not is_online or not is_host or not game_has_started:
+		return
 	var names: Array[String] = []
 	for player_idx in _pending_reconnects:
 		names.append(str(GameManager.players[int(player_idx)]["name"]))
@@ -1341,12 +1349,14 @@ func _on_peer_disconnected(id: int) -> void:
 	player_disconnected.emit(id)
 	if is_host:
 		if was_registered:
-			_broadcast_lobby_state()
+			_broadcast_lobby_state.call_deferred()
 		var player_idx := get_player_index_for_peer(id)
 		if game_has_started and player_idx >= 0 and player_idx < GameManager.players.size():
 			if not _pending_reconnects.has(player_idx):
 				_pending_reconnects[player_idx] = Time.get_ticks_msec() + int(RECONNECT_GRACE_SECONDS * 1000)
-			_publish_recovery_state()
+			# Finish this poll's disconnects before broadcasting to surviving peers.
+			get_tree().paused = true
+			_publish_recovery_state.call_deferred()
 		elif not game_has_started:
 			_peer_resume_tokens.erase(id)
 			_web_peer_generations.erase(id)
@@ -1479,7 +1489,13 @@ func _handle_game_action(sender_peer_id: int, action: String, payload: Dictionar
 				GameManager.claim_lap_reward(player_idx, str(payload.get("item_id", "")))
 		"build_project":
 			if int(payload.get("player_idx", -1)) == player_idx:
-				GameManager.build_village_project(int(payload.get("project_index", -1)), player_idx, payload.get("map_position", Vector2(-1, -1)))
+				var project_index := int(payload.get("project_index", -1))
+				if not GameManager.build_village_project(project_index, player_idx, payload.get("map_position", Vector2(-1, -1))):
+					var rejected := {"project_index": project_index}
+					if sender_peer_id == my_peer_id:
+						game_action_rejected.emit(action, rejected)
+					else:
+						_rpc_game_action_rejected.rpc_id(sender_peer_id, action, rejected)
 		"open_market_offer":
 			if int(payload.get("player_idx", -1)) == player_idx:
 				GameManager.submit_open_market_offer(player_idx, payload.get("offer", {}))
@@ -1495,6 +1511,11 @@ func _handle_game_action(sender_peer_id: int, action: String, payload: Dictionar
 		"evaluate_village":
 			if int(payload.get("player_idx", -1)) == player_idx:
 				GameManager.finish_village_construction(player_idx)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_game_action_rejected(action: String, payload: Dictionary) -> void:
+	game_action_rejected.emit(action, payload)
 
 
 func _broadcast_lobby_state() -> void:
