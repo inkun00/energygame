@@ -385,7 +385,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	hero.position = Vector3(hero_x, hero_y, 1.8)
 	hero.scale = Vector3.ONE * 2.1
 	if hero.shadow_mesh:
-		hero.shadow_mesh.visible = false
+		hero.shadow_mesh.visible = true
 	hero.call("_set_avatar_animation_state", false)
 	VISUAL_STYLE.style_hero(hero)
 
@@ -590,7 +590,7 @@ func _overflow() -> void:
 	charge = 0.0
 	result_label.text = "댐 넘침! 게임 오버\n생산 전력 %.1f kWh" % generated_kwh
 	result_label.visible = true
-	flash.color = Color("f05c4260")
+	flash.color = Color(0.94, 0.36, 0.26, VISUAL_STYLE.WARNING_FLASH_ALPHA)
 	arcade_event.emit(0, false, "댐이 넘쳤어요! 더 일찍 수문을 열어야 합니다.", false)
 	game_over.emit(generated_kwh)
 
@@ -614,6 +614,17 @@ func _animate_world(delta: float) -> void:
 			drop.position.y = 6.05 + float(drop_index % 5) * 0.17
 	if is_instance_valid(hero):
 		hero.position = Vector3(hero_x, hero_y, 1.8)
+		var contact_floor := hero_floor_index
+		if contact_floor < 0:
+			for candidate in range(2, -1, -1):
+				if hero_x >= PLATFORM_LEFT[candidate] and hero_x <= PLATFORM_RIGHT[candidate] and platform_height(candidate) <= hero_y:
+					contact_floor = candidate
+					break
+		if hero.shadow_mesh:
+			hero.shadow_mesh.visible = contact_floor >= 0
+		if contact_floor >= 0:
+			var surface_y := platform_height(contact_floor)
+			VISUAL_STYLE.update_contact_shadow(hero, surface_y, hero_y - surface_y)
 		var moving := absf(hero_move_axis) > 0.01 or hero_floor_index < 0
 		if hero.is_moving != moving:
 			hero.call("_set_avatar_animation_state", moving)

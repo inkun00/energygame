@@ -96,30 +96,32 @@ async function main() {
       await page.waitForTimeout(350);
       const guide = await page.screenshot({path: path.join(screenshotRoot, `${id}-guide.png`)});
       await page.locator('#canvas').click({position: {x: Math.floor(viewportSize.width / 2), y: Math.floor(viewportSize.height / 2)}});
-      if (verifyPractice && id === 'hydro_gate') {
-        await page.keyboard.press('KeyP');
+      if (verifyPractice) {
+        await page.keyboard.press('KeyP', {delay: 160});
         await page.waitForTimeout(700);
         const practice = await page.screenshot({path: path.join(screenshotRoot, `${id}-practice.png`)});
-        if (await differentPixels(guide, practice) < 0.08) throw new Error('Hydro practice did not open');
-        await page.keyboard.down('KeyA');
+        if (await differentPixels(guide, practice) < 0.08) throw new Error(`${id}: practice did not open`);
+        const movementKey = id === 'grid_balance' ? 'KeyW' : ['hydro_gate', 'battery_relay', 'energy_sort'].includes(id) ? 'KeyA' : 'KeyD';
+        await page.keyboard.down(movementKey);
         await page.waitForTimeout(750);
-        await page.keyboard.up('KeyA');
-        for (let tap = 0; tap < 3; tap++) {
+        await page.keyboard.up(movementKey);
+        if (id === 'eco_commute') await page.keyboard.press('KeyS', {delay: 180});
+        for (let tap = 0; tap < (id === 'hydro_gate' ? 3 : 1); tap++) {
           await page.keyboard.down('Space');
           await page.waitForTimeout(100);
           await page.keyboard.up('Space');
           await page.waitForTimeout(100);
         }
         await page.waitForTimeout(750);
-        await page.keyboard.press('KeyE');
-        await page.keyboard.press('Escape');
-        await page.waitForTimeout(350);
+        if (id === 'hydro_gate') await page.keyboard.press('KeyE', {delay: 160});
+        await page.keyboard.press('Escape', {delay: 160});
+        await page.waitForTimeout(650);
         const afterPractice = await page.screenshot({path: path.join(screenshotRoot, `${id}-after-practice.png`)});
-        if (await differentPixels(practice, afterPractice) < 0.08) throw new Error('Hydro practice did not return to its guide');
-        if (await differentPixels(guide, afterPractice) > 0.08) throw new Error('Hydro guide did not reset after practice');
-        console.log('[BrowserSmoke] Hydro practice, real keyboard actions, and guide return passed');
+        if (await differentPixels(practice, afterPractice) < 0.08) throw new Error(`${id}: practice did not return to its guide`);
+        if (await differentPixels(guide, afterPractice) > 0.08) throw new Error(`${id}: guide did not reset after practice`);
+        console.log(`[BrowserSmoke] ${id} practice, real keyboard actions, and guide return passed`);
       }
-      await page.keyboard.press('Enter');
+      await page.keyboard.press('Enter', {delay: 160});
       await page.waitForTimeout(4800);
       const playing = await page.screenshot({path: path.join(screenshotRoot, `${id}-playing.png`)});
       const changed = await differentPixels(guide, playing);

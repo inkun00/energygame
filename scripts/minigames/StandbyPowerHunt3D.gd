@@ -151,11 +151,11 @@ func _build_world() -> void:
 	standby_led_material = _material(Color("ffc66b"), true)
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 7.2
-	camera.position = Vector3(4.3, 3.45, 12.0)
+	camera.size = 6.2
+	camera.position = Vector3(4.3, 2.9, 12.0)
 	camera.current = true
 	world.add_child(camera)
-	camera.look_at(Vector3(4.3, 2.25, 0.0), Vector3.UP)
+	camera.look_at(Vector3(4.3, 1.45, 0.0), Vector3.UP)
 
 func _spawn_hero(player_data: Dictionary) -> void:
 	hero = PLAYER_PAWN.new()
@@ -210,8 +210,8 @@ func _build_upper_route() -> void:
 		_apply_model_tint(platform, Color("d9b47b"))
 		platform_records.append(spec)
 	var sign := Label3D.new()
-	sign.text = "↑ 점프해서 위층 기기도 확인!"
-	sign.position = Vector3(28.5, 4.0, 0.6)
+	sign.text = "위층 기기 ↑"
+	sign.position = Vector3(28.5, 3.55, 0.6)
 	sign.font_size = 40
 	sign.pixel_size = 0.006
 	sign.no_depth_test = true
@@ -219,19 +219,25 @@ func _build_upper_route() -> void:
 
 func _build_house_shell() -> void:
 	for tile_x in range(48):
-		_place_model(FLOOR, Vector3(float(tile_x) + 0.5, -0.02, 0.0), 1.02, 0.0, "Floor")
+		# The source floor spans local z=-1..0, while the runner uses z=1.
+		# Extend the SAME CC0 floor across the visible walking lane, so feet and
+		# contact shadows have a surface rather than floating in front of a shelf.
+		var floor_model := _place_model(FLOOR, Vector3(float(tile_x), -0.02, 1.65), 1.02, 0.0, "Floor")
+		floor_model.scale.z = 3.0
 	for wall_x in range(0, 48, 2):
 		var wall_scene: PackedScene = WALL_WINDOW if wall_x % 12 == 4 else WALL
-		_place_model(wall_scene, Vector3(float(wall_x) + 1.0, 0.0, -1.35), 1.0, 0.0, "Wall")
+		# CC0 wall modules are 1m wide and 1.29m tall. The previous 2m
+		# spacing at scale 1 left alternating holes and child-height walls.
+		_place_model(wall_scene, Vector3(float(wall_x), 0.0, -1.35), 2.0, 0.0, "Wall")
 	for boundary in [0.0, 12.0, 24.0, 36.0, 48.0]:
-		_place_model(WALL_DOOR, Vector3(boundary, 0.0, -0.65), 1.0, 90.0, "RoomDivider")
+		_place_model(WALL_DOOR, Vector3(boundary, 0.0, -0.65), 2.0, 90.0, "RoomDivider")
 	for room_index in range(4):
 		var room_center := 6.0 + float(room_index) * 12.0
 		var label := Label3D.new()
-		label.position = Vector3(room_center, 4.75, -0.8)
+		label.position = Vector3(room_center, 3.05, -0.8)
 		label.text = ["거실", "주방", "침실", "세탁실"][room_index]
-		label.font_size = 48
-		label.pixel_size = 0.007
+		label.font_size = 40
+		label.pixel_size = 0.006
 		label.outline_size = 8
 		label.modulate = Color("fff1bf")
 		course_root.add_child(label)
@@ -247,7 +253,7 @@ func _build_room_decor() -> void:
 	_place_model(SIDE_TABLE, Vector3(30.0, 0, -0.55), 1.25, 0, "SideTable")
 	_place_model(TABLE_LAMP, Vector3(30.0, 1.0, -0.55), 1.1, 0, "BedLamp")
 	_place_model(BOOKCASE, Vector3(34.4, 0, -0.65), 1.3, 0, "Bookcase")
-	_place_model(CEILING_FAN, Vector3(33.0, 5.1, -0.2), 1.35, 0, "CeilingFan")
+	_place_model(CEILING_FAN, Vector3(33.0, 3.3, -0.2), 1.35, 0, "CeilingFan")
 	_place_model(DOOR, Vector3(46.2, 0, -0.6), 1.25, 0, "ExitDoor")
 
 func _build_jump_barriers() -> void:
@@ -370,7 +376,7 @@ func _process(delta: float) -> void:
 		hero.avatar_sprite.flip_h = run_velocity < -0.1
 	var look_x := clampf(hero.position.x + 2.3, 4.3, COURSE_END - 4.3)
 	camera.position.x = lerpf(camera.position.x, look_x, 1.0 - exp(-delta * 5.5))
-	camera.look_at(Vector3(camera.position.x, 2.25, 0.0), Vector3.UP)
+	camera.look_at(Vector3(camera.position.x, 1.45, 0.0), Vector3.UP)
 	_update_device_passes()
 	_update_hud()
 	var space_down := MINIGAME_INPUT.is_pressed(KEY_SPACE)
@@ -395,8 +401,7 @@ func _update_jump(delta: float) -> void:
 		if hero.position.y <= landing_height:
 			hero.position.y = landing_height
 			vertical_velocity = 0.0
-	if hero.has_method("_update_ground_shadow"):
-		hero.call("_update_ground_shadow", floor_height, hero.position.y - floor_height)
+	VISUAL_STYLE.update_contact_shadow(hero, floor_height, hero.position.y - floor_height)
 
 func _floor_height_at(x_pos: float, y_pos: float) -> float:
 	var height := GROUND_Y
@@ -494,15 +499,15 @@ func _resolve_device(record: Dictionary, disconnect: bool) -> void:
 		if is_instance_valid(plug):
 			plug.material_override = safe_material if is_waste else danger_material
 			var tween := create_tween().set_parallel(true)
-			tween.tween_property(plug, "position:y", plug.position.y + 0.8, 0.32).set_trans(Tween.TRANS_BACK)
-			tween.tween_property(plug, "rotation_degrees:z", 45.0, 0.32)
+			tween.tween_property(plug, "position", plug.position + Vector3(0.30, -0.08, 0.12), 0.24).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			tween.tween_property(plug, "rotation_degrees:z", -20.0, 0.24)
 		if is_waste:
 			var points := score_for_saved_watts(watts)
 			saved_watts += watts
 			status.text = "%s\n차단 완료 · 0 W" % device_name
 			status.modulate = Color("79efaa")
 			arcade_event.emit(points, true, "%s의 대기전력 %d W를 차단했어요. 누적 %d W" % [device_name, watts, saved_watts], true)
-			_flash(Color("55e79c35"))
+			_flash(Color(0.33, 0.90, 0.61, VISUAL_STYLE.SUCCESS_FLASH_ALPHA))
 		else:
 			status.text = "%s\n사용 중 전원 차단!" % device_name
 			status.modulate = Color("ff6c60")
@@ -583,6 +588,8 @@ func _build_overlay() -> void:
 	help.add_theme_constant_override("outline_size", 5)
 	add_child(help)
 	room_label = _overlay_label(Vector2(14, 39), Vector2(300, 70), "현재 위치  거실", HORIZONTAL_ALIGNMENT_LEFT, Color("8bf2d1"))
+	# The room name is already placed above its room in the house itself.
+	room_label.visible = false
 	progress_label = _overlay_label(Vector2(740, 9), Vector2(946, 40), "집 1", HORIZONTAL_ALIGNMENT_RIGHT, Color("fff0b3"))
 	progress_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	progress_label.offset_left = -200.0
@@ -621,6 +628,7 @@ func _overlay_label(from: Vector2, to: Vector2, text_value: String, alignment: H
 	return label
 
 func _flash(color: Color) -> void:
+	color.a = minf(color.a, VISUAL_STYLE.WARNING_FLASH_ALPHA)
 	flash.color = color
 	create_tween().tween_property(flash, "color:a", 0.0, 0.30)
 

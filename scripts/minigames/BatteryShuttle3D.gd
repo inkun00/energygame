@@ -339,6 +339,7 @@ func _try_station_action() -> void:
 		interaction_cooldown = 0.23
 
 func _flash(color: Color) -> void:
+	color.a = minf(color.a, VISUAL_STYLE.SUCCESS_FLASH_ALPHA)
 	flash.color = color
 	flash_remaining = 0.20
 

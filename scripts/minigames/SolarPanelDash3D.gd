@@ -420,6 +420,7 @@ func _update_hero_physics(delta: float) -> void:
 	hero_body.position.x = clampf(hero_body.position.x, LANES[0], LANES[2])
 	jump_velocity = hero_body.velocity.y
 	jump_height = maxf(0.0, hero_body.position.y - GROUND_Y)
+	VISUAL_STYLE.update_contact_shadow(hero, GROUND_Y, jump_height)
 	_handle_physical_collisions()
 	# 좌우 이동과 점프가 스프라이트만 움직이는 느낌이 들지 않도록 살짝 기울입니다.
 	hero.rotation.z = lerpf(hero.rotation.z, -direction * 0.12, clampf(delta * 8.0, 0.0, 1.0))
@@ -618,7 +619,7 @@ func _tint_model(model_root: Node3D, material: StandardMaterial3D) -> void:
 func _show_collision_flash() -> void:
 	var flash := ColorRect.new()
 	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	flash.color = Color(1.0, 0.18, 0.08, 0.30)
+	flash.color = Color(1.0, 0.18, 0.08, VISUAL_STYLE.WARNING_FLASH_ALPHA)
 	flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(flash)
 	var tween := create_tween()

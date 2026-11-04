@@ -60,7 +60,7 @@ func _capture(name: String) -> void:
 	await process_frame
 	await RenderingServer.frame_post_draw
 	DirAccess.make_dir_recursive_absolute("res://.godot/qa-audit-b/clarity")
-	root.get_texture().get_image().save_png("res://.godot/qa-audit-b/clarity/%s.png" % name)
+	root.get_texture().get_image().save_png("res://.godot/qa-audit-b/clarity/%s-%dx%d.png" % [name, root.size.x, root.size.y])
 
 func _test_sort() -> bool:
 	var game := _open_game("energy_sort")
@@ -136,10 +136,23 @@ func _test_bus() -> bool:
 	_check(game.get_finish_animation_seconds() > 3.0 and game.get_finish_animation_seconds() < 4.0, "All 45 walking animations fit the existing bounded result handoff")
 	var final_score: int = modal.score
 	var delivered: int = game.delivered_total
+	var objects_before: int = game.world.get_child_count()
+	var observed_exits: Dictionary = {}
+	var used_models: Dictionary = {}
+	var peak_models := 0
 	game.begin_finish_animation()
-	game.advance_finish_animation(0.85)
-	await _capture("bus-three-lane-entry")
-	for tick in range(240): game.advance_finish_animation(1.0 / 60.0)
+	for tick in range(240):
+		game.advance_finish_animation(1.0 / 60.0)
+		var visible_models := 0
+		for record in game.dropped_students:
+			if is_instance_valid(record["node"]):
+				visible_models += 1
+				observed_exits[float(record["delay"])] = true
+				used_models[record["node"].get_instance_id()] = true
+		peak_models = maxi(peak_models, visible_models)
+		if tick == 51: await _capture("bus-three-lane-entry")
+	_check(observed_exits.size() == 45 and peak_models <= 9 and used_models.size() <= 9, "All 45 pupils visibly leave using at most nine pooled models")
+	_check(game.world.get_child_count() == objects_before, "School entry reuses prewarmed pupils without new model allocations")
 	_check(not game.has_pending_finish_animation() and game.elapsed == 60.0 and game.bus_x == 56.8 and game.delivered_total == delivered and modal.score == final_score, "Cosmetic entry preserves the submitted time, position, learning count and score")
 	return true
 
@@ -154,6 +167,7 @@ func _test_heat() -> bool:
 	game.hero.position.x = game.hero_x
 	game._animate_heat(0.4)
 	game._update_overlay()
+	_check(window["particles"][0].mesh is QuadMesh and window["particles"][0].material_override.albedo_texture is GradientTexture2D, "Hot air uses shared soft streaks instead of solid red blocks")
 	_check(str(window["status"].text).contains("열림") and window["particles"][0].visible, "Open windows pair a visible opening with incoming hot air and a written state")
 	var first_particle: Vector3 = window["particles"][0].position
 	game.elapsed += 0.2

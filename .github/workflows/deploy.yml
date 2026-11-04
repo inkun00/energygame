@@ -88,6 +88,9 @@ jobs:
             QuizMultipleChoiceTest \
             QuizReviewedDataTest \
             HydroPracticeTest \
+            AllMiniGamePracticeTest \
+            EndingPresentationTest \
+            RenderQualityTest \
             MiniGameVisualStyleTest \
             QuizMarketTransitionTest \
             OpenMarketCraftAssistTest \

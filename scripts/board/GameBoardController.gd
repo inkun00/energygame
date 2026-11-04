@@ -8,6 +8,7 @@ const BoardItemPickup3D = preload("res://scripts/board/BoardItemPickup3D.gd")
 const SpecialSkillEffect3D = preload("res://scripts/effects/SpecialSkillEffect3D.gd")
 const EnergyFairyVillage3D = preload("res://scripts/board/EnergyFairyVillage3D.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
+const RENDER_QUALITY = preload("res://scripts/performance/RenderQuality.gd")
 
 @onready var viewport: SubViewport = $ViewportContainer/SubViewport
 @onready var viewport_container: SubViewportContainer = $ViewportContainer
@@ -56,6 +57,11 @@ var camera_restore_start_focus := Vector3.ZERO
 var camera_restore_start_distance := 32.0
 var board_active_player_idx := -1
 var movement_route_tiles: Array[int] = []
+var board_surface_active := false
+var board_render_warmup := false
+var board_presentation_suspended := true
+var board_snapshot_pending := false
+var board_snapshot_session := -1
 
 ## 이전 최대 확대(220%)보다 정확히 30% 더 가까운 거리 = 286% 확대입니다.
 const CAMERA_MIN_DISTANCE := 6.53846
@@ -70,6 +76,11 @@ const CAMERA_FOLLOW_HOLD_SECONDS := 1.25
 const CAMERA_RESTORE_SECONDS := 0.48
 
 func set_board_active(is_active: bool) -> void:
+	board_surface_active = is_active
+	board_render_warmup = false
+	if not is_active:
+		board_snapshot_pending = false
+		board_snapshot_session = -1
 	visible = is_active
 	if is_instance_valid(minigame_modal):
 		minigame_modal.set_surface_enabled(is_active)
@@ -79,9 +90,78 @@ func set_board_active(is_active: bool) -> void:
 		modals_layer.visible = is_active
 	if is_instance_valid(viewport):
 		viewport.get_parent().visible = is_active
-		viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if is_active else SubViewport.UPDATE_DISABLED
-	if is_instance_valid(energy_fairy_village):
-		energy_fairy_village.set_process(is_active)
+	_refresh_board_render_budget()
+
+func _board_overlay_is_visible() -> bool:
+	if (is_instance_valid(quiz_modal) and quiz_modal.visible) or (is_instance_valid(minigame_modal) and minigame_modal.visible):
+		return true
+	if is_instance_valid(hud):
+		for path in ["VictoryModal", "OpenMarketDimmer"]:
+			var overlay := hud.get_node_or_null(path) as CanvasItem
+			if overlay and overlay.visible:
+				return true
+		var planner: Variant = hud.get("adventure_planner")
+		if is_instance_valid(planner) and planner.catalog.visible:
+			return true
+	return GameManager.adventure_waiting_for_start
+
+func _refresh_board_render_budget() -> void:
+	var awake := board_render_warmup or (board_surface_active and visible and not _board_overlay_is_visible())
+	board_presentation_suspended = not awake
+	RENDER_QUALITY.set_board_world_awake(viewport, energy_fairy_village, player_pawns, tile_markers, awake)
+	if not awake and board_snapshot_pending and board_surface_active and visible:
+		viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+
+func _request_board_snapshot() -> void:
+	# Reusing a frozen viewport must not reuse the previous adventure's pawns.
+	# Refresh exactly once after setup/restore, without waking visual animation.
+	if not board_surface_active or not visible or not board_presentation_suspended:
+		return
+	var player_idx := GameManager.current_turn_idx
+	if player_idx >= 0 and player_idx < player_pawns.size():
+		_cancel_camera_follow()
+		if camera_zoom_tween and camera_zoom_tween.is_valid():
+			camera_zoom_tween.kill()
+		var pawn_position := player_pawns[player_idx].position
+		camera_focus = Vector3(pawn_position.x, 0.0, pawn_position.z)
+		# Match ordinary turn focus, retaining the selected pitch/yaw and any
+		# closer manual zoom; do not wait for a tween behind a frozen overlay.
+		camera_distance = minf(camera_distance, CAMERA_FOLLOW_DISTANCE)
+		_apply_camera_transform()
+	var session := GameManager.game_session_id
+	if board_snapshot_pending and board_snapshot_session == session:
+		return
+	board_snapshot_pending = true
+	board_snapshot_session = session
+	_refresh_board_render_budget()
+	var completed := _on_board_snapshot_completed.bind(session)
+	if DisplayServer.get_name() == "headless":
+		# CI has no drawn pixels; model the single presentation tick explicitly.
+		get_tree().process_frame.connect(completed, CONNECT_ONE_SHOT)
+	else:
+		RenderingServer.frame_post_draw.connect(completed, CONNECT_ONE_SHOT)
+
+func _on_board_snapshot_completed(session: int) -> void:
+	if session != GameManager.game_session_id or session != board_snapshot_session:
+		return
+	board_snapshot_pending = false
+	board_snapshot_session = -1
+	if board_presentation_suspended:
+		viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+
+func _connect_board_render_budget() -> void:
+	visibility_changed.connect(_refresh_board_render_budget)
+	quiz_modal.visibility_changed.connect(_refresh_board_render_budget)
+	minigame_modal.visibility_changed.connect(_refresh_board_render_budget)
+	for path in ["VictoryModal", "OpenMarketDimmer"]:
+		var overlay := hud.get_node_or_null(path) as CanvasItem
+		if overlay:
+			overlay.visibility_changed.connect(_refresh_board_render_budget)
+	var planner: Variant = hud.get("adventure_planner")
+	if is_instance_valid(planner):
+		planner.catalog.visibility_changed.connect(_refresh_board_render_budget)
+	GameManager.adventure_preparation_changed.connect(func(_state: Dictionary): _refresh_board_render_budget())
+	_refresh_board_render_budget()
 
 func _ready() -> void:
 	# CanvasLayer는 숨겨진 부모와 별개로 표시될 수 있으므로, 로비 단계에서는
@@ -118,6 +198,7 @@ func _ready() -> void:
 		GameManager.village_construction_started.connect(_on_village_construction_started)
 		GameManager.minigame_finished.connect(_on_minigame_finished)
 	NetworkManager.session_restored.connect(_on_session_restored)
+	_connect_board_render_budget()
 
 func _on_session_restored() -> void:
 	_cancel_camera_follow()
@@ -141,6 +222,7 @@ func _on_session_restored() -> void:
 	elif GameManager.village_construction_active:
 		GameManager.village_construction_started.emit(GameManager.get_player_inventories())
 	_on_minigame_finished([])
+	_request_board_snapshot()
 
 func _build_energy_fairy_village_backdrop() -> void:
 	if is_instance_valid(energy_fairy_village):
@@ -450,6 +532,7 @@ func _spawn_3d_tile_markers() -> void:
 		var marker = TileMarker3D.new()
 		tiles_container.add_child(marker)
 		marker.setup_tile_3d(i)
+		marker.set_process(false)
 		tile_markers.append(marker)
 
 func _reset_tile_item_pickups() -> void:
@@ -559,6 +642,7 @@ func _on_special_skill_tile_targets_changed(tile_indices: Array) -> void:
 		var tile_index := int(tile_index_variant)
 		if tile_index >= 0 and tile_index < tile_markers.size() and is_instance_valid(tile_markers[tile_index]):
 			tile_markers[tile_index].set_skill_targetable(true)
+	_refresh_board_render_budget()
 
 func _activate_tile(tile_index: int) -> void:
 	if tile_index < 0 or tile_index >= tile_markers.size():
@@ -628,6 +712,7 @@ func start_board_game(player_configs: Array[Dictionary], duration_seconds: int =
 	_reset_kingdom_visuals()
 	# 기존 말 정리
 	for child in pawns_container.get_children():
+		pawns_container.remove_child(child)
 		child.queue_free()
 	player_pawns.clear()
 	
@@ -647,9 +732,11 @@ func start_board_game(player_configs: Array[Dictionary], duration_seconds: int =
 		VISUAL_STYLE.style_hero(pawn)
 		player_pawns.append(pawn)
 	_refresh_board_player_focus(GameManager.current_turn_idx)
+	_refresh_board_render_budget()
 		
 	if hud and hud.has_method("initialize_hud"):
 		hud.initialize_hud()
+	_request_board_snapshot()
 		
 	var started_session := GameManager.game_session_id
 	get_tree().create_timer(0.1, false).timeout.connect(func():
@@ -673,10 +760,12 @@ func begin_render_warmup() -> void:
 	# HTML 로딩 화면 뒤에서 실제 3D 보드를 몇 프레임 렌더링해 WebGL 셰이더를
 	# 미리 컴파일합니다. HUD와 모달은 로비 위로 나타나지 않게 유지합니다.
 	visible = true
+	board_render_warmup = true
 	viewport_container.visible = true
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	ui_layer.visible = false
 	modals_layer.visible = false
+	_refresh_board_render_budget()
 
 func end_render_warmup() -> void:
 	set_board_active(false)

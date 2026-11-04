@@ -34,6 +34,7 @@ signal tutorial_turn_finished
 # leaving the board both clear it before another adventure can start.
 var guided_tutorial_active := false
 var guided_tutorial_step := ""
+var local_minigame_practice_round_id := -1
 
 enum TurnState {
 	WAIT_ACTION,
@@ -359,6 +360,7 @@ func _process(delta: float) -> void:
 
 # 게임 초기화 (로비에서 호출)
 func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAULT_GAME_DURATION_SECONDS) -> void:
+	local_minigame_practice_round_id = -1
 	game_session_id += 1
 	guided_tutorial_active = false
 	guided_tutorial_step = ""
@@ -500,6 +502,7 @@ func setup_game(player_configs: Array[Dictionary], duration_seconds: int = DEFAU
 	status_message_posted.emit(party_message)
 
 func stop_game() -> void:
+	local_minigame_practice_round_id = -1
 	game_session_id += 1
 	guided_tutorial_active = false
 	guided_tutorial_step = ""
@@ -1063,6 +1066,17 @@ func _schedule_ai_minigame_scores(round_duration: float, minigame_id: String) ->
 			_ai_minigame_due_seconds[player_idx] = delay
 			_schedule_game_action(delay, _submit_ai_minigame_score.bind(player_idx, minigame_round_count))
 
+func set_local_minigame_practice(round_id: int, practicing: bool) -> void:
+	# Offline pupils may finish practice before the ready timer starts again.
+	# Online practice never delays the host or any other participant.
+	if not practicing:
+		if local_minigame_practice_round_id == round_id:
+			local_minigame_practice_round_id = -1
+		return
+	if not NetworkManager.is_online and round_id >= 0 and int(active_minigame.get("round_id", -2)) == round_id and str(active_minigame.get("phase", "")) == "ready":
+		local_minigame_practice_round_id = round_id
+		minigame_guide_timeout = 45.0
+
 func _update_minigame(delta: float) -> void:
 	var phase := str(active_minigame.get("phase", ""))
 	if phase == "ready":
@@ -1074,7 +1088,7 @@ func _update_minigame(delta: float) -> void:
 			_start_minigame_countdown()
 			return
 		minigame_guide_timeout -= delta
-		if guided_tutorial_active:
+		if guided_tutorial_active or (not NetworkManager.is_online and local_minigame_practice_round_id >= 0 and local_minigame_practice_round_id == int(active_minigame.get("round_id", -2))):
 			minigame_guide_timeout = 45.0
 		if minigame_guide_timeout <= 0.0:
 			_start_minigame_countdown()

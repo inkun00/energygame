@@ -27,7 +27,9 @@ const BRAKE := 15.0
 const COAST_DRAG := 1.3
 const START_ENERGY := 3.0
 const ENERGY_PER_DISTANCE := 0.15
-const DROPOFF_SECONDS := 1.8
+const DROPOFF_SECONDS := 0.65
+const DROPOFF_BATCH_GAP := 0.225
+const MAX_VISIBLE_DROPOFF := 9
 
 var viewport: SubViewport
 var world: Node3D
@@ -39,6 +41,7 @@ var parking_reference: Label3D
 var bus_door_open := 0.0
 var segments: Dictionary = {}
 var dropped_students: Array[Dictionary] = []
+var dropoff_pool: Array[Dictionary] = []
 var boarding_students: Array[Dictionary] = []
 var passenger_label: Label
 var efficiency_label: Label
@@ -93,8 +96,7 @@ func setup(_player_data: Dictionary, game_seed: int) -> void:
 		(segments[index] as Dictionary)["root"].queue_free()
 	segments.clear()
 	for record in dropped_students:
-		if is_instance_valid(record["node"]):
-			(record["node"] as Node3D).queue_free()
+		_release_dropoff_student(record)
 	dropped_students.clear()
 	boarding_students.clear()
 	_ensure_segments()
@@ -185,7 +187,50 @@ func _build_world() -> void:
 	parking_reference.font_size = 52
 	parking_reference.pixel_size = 0.009
 	parking_reference.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_build_dropoff_pool()
 	_update_camera_and_bus()
+
+func _build_dropoff_pool() -> void:
+	# Nine prewarmed pupils are reused for all 45 exits. The remaining pupils
+	# wait inside the bus; no 45-model crowd or repeated material setup occurs.
+	for index in range(MAX_VISIBLE_DROPOFF):
+		var scene: PackedScene = STUDENT_A if index % 2 == 0 else STUDENT_B
+		var student := scene.instantiate() as Node3D
+		student.name = "SchoolEntryPupil%d" % index
+		student.scale = Vector3.ONE * 0.42
+		student.visible = false
+		world.add_child(student)
+		VISUAL_STYLE.prepare_imported(student)
+		var animator := student.find_child("AnimationPlayer", true, false) as AnimationPlayer
+		if animator:
+			animator.stop()
+		dropoff_pool.append({"node": student, "animator": animator, "in_use": false})
+
+func _acquire_dropoff_student(record: Dictionary) -> bool:
+	for index in range(dropoff_pool.size()):
+		var slot: Dictionary = dropoff_pool[index]
+		if bool(slot["in_use"]):
+			continue
+		slot["in_use"] = true
+		record["pool_index"] = index
+		record["node"] = slot["node"]
+		(slot["node"] as Node3D).visible = true
+		var animator := slot["animator"] as AnimationPlayer
+		if animator:
+			animator.play("sprint")
+		return true
+	return false
+
+func _release_dropoff_student(record: Dictionary) -> void:
+	var index := int(record.get("pool_index", -1))
+	if index >= 0 and index < dropoff_pool.size():
+		var slot: Dictionary = dropoff_pool[index]
+		(slot["node"] as Node3D).visible = false
+		if slot["animator"] != null:
+			(slot["animator"] as AnimationPlayer).stop()
+		slot["in_use"] = false
+	record["node"] = null
+	record["pool_index"] = -1
 
 func _build_bus_door() -> void:
 	# 원본 CC BY 버스는 단일 메시라 문만 분리할 수 없습니다. 차체 옆에
@@ -475,7 +520,7 @@ func _attempt_pickup() -> void:
 	else:
 		_notice("학생 %d명 탑승! 함께 탈수록 1인당 에너지가 줄어요." % boarding)
 	arcade_event.emit(0, true, "학생 %d명 탑승 · 앞으로 달리세요" % boarding, false)
-	flash.color = Color("8de9b236")
+	flash.color = Color(Color("8de9b2"), VISUAL_STYLE.SUCCESS_FLASH_ALPHA)
 	flash_remaining = 0.20
 	_update_visuals()
 
@@ -503,7 +548,7 @@ func _unload_at_school(school_x: float) -> void:
 		delivered_total += passengers
 		arcade_event.emit(earned, true, "학생 %d명 도착 · 같은 길을 혼자 타면 %.1f, 함께 타면 1인당 %.1f" % [passengers, last_trip_solo_energy, per_person], passengers >= 2)
 		_notice("학교 도착! 함께 탄 %d명의 1인당 에너지 %.1f" % [passengers, per_person])
-		flash.color = Color("ffe77e42")
+		flash.color = Color(Color("ffe77e"), VISUAL_STYLE.SUCCESS_FLASH_ALPHA)
 		flash_remaining = 0.25
 	else:
 		_notice("빈 버스로 학교에 왔어요. 다음 정류장에서 학생을 태워 보세요!")
@@ -512,12 +557,12 @@ func _unload_at_school(school_x: float) -> void:
 	trip_index += 1
 
 func _spawn_dropoff_students(school_x: float, count: int) -> void:
-	# Three separated lanes let all 45 pupils visibly enter in under four
-	# seconds, without stretching the competition or changing awarded points.
+	# Three pupils leave at a time and clear the doorway before the next batch.
+	# The full 45-person flow lasts 3.85 s, with at most nine models visible.
 	for student_index in range(count):
 		var lane := student_index % 3 - 1
 		var start_x := bus_x + 1.08 + float(lane) * 0.08
-		var delay := float(int(student_index / 3)) * 0.12 + float(student_index % 3) * 0.055
+		var delay := float(int(student_index / 3)) * DROPOFF_BATCH_GAP + float(student_index % 3) * 0.025
 		dropped_students.append({"node": null, "age": 0.0, "delay": delay, "start_x": start_x, "lane": lane, "school_x": school_x, "entrance_x": school_x + SCHOOL_ENTRANCE_OFFSET, "variant": student_index % 2})
 
 static func dropoff_path_position(record: Dictionary, progress: float) -> Vector3:
@@ -560,24 +605,17 @@ func _animate_dropoff_students(delta: float) -> void:
 		record["age"] = float(record["age"]) + delta
 		if float(record["age"]) < float(record["delay"]):
 			continue
-		if not is_instance_valid(record["node"]):
-			var student_scene: PackedScene = STUDENT_A if int(record["variant"]) == 0 else STUDENT_B
-			var new_student := student_scene.instantiate() as Node3D
-			new_student.scale = Vector3.ONE * 0.42
-			new_student.position = Vector3(float(record["start_x"]), 0.335, 1.98)
-			world.add_child(new_student)
-			VISUAL_STYLE.prepare_imported(new_student)
-			var animator := new_student.find_child("AnimationPlayer", true, false) as AnimationPlayer
-			if animator:
-				animator.play("walk")
-			record["node"] = new_student
-		var student := record["node"] as Node3D
 		var progress := clampf((float(record["age"]) - float(record["delay"])) / DROPOFF_SECONDS, 0.0, 1.0)
+		if progress >= 1.0:
+			_release_dropoff_student(record)
+			dropped_students.remove_at(index)
+			continue
+		if not is_instance_valid(record["node"]):
+			if not _acquire_dropoff_student(record):
+				continue
+		var student := record["node"] as Node3D
 		student.position = dropoff_path_position(record, progress)
 		_face_student(student, dropoff_path_position(record, minf(1.0, progress + 0.01)) - student.position)
-		if progress >= 1.0:
-			student.queue_free()
-			dropped_students.remove_at(index)
 
 func _animate_school_doors(delta: float) -> void:
 	for segment in segments.values():

@@ -510,7 +510,7 @@ func _update_hud(difference: float, balanced: bool) -> void:
 	var gap := absf(difference)
 	var average_gap := gap_integral / maxf(measurement_time, 0.001)
 	demand_label.text = "현재 수요 %d · 공급 %d MW" % [roundi(demand), roundi(supply)]
-	average_gap_label.text = "지금까지 평균 차이 %.1f MW" % average_gap
+	average_gap_label.text = "지금까지 평균 차이 %.1f MW" % average_gap if measurement_time > 0.0 else "평균 차이 · 시작 후 측정해요"
 	if balanced:
 		balance_label.text = "도시 불빛 안정 · 균형 유지 · 차이 %.1f MW" % gap
 		balance_label.add_theme_color_override("font_color", Color("65f2b3"))

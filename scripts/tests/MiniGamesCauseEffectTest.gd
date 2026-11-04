@@ -6,6 +6,7 @@ const WIND = preload("res://scripts/minigames/WindTurbinePilot3D.gd")
 const GRID = preload("res://scripts/minigames/SmartGridBalance3D.gd")
 const STANDBY = preload("res://scripts/minigames/StandbyPowerHunt3D.gd")
 const HYDRO = preload("res://scripts/minigames/HydroGateRun3D.gd")
+const STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 var failures: Array[String] = []
 var created: Array[Node] = []
 
@@ -28,7 +29,7 @@ func _check(value: bool, message: String) -> void:
 		push_error("[FAIL] " + message)
 
 func _run() -> void:
-	for test_name in ["_solar", "_wind", "_grid", "_standby", "_hydro"]:
+	for test_name in ["_solar", "_wind", "_grid", "_standby", "_hydro", "_contact_shadows"]:
 		_check(call(test_name) == true, test_name + " must finish without a runtime error")
 	for game in created:
 		game.queue_free()
@@ -72,9 +73,14 @@ func _wind() -> bool:
 	game._engage_storm_brake(false)
 	game._update_hud(1.0, 0.0)
 	var rotation_before: float = game.rotor.rotation.z
+	var background_before: float = game.background_rotors[0].rotation.z
 	game._update_rotor(0.25, 0.0)
 	_check(is_equal_approx(rotation_before, game.rotor.rotation.z) and "안전 정지" in game.direction_caption.text and not game.wind_pointer.visible, "Wind: successful braking must freeze the rotor and replace yaw comparison with safe-stop feedback")
+	_check(is_equal_approx(background_before, game.background_rotors[0].rotation.z), "Wind: farm background must not contradict storm safety by continuing to spin")
+	_check(game.storm_banner.anchor_left == 0.0 and game.storm_banner.offset_right <= 340.0, "Wind: the storm prompt must leave the central rotor/hub visible")
 	_check(game.rng.state == scenario_state, "Wind: direction/brake visuals must not change ranked wind")
+	_check(game.power_caption.text == "발전 멈춤" and "초" in game.phase_caption.text, "Wind: output and phase meters must explain a stopped rotor rather than remain unlabeled grey bars")
+	_check(game.power_caption.get_theme_constant("outline_size") >= 3, "Wind: output captions over the bright landscape require a contrasting outline")
 	return true
 
 func _grid() -> bool:
@@ -96,6 +102,10 @@ func _grid() -> bool:
 
 func _standby() -> bool:
 	var game = _game(STANDBY)
+	var floor_bounds: AABB = game._model_bounds(game.course_root.get_node("Floor"))
+	var wall_bounds: AABB = game._model_bounds(game.course_root.get_node("Wall"))
+	_check(floor_bounds.position.z <= game.hero.position.z and floor_bounds.end.z >= game.hero.position.z, "Standby: the reused floor asset must actually extend beneath the runner's walking lane")
+	_check(wall_bounds.size.x >= 2.0 and wall_bounds.size.y >= 2.5, "Standby: adjacent CC0 wall modules must cover their 2m spacing and be taller than the hero")
 	var active: Dictionary = game.device_records[0]
 	game.hero.position.x = float(active.x)
 	game._update_hud()
@@ -142,4 +152,24 @@ func _hydro() -> bool:
 	for window in game.city_windows:
 		_check(window.material_override == game.city_window_dark_material, "Hydro: closed gate must visibly darken city windows")
 	_check(game.generated_kwh == 0.0 and game.awarded_points == 0, "Hydro: cosmetic flow must never produce real energy or points")
+	return true
+
+func _contact_shadows() -> bool:
+	var solar = _game(SOLAR)
+	solar.hero_body.position.y = 1.4
+	solar.hero.rotation.z = 0.12
+	STYLE.update_contact_shadow(solar.hero, solar.GROUND_Y, 1.4 - solar.GROUND_Y)
+	_check(absf(solar.hero.shadow_mesh.global_position.y - solar.GROUND_Y) < 0.06, "Solar: a scaled pawn parented to a jumping body must keep its shadow on the ground")
+	_check(absf(solar.hero.shadow_mesh.global_position.x - solar.hero.global_position.x) < 0.001 and absf(solar.hero.shadow_mesh.global_rotation.z) < 0.001, "Solar: banking the runner must not tilt or shift its ground contact mark")
+	var house = _game(STANDBY)
+	house.hero.position.y = 1.4
+	STYLE.update_contact_shadow(house.hero, house.GROUND_Y, 1.4 - house.GROUND_Y)
+	_check(absf(house.hero.shadow_mesh.global_position.y - house.GROUND_Y) < 0.06, "Standby: magnified side-runner shadow must not be multiplied below the floor")
+	var hydro = _game(HYDRO)
+	hydro.hero_floor_index = 1
+	hydro.hero_x = 2.0
+	hydro.hero_y = hydro.platform_height(1)
+	hydro._animate_world(0.016)
+	_check(hydro.hero.shadow_mesh.visible and absf(hydro.hero.shadow_mesh.global_position.y - hydro.platform_height(1)) < 0.06, "Hydro: the hero must be grounded on the actual upper service platform")
+	_check(STYLE.SUCCESS_FLASH_ALPHA <= 0.12 and STYLE.WARNING_FLASH_ALPHA <= 0.14, "Feedback must preserve scene readability rather than wash out its assets")
 	return true

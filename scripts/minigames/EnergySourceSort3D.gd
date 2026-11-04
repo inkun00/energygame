@@ -337,7 +337,7 @@ func _deliver(bin_kind: int) -> void:
 	arcade_event.emit(earned if correct else WRONG_PENALTY, correct, message + (" 다시 골라 보세요." if not correct else ""), correct and not retrying_item)
 	left_light.material_override = left_material if bin_kind == 0 and correct else idle_light_material
 	right_light.material_override = right_material if bin_kind == 1 and correct else idle_light_material
-	flash.color = Color("62ed9b32") if correct else Color("f071633f")
+	flash.color = Color(Color("62ed9b") if correct else Color("f07163"), VISUAL_STYLE.SUCCESS_FLASH_ALPHA if correct else VISUAL_STYLE.WARNING_FLASH_ALPHA)
 	flash_remaining = 0.22
 	returning_to_center = true
 	icon_anchor.visible = false

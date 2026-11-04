@@ -36,6 +36,8 @@ var cool_air: Array[MeshInstance3D] = []
 var power_active_material: StandardMaterial3D
 var power_efficient_material: StandardMaterial3D
 var power_idle_material: StandardMaterial3D
+var hot_air_material: StandardMaterial3D
+var cool_air_material: StandardMaterial3D
 var usage_before_close := 0.0
 var usage_after_close := 0.0
 var comparison_remaining := 0.0
@@ -134,6 +136,7 @@ func _build_world() -> void:
 	_box(world, Vector3(0.0, -0.20, 0.0), Vector3(16.4, 0.35, 5.3), VISUAL_STYLE.CREAM)
 	_box(world, Vector3(0.0, 3.43, -1.42), Vector3(16.0, 0.85, 0.18), VISUAL_STYLE.WALL)
 	_box(world, Vector3(0.0, 0.43, -1.42), Vector3(16.0, 0.86, 0.18), VISUAL_STYLE.WALL)
+	_build_air_materials()
 	for index in range(16):
 		var floor_tile := FLOOR_MODEL.instantiate() as Node3D
 		floor_tile.position = Vector3(-7.5 + float(index), -0.02, 0.25)
@@ -153,7 +156,7 @@ func _build_world() -> void:
 		power_cell.name = "AirConditionerPower%d" % cell
 		ac_power_cells.append(power_cell)
 	for index in range(4):
-		var puff := _sphere(world, Vector3.ZERO, 0.065, Color("9eeaff"), true)
+		var puff := _air_wisp(Vector3.ZERO, cool_air_material, Vector2(0.28, 0.10))
 		puff.name = "CoolingAir%d" % index
 		cool_air.append(puff)
 	var sun := _sphere(world, Vector3(7.25, 4.15, -1.0), 0.42, Color("ffd45f"), true)
@@ -183,7 +186,7 @@ func _build_window(index: int) -> void:
 	status.outline_size = 6
 	var particles: Array[MeshInstance3D] = []
 	for particle_index in range(5):
-		var particle := _box(world, Vector3(x, 1.74 + float(particle_index) * 0.10, -0.30), Vector3(0.22, 0.10, 0.29), Color("ff754f"), true)
+		var particle := _air_wisp(Vector3(x, 1.74 + float(particle_index) * 0.10, -0.30), hot_air_material, Vector2(0.48, 0.15))
 		particles.append(particle)
 	var reach_marker := _box(world, Vector3(center_x, 0.08, 1.12), Vector3(CLOSE_REACH * 2.0, 0.035, 0.42), Color("88f0b9"), true)
 	reach_marker.visible = false
@@ -321,7 +324,7 @@ func _try_close() -> void:
 	_update_window_visual(closest)
 	arcade_event.emit(points, true, "창문을 닫았어요! 더운 공기가 멈춰 에어컨 사용 속도가 느려져요.", true)
 	_notice("창문 닫기 +%d점 · 전기 사용 %.1f → %.1f/초" % [points, usage_before_close, usage_after_close])
-	flash.color = Color("8af2ae3c")
+	flash.color = Color(Color("8af2ae"), VISUAL_STYLE.SUCCESS_FLASH_ALPHA)
 	flash_remaining = 0.20
 	_update_overlay()
 
@@ -363,6 +366,41 @@ func _animate_heat(delta: float) -> void:
 			particle.position.x = float(window["x"]) + sin(float(index) * 1.7) * 0.32
 			particle.position.y = 1.43 + float(index) * 0.10 + sin(phase * PI) * 0.13
 			particle.position.z = -1.15 + phase * 2.3
+			particle.scale = Vector3(0.8 + sin(phase * PI) * 0.35, 0.7 + phase * 0.5, 1.0)
+
+func _build_air_materials() -> void:
+	# A tiny shared engine gradient replaces solid blocks with soft air streaks.
+	# No image files, particle simulation or full-screen shader is needed.
+	var gradient := Gradient.new()
+	gradient.offsets = PackedFloat32Array([0.0, 0.45, 1.0])
+	gradient.colors = PackedColorArray([Color(1, 1, 1, 0.66), Color(1, 1, 1, 0.22), Color(1, 1, 1, 0)])
+	var texture := GradientTexture2D.new()
+	texture.width = 32
+	texture.height = 32
+	texture.fill = GradientTexture2D.FILL_RADIAL
+	texture.fill_from = Vector2(0.5, 0.5)
+	texture.fill_to = Vector2(1.0, 0.5)
+	texture.gradient = gradient
+	hot_air_material = VISUAL_STYLE.material(Color("ff754f"))
+	cool_air_material = VISUAL_STYLE.material(Color("9eeaff"))
+	for material in [hot_air_material, cool_air_material]:
+		material.albedo_texture = texture
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+
+func _air_wisp(where: Vector3, material: StandardMaterial3D, dimensions: Vector2) -> MeshInstance3D:
+	var quad := QuadMesh.new()
+	quad.size = dimensions
+	var instance := MeshInstance3D.new()
+	instance.name = "AirWisp"
+	instance.mesh = quad
+	instance.material_override = material
+	instance.position = where
+	world.add_child(instance)
+	return instance
 
 func _notice(message: String) -> void:
 	notice = message

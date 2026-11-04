@@ -1,8 +1,8 @@
 extends RefCounted
 class_name MiniGameVisualStyle
 
-## Shared low-cost art direction. Only initialization/spawning calls this helper;
-## scoring colours, textures, collision shapes and weather stay game-owned.
+## Shared low-cost art setup and visual-only contact helpers. Scoring colours,
+## textures, collision shapes and weather stay game-owned.
 const SKY := Color("88b3ad")
 const NIGHT_SKY := Color("244650")
 const FIELD := Color("769c83")
@@ -16,6 +16,9 @@ const MATTE_ROUGHNESS := 0.86
 const SOFT_SPECULAR := 0.22
 const SIGNAL_EMISSION := 0.34
 const HERO_TINT := Color("f8f6ed")
+const ADAPTED_MATERIAL_META := &"energy_arcade_adapted"
+const SUCCESS_FLASH_ALPHA := 0.12
+const WARNING_FLASH_ALPHA := 0.14
 
 static var _imported_materials: Dictionary = {}
 
@@ -87,18 +90,43 @@ static func prepare_imported(model: Node3D) -> void:
 			var source := mesh.get_active_material(index)
 			if not source is StandardMaterial3D:
 				continue
-			var key := source.get_instance_id()
-			if not _imported_materials.has(key):
-				var adapted := source.duplicate() as StandardMaterial3D
+			if source.get_meta(ADAPTED_MATERIAL_META, false):
+				continue
+			# Only shared imported resources belong in the shared cache. A tinted
+			# per-device duplicate has no resource path and dies with that device;
+			# caching its instance ID retained a new material on every house lap.
+			var key := source.resource_path
+			var cacheable := not key.is_empty() and key.begins_with("res://")
+			var adapted: StandardMaterial3D = _imported_materials.get(key) if cacheable else null
+			if adapted == null:
+				adapted = source.duplicate() as StandardMaterial3D
 				adapted.albedo_color = surface_color(adapted.albedo_color)
 				adapted.roughness = maxf(adapted.roughness, MATTE_ROUGHNESS)
 				adapted.metallic_specular = minf(adapted.metallic_specular, SOFT_SPECULAR)
 				if adapted.emission_enabled:
 					adapted.emission_energy_multiplier = minf(adapted.emission_energy_multiplier, SIGNAL_EMISSION)
-				_imported_materials[key] = adapted
-			mesh.set_surface_override_material(index, _imported_materials[key])
+				adapted.set_meta(ADAPTED_MATERIAL_META, true)
+				if cacheable:
+					_imported_materials[key] = adapted
+			mesh.set_surface_override_material(index, adapted)
 
 static func style_hero(hero: Node3D) -> void:
 	var avatar: Variant = hero.get("avatar_sprite")
 	if avatar is Sprite3D:
 		avatar.modulate = HERO_TINT
+
+static func update_contact_shadow(hero: Node3D, surface_world_y: float, lift_world: float) -> void:
+	if not is_instance_valid(hero) or not hero.has_method("_update_ground_shadow"):
+		return
+	# Pawn's established method takes a height in its parent's coordinate space.
+	# Mini-games magnify the pawn and sometimes parent it to a physics body, so
+	# feeding raw world height sent the local shadow underground (or into the air).
+	var vertical_scale := maxf(absf(hero.global_basis.get_scale().y), 0.001)
+	var local_surface := hero.position.y + (surface_world_y - hero.global_position.y) / vertical_scale
+	hero.call("_update_ground_shadow", local_surface, maxf(0.0, lift_world) / vertical_scale)
+	var shadow: Variant = hero.get("shadow_mesh")
+	if shadow is Node3D:
+		# A running hero may bank sideways. Its contact mark belongs vertically
+		# below it on the horizontal floor, not tilted by that decorative lean.
+		shadow.global_position = Vector3(hero.global_position.x, surface_world_y + 0.014 * vertical_scale, hero.global_position.z)
+		shadow.global_rotation = Vector3(0.0, hero.global_rotation.y, 0.0)

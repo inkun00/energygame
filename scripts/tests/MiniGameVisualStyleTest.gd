@@ -51,6 +51,19 @@ func _run() -> void:
 	var adapted := imported.get_active_material(0) as StandardMaterial3D
 	_check(adapted != original and is_equal_approx(original.roughness, 0.15) and original.albedo_color == Color.WHITE, "Imported materials must never mutate their shared source")
 	_check(adapted.roughness >= STYLE.MATTE_ROUGHNESS and adapted.metallic_specular <= STYLE.SOFT_SPECULAR, "Imported white surfaces use the same soft matte material")
+	var adapted_color := adapted.albedo_color
+	STYLE.prepare_imported(imported)
+	_check(imported.get_active_material(0) == adapted and adapted.albedo_color == adapted_color, "Repeated asset preparation must not duplicate or repeatedly yellow the same material")
+	var cache_size: int = STYLE._imported_materials.size()
+	for sample_index in range(20):
+		var temporary := MeshInstance3D.new()
+		temporary.mesh = BoxMesh.new()
+		var local_tint := StandardMaterial3D.new()
+		local_tint.albedo_color = Color(0.5 + sample_index * 0.01, 0.6, 0.65)
+		temporary.mesh.surface_set_material(0, local_tint)
+		STYLE.prepare_imported(temporary)
+		temporary.free()
+	_check(STYLE._imported_materials.size() == cache_size, "One-off house/device material duplicates must not accumulate in a permanent shared cache")
 	var material := STYLE.material(Color("ff5148"), true)
 	_check(material.albedo_color == Color("ff5148") and is_equal_approx(material.emission_energy_multiplier, STYLE.SIGNAL_EMISSION), "Signals keep their exact hue and restrained emission")
 	_check(STYLE.material(Color("3f9bdfbd"), true).transparency == BaseMaterial3D.TRANSPARENCY_ALPHA, "Reservoir transparency must remain intact")

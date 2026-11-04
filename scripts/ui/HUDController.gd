@@ -1535,7 +1535,7 @@ func _play_ending_cinematic(is_success: bool, rankings: Array) -> void:
 		ending_cinematic.queue_free()
 	ending_cinematic = ENDING_CINEMATIC.new()
 	ending_cinematic.name = "EndingCinematic"
-	ending_cinematic.setup(is_success, GameManager.kingdom_health, GameManager.VILLAGE_RECOVERY_TARGET)
+	ending_cinematic.setup(is_success, GameManager.kingdom_health, GameManager.VILLAGE_RECOVERY_TARGET, rankings)
 	ending_cinematic.animation_finished.connect(_show_game_over_results.bind(rankings.duplicate(true)), CONNECT_ONE_SHOT)
 	add_child(ending_cinematic)
 

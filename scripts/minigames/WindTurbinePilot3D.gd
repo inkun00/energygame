@@ -70,6 +70,9 @@ var direction_caption: Label
 var wind_pointer: ColorRect
 var turbine_pointer: ColorRect
 var direction_gauge_style: StyleBoxFlat
+var power_caption: Label
+var phase_caption: Label
+var power_fill_style: StyleBoxFlat
 
 func _ready() -> void:
 	stretch = true
@@ -334,6 +337,14 @@ func _build_overlay() -> void:
 	power_bar.max_value = 100.0
 	power_bar.show_percentage = false
 	add_child(power_bar)
+	power_fill_style = _style_meter(power_bar, Color("74e0b2"))
+	power_caption = _comparison_label("발전 출력", Vector2.ZERO, 106, self)
+	power_caption.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	power_caption.offset_left = 8.0
+	power_caption.offset_right = 114.0
+	power_caption.offset_top = -45.0
+	power_caption.offset_bottom = -19.0
+	power_caption.add_theme_font_size_override("font_size", 16)
 
 	phase_bar = ProgressBar.new()
 	phase_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
@@ -344,6 +355,14 @@ func _build_overlay() -> void:
 	phase_bar.max_value = WIND_PHASE_SECONDS
 	phase_bar.show_percentage = false
 	add_child(phase_bar)
+	_style_meter(phase_bar, Color("7dd6ed"))
+	phase_caption = _comparison_label("", Vector2.ZERO, 120, self)
+	phase_caption.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	phase_caption.offset_left = -116.0
+	phase_caption.offset_right = -8.0
+	phase_caption.offset_top = -45.0
+	phase_caption.offset_bottom = -19.0
+	phase_caption.add_theme_font_size_override("font_size", 15)
 
 	storm_border = Panel.new()
 	storm_border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -358,11 +377,13 @@ func _build_overlay() -> void:
 	add_child(storm_border)
 
 	storm_banner = Panel.new()
-	storm_banner.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	storm_banner.offset_left = -330.0
-	storm_banner.offset_top = 66.0
-	storm_banner.offset_right = 330.0
-	storm_banner.offset_bottom = 140.0
+	# The old centered banner covered the main hub, hiding the very rotation
+	# the learner needs to stop. Reserve the left sky, not the working turbine.
+	storm_banner.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	storm_banner.offset_left = 14.0
+	storm_banner.offset_top = 78.0
+	storm_banner.offset_right = 340.0
+	storm_banner.offset_bottom = 158.0
 	storm_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	storm_banner_style = StyleBoxFlat.new()
 	storm_banner_style.bg_color = Color(0.42, 0.015, 0.015, 0.94)
@@ -379,13 +400,24 @@ func _build_overlay() -> void:
 	storm_warning_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	storm_warning_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	storm_warning_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	storm_warning_label.add_theme_font_size_override("font_size", 25)
+	storm_warning_label.add_theme_font_size_override("font_size", 21)
 	storm_warning_label.add_theme_color_override("font_color", Color("fff1bf"))
 	storm_warning_label.add_theme_color_override("font_outline_color", Color("400000"))
 	storm_warning_label.add_theme_constant_override("outline_size", 5)
 	storm_warning_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	storm_banner.add_child(storm_warning_label)
 	_build_direction_gauge()
+
+func _style_meter(bar: ProgressBar, color: Color) -> StyleBoxFlat:
+	var background := StyleBoxFlat.new()
+	background.bg_color = Color("203f47")
+	background.set_corner_radius_all(6)
+	bar.add_theme_stylebox_override("background", background)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = color
+	fill.set_corner_radius_all(6)
+	bar.add_theme_stylebox_override("fill", fill)
+	return fill
 
 func _build_direction_gauge() -> void:
 	direction_gauge = Panel.new()
@@ -433,6 +465,8 @@ func _comparison_label(value: String, where: Vector2, width: float, parent: Cont
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", 14)
 	label.add_theme_color_override("font_color", Color("f1fff5"))
+	label.add_theme_color_override("font_outline_color", Color("12313b"))
+	label.add_theme_constant_override("outline_size", 3)
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(label)
 	return label
@@ -598,7 +632,10 @@ func _update_rotor(delta: float, power_percent: float) -> void:
 	rotor.rotation.z -= delta * spin_speed
 	for background_rotor in background_rotors:
 		if is_instance_valid(background_rotor):
-			background_rotor.rotation.z -= delta * lerpf(0.8, 4.6, wind_factor)
+			# Distant farm turbines use automatic storm protection. They must not
+			# contradict the safety lesson by racing on while our hero parks one.
+			if not storm_phase:
+				background_rotor.rotation.z -= delta * lerpf(0.8, 4.6, wind_factor)
 	if is_instance_valid(nacelle) and not storm_phase:
 		nacelle.material_override = aligned_head_material if power_percent >= 72.0 else normal_head_material
 
@@ -651,6 +688,9 @@ func _update_hud(alignment: float, power_percent: float) -> void:
 		phase_bar.value = WIND_PHASE_SECONDS - phase_elapsed
 	if is_instance_valid(power_bar):
 		power_bar.value = power_percent
+		power_fill_style.bg_color = Color("819ca0") if brake_active or rotor_broken or storm_phase else Color("74e0b2")
+		power_caption.text = "발전 멈춤" if brake_active or rotor_broken or storm_phase else "발전 출력"
+		phase_caption.text = "바람 %.1f초" % maxf(0.0, WIND_PHASE_SECONDS - phase_elapsed)
 	var direction_text := "정면"
 	if wind_angle < -8.0:
 		direction_text = "← 왼쪽"
@@ -661,12 +701,14 @@ func _update_hud(alignment: float, power_percent: float) -> void:
 		wind_label.add_theme_color_override("font_color", Color("ff756d") if storm_phase else Color("9deeff"))
 	if is_instance_valid(alignment_label):
 		if storm_phase:
-			alignment_label.text = "SPACE 브레이크  %s" % ("안전 정지 완료" if brake_active else "지금 누르세요!")
+			alignment_label.text = "발전 0% · 안전 정지" if brake_active else "과속 위험 · 발전 중단"
 		elif not yaw_choice_made:
 			alignment_label.text = "정렬도 %d%% · 예상 발전 %d%%" % [roundi(alignment * 100.0), roundi(power_percent)]
 		else:
 			alignment_label.text = "정렬도 %d%%  ·  발전 %d%%" % [roundi(alignment * 100.0), roundi(power_percent)]
-	if is_instance_valid(instruction_label) and not storm_phase:
+	if is_instance_valid(instruction_label) and storm_phase:
+		instruction_label.text = "멈추면 돌풍에서 날개를 지킬 수 있어요"
+	elif is_instance_valid(instruction_label):
 		if rotor_broken:
 			instruction_label.text = "터빈 수리 중 · 잠깐 뒤 A/D로 풍향을 맞춰요"
 		elif brake_active:
@@ -674,24 +716,24 @@ func _update_hud(alignment: float, power_percent: float) -> void:
 		elif not yaw_choice_made:
 			instruction_label.text = "A/D로 한 번 조절해 시작 · 풍향에 맞추면 점수가 쌓여요"
 		else:
-			instruction_label.text = "A/D 터빈 회전 · 풍향에 맞춘 동안 점수가 쌓여요"
+			instruction_label.text = "A/D 방향 조절 · SPACE 브레이크"
 		if phase_index % 4 == 3 and phase_elapsed >= WIND_PHASE_SECONDS - 1.0:
 			instruction_label.text = "돌풍 접근! 다음 바람에서는 SPACE로 터빈을 멈춰요"
 	if storm_phase and is_instance_valid(storm_warning_label):
 		if brake_active:
-			storm_warning_label.text = "안전! 브레이크 성공 · 터빈 정지"
+			storm_warning_label.text = "안전 정지 완료!\n돌풍에서 날개를 지켰어요"
 			storm_border.modulate.a = 1.0
 			storm_banner.modulate.a = 1.0
 			storm_tint.modulate.a = 0.45
 		else:
 			var remaining := maxf(0.0, WIND_PHASE_SECONDS - phase_elapsed)
-			storm_warning_label.text = "주의! 위험 돌풍  %d m/s\nSPACE 브레이크!  %.1f초" % [wind_speed, remaining]
+			storm_warning_label.text = "위험 돌풍  %d m/s\nSPACE 브레이크!  %.1f초" % [wind_speed, remaining]
 			var pulse := 0.72 + sin(phase_elapsed * 12.0) * 0.28
 			storm_border.modulate.a = pulse
 			storm_banner.modulate.a = 0.86 + pulse * 0.14
 			storm_tint.modulate.a = 0.48 + pulse * 0.32
 
-func _update_direction_feedback(alignment: float, power_percent: float) -> void:
+func _update_direction_feedback(alignment: float, _power_percent: float) -> void:
 	if not is_instance_valid(direction_gauge):
 		return
 	# The large storm banner is the only central stop instruction. Do not add a
@@ -713,9 +755,9 @@ func _update_direction_feedback(alignment: float, power_percent: float) -> void:
 	elif brake_active:
 		direction_caption.text = "SPACE 놓기 → 다시 발전"
 	elif not yaw_choice_made:
-		direction_caption.text = "A/D 조절 → 발전 시작"
+		direction_caption.text = "바람과 터빈 방향 비교"
 	else:
-		direction_caption.text = "정렬 유지 → 발전 %d%%" % roundi(power_percent) if alignment >= 0.8 else "두 방향이 가까울수록 발전"
+		direction_caption.text = "바람과 터빈 방향 비교"
 
 func _set_storm_overlay(active: bool, safe: bool) -> void:
 	if not is_instance_valid(storm_tint):
@@ -742,9 +784,9 @@ func _show_score_popup(points: int, success: bool, message: String) -> void:
 	var popup := Label.new()
 	popup.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	popup.offset_left = -280.0
-	popup.offset_top = 158.0
+	popup.offset_top = 184.0
 	popup.offset_right = 280.0
-	popup.offset_bottom = 206.0
+	popup.offset_bottom = 232.0
 	popup.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	popup.text = "%s%d점  %s" % ["+" if success else "−", points, message]
 	popup.add_theme_font_size_override("font_size", 25)

@@ -18,6 +18,7 @@ const SHARED_SCHOOL_BUS = preload("res://scripts/minigames/SharedSchoolBus3D.gd"
 const HEAT_LEAK_DASH = preload("res://scripts/minigames/HeatLeakDash3D.gd")
 const LEARNING_FEEDBACK = preload("res://scripts/minigames/MiniGameLearningFeedback.gd")
 const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
+const PRACTICE = preload("res://scripts/minigames/MiniGamePractice.gd")
 
 const STANDBY_DEVICES := [
 	{"name": "꺼진 TV", "watt": 3, "waste": true},
@@ -68,6 +69,8 @@ var practice_actions: HBoxContainer
 var practice_active := false
 var practice_elapsed := 0.0
 var practice_completed_at := -1.0
+var practice_plan: RefCounted
+var practice_arcade: Node
 const HYDRO_PRACTICE_SECONDS := 30.0
 var finishing_animation := false
 var pending_results: Array = []
@@ -244,7 +247,7 @@ func _build_ui() -> void:
 	# The keyboard exit remains Esc; this button is a pointer alternative.
 	practice_end_button.focus_mode = Control.FOCUS_NONE
 	practice_end_button.custom_minimum_size = Vector2(320, 44)
-	practice_end_button.pressed.connect(_finish_hydro_practice)
+	practice_end_button.pressed.connect(_finish_practice)
 	practice_actions.add_child(practice_end_button)
 	_build_touch_controls(content)
 	if standalone_mode:
@@ -268,18 +271,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if visible and practice_active and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		get_viewport().set_input_as_handled()
-		_finish_hydro_practice()
+		_finish_practice()
 		return
 	if not visible or not is_guide_open():
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
-		if game_id == "hydro_gate" and event.keycode == KEY_P:
+		if event.keycode == KEY_P:
 			get_viewport().set_input_as_handled()
-			_start_hydro_practice()
+			_start_practice()
 			return
 		if event.keycode == KEY_SPACE or event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
 			get_viewport().set_input_as_handled()
-			dismiss_guide()
+			if get_viewport().gui_get_focus_owner() == guide_practice_button:
+				_start_practice()
+			else:
+				dismiss_guide()
 
 func _build_touch_controls(parent: Control) -> void:
 	touch_controls = HBoxContainer.new()
@@ -355,6 +361,7 @@ func _notification(what: int) -> void:
 
 func _exit_tree() -> void:
 	MINIGAME_INPUT.release_all()
+	_disconnect_practice()
 
 func _process(delta: float) -> void:
 	if not surface_enabled:
@@ -374,20 +381,25 @@ func _process(delta: float) -> void:
 		return
 	if practice_active:
 		practice_elapsed += delta
-		_advance_arcade_simulation(minf(HYDRO_PRACTICE_SECONDS, practice_elapsed))
-		var progress: Dictionary = hydro_arcade.call("get_practice_progress")
-		goal_label.text = "조작 연습  |  " + str(progress.get("hint", "레버로 이동해요"))
+		var practice_seconds: float = PRACTICE.seconds_for(game_id)
+		if not is_instance_valid(solar_arcade):
+			_advance_arcade_simulation(minf(practice_seconds, practice_elapsed))
+		var progress: Dictionary = practice_plan.progress(practice_arcade)
+		var practice_steps := 4 if game_id == "hydro_gate" else 2
+		goal_label.text = "조작 연습 %d/%d  |  %s" % [mini(practice_steps, int(progress.get("step", 0)) + 1), practice_steps, str(progress.get("hint", ""))]
 		if bool(progress.get("complete", false)):
 			if practice_completed_at < 0.0:
 				practice_completed_at = practice_elapsed
-			feedback_label.text = "수문 열기 → 물의 낙차로 발전 → 닫고 물 모으기 완료!"
+				_set_arcades_running(false)
+			goal_label.add_theme_color_override("font_color", UI.SUCCESS)
+			feedback_label.text = "연습 성공! 잠시 후 안내로 돌아가요. 준비되면 게임을 시작해요."
 			if practice_elapsed - practice_completed_at >= 2.0:
-				_finish_hydro_practice()
+				_finish_practice()
 				return
-		timer_label.text = "연습 %02d초" % ceili(maxf(0.0, HYDRO_PRACTICE_SECONDS - practice_elapsed))
-		timer_bar.value = maxf(0.0, HYDRO_PRACTICE_SECONDS - practice_elapsed)
-		if practice_elapsed >= HYDRO_PRACTICE_SECONDS:
-			_finish_hydro_practice()
+		timer_label.text = "연습 %02d초" % ceili(maxf(0.0, practice_seconds - practice_elapsed))
+		timer_bar.value = maxf(0.0, practice_seconds - practice_elapsed)
+		if practice_elapsed >= practice_seconds:
+			_finish_practice()
 		return
 	if not active or submitted or not round_started_locally:
 		return
@@ -416,6 +428,9 @@ func _process(delta: float) -> void:
 		_submit_score()
 
 func _physics_process(_delta: float) -> void:
+	if practice_active and is_instance_valid(solar_arcade):
+		_advance_arcade_simulation(minf(PRACTICE.seconds_for(game_id), practice_elapsed))
+		return
 	if not active or submitted or not round_started_locally or not is_instance_valid(solar_arcade):
 		return
 	var clock_time := maxf(elapsed, float(Time.get_ticks_msec() - round_start_msec) / 1000.0)
@@ -437,6 +452,7 @@ func _advance_arcade_simulation(target_time: float) -> void:
 func _on_minigame_started(data: Dictionary) -> void:
 	if not surface_enabled:
 		return
+	_disconnect_practice()
 	MINIGAME_INPUT.release_all()
 	finishing_animation = false
 	pending_results.clear()
@@ -492,7 +508,7 @@ func _on_submission_changed(state: Dictionary) -> void:
 		var player_count := int(state.get("player_count", 4))
 		var guide_seconds := ceili(float(state.get("guide_remaining", 0.0)))
 		if practice_active:
-			submission_label.text = "점수 없는 조작 연습 · %d초 뒤 전체 자동 시작" % guide_seconds
+			submission_label.text = "조작 연습 · %d초 뒤 전체 자동 시작" % guide_seconds if NetworkManager.is_online else "한 단계씩 해봐요 · Esc로 안내로 돌아가기"
 		elif is_guide_open():
 			guide_badge_label.text = "게임 방법 · %d명 준비 · %d초 뒤 자동 시작" % [ready_count, guide_seconds]
 			if GameManager.guided_tutorial_active:
@@ -503,7 +519,7 @@ func _on_submission_changed(state: Dictionary) -> void:
 		return
 	if phase == "countdown":
 		if practice_active:
-			_finish_hydro_practice()
+			_finish_practice()
 		var countdown := maxi(1, ceili(float(state.get("countdown_remaining", 0.0))))
 		if is_guide_open():
 			guide_badge_label.text = "다 함께 %d초 후 시작!" % countdown
@@ -526,7 +542,7 @@ func _begin_local_round() -> void:
 	# A host timeout/reconnect can start the round while a player is practicing.
 	# Reset the same seed and discard every practice action before competition.
 	if practice_active:
-		_finish_hydro_practice(false)
+		_finish_practice(false)
 	round_started_locally = true
 	round_start_msec = Time.get_ticks_msec()
 	round_pause_msec = -1
@@ -547,6 +563,10 @@ func _begin_local_round() -> void:
 func _on_minigame_finished(results: Array) -> void:
 	if not visible:
 		return
+	# A reconnect can deliver results without the intervening playing state.
+	# Practice passengers and their entrance animation are never round results.
+	if practice_active:
+		_finish_practice(false)
 	if finishing_animation:
 		pending_results = results.duplicate(true)
 		return
@@ -572,8 +592,6 @@ func _on_minigame_finished(results: Array) -> void:
 			timer_bar.value = 0
 			feedback_label.text = "점수 집계 완료! 학생들이 학교에 들어가는 중이에요."
 			return
-	if practice_active:
-		_finish_hydro_practice(false)
 	if is_instance_valid(guide_panel):
 		guide_panel.visible = false
 	var content_node := card.find_child("ContentBox", false, false)
@@ -619,6 +637,7 @@ func _on_turn_changed(_player_idx: int) -> void:
 		visible = false
 
 func cancel_minigame() -> void:
+	_disconnect_practice()
 	finishing_animation = false
 	pending_results.clear()
 	practice_active = false
@@ -790,7 +809,7 @@ func _build_guide_ui() -> void:
 	guide_practice_button.text = "조작 연습 (P)"
 	guide_practice_button.custom_minimum_size = Vector2(190, 52)
 	guide_practice_button.add_theme_font_size_override("font_size", 18)
-	guide_practice_button.pressed.connect(_start_hydro_practice)
+	guide_practice_button.pressed.connect(_start_practice)
 	UI.apply_secondary_button(guide_practice_button)
 	footer.add_child(guide_practice_button)
 
@@ -839,7 +858,7 @@ func _populate_guide_content() -> void:
 	guide_objective_label.text = str(game_data.get("objective", "제한시간 안에 최고 점수를 달성하세요."))
 	guide_lesson_label.text = str(game_data.get("lesson", "신재생에너지를 올바르게 활용하여 탄소를 줄입니다."))
 	guide_tip_label.text = str(game_data.get("tip", "신속하고 정확하게 조작하여 콤보 점수를 획득하세요!"))
-	guide_practice_button.visible = game_id == "hydro_gate"
+	guide_practice_button.visible = true
 	guide_rewards_label.text = "%s\n목표 달성 + 양수 점수: 순위에 따라 에너지 20 / 10 / 5 / 1. 같은 점수는 공동 순위예요." % LEARNING_FEEDBACK.goal_requirement(game_id)
 
 	for child in guide_controls_container.get_children():
@@ -931,9 +950,20 @@ func is_guide_open() -> bool:
 	return guide_open and is_instance_valid(guide_panel) and guide_panel.visible
 
 func _start_hydro_practice() -> void:
-	if game_id != "hydro_gate" or not is_guide_open() or round_started_locally or not active:
+	# Kept for the existing hydro entry point and older practice links/tests.
+	_start_practice()
+
+func _start_practice() -> void:
+	if not is_guide_open() or round_started_locally or not active:
 		return
+	practice_arcade = _current_arcade()
+	if not is_instance_valid(practice_arcade):
+		return
+	practice_plan = PRACTICE.new(game_id)
+	practice_arcade.connect("arcade_event", _on_practice_event)
+	GameManager.set_local_minigame_practice(round_id, true)
 	practice_active = true
+	mode_label.text = "조작 연습 · 한 단계씩 해봐요"
 	practice_elapsed = 0.0
 	practice_completed_at = -1.0
 	simulation_elapsed = 0.0
@@ -942,26 +972,41 @@ func _start_hydro_practice() -> void:
 	objective_label.visible = false
 	lesson_label.visible = false
 	goal_label.visible = true
-	goal_label.text = "조작 연습  |  1. A/D로 가까운 수문 레버에 이동해요."
+	goal_label.text = "조작 연습  |  " + str(practice_plan.progress(practice_arcade).get("hint", ""))
+	goal_label.add_theme_color_override("font_color", UI.GOLD)
 	practice_actions.visible = true
-	timer_bar.max_value = HYDRO_PRACTICE_SECONDS
-	timer_bar.value = HYDRO_PRACTICE_SECONDS
+	timer_bar.max_value = PRACTICE.seconds_for(game_id)
+	timer_bar.value = timer_bar.max_value
+	timer_label.add_theme_color_override("font_color", UI.TEXT)
 	score_label.text = "점수 없는 연습"
-	feedback_label.text = "연습에서는 넘치지 않아요. 실제 게임은 새 상태로 모두 함께 시작해요."
-	submission_label.text = "연습 후 시작 버튼을 누르면 준비 완료 · Esc로 안내로 돌아가기"
-	hydro_arcade.call("set_practice_mode", true)
+	feedback_label.text = "직접 조작해 미션을 해봐요. 틀려도 다시 해볼 수 있어요."
+	submission_label.text = "한 단계씩 해봐요 · Esc로 안내로 돌아가기"
+	if game_id == "hydro_gate":
+		hydro_arcade.call("set_practice_mode", true)
 	_set_arcades_running(true)
+	if NetworkManager.is_online:
+		_on_submission_changed(GameManager.get_minigame_state())
 
 func _finish_hydro_practice(show_guide: bool = true) -> void:
+	_finish_practice(show_guide)
+
+func _finish_practice(show_guide: bool = true) -> void:
 	if not practice_active:
 		return
+	_disconnect_practice()
 	practice_active = false
 	practice_completed_at = -1.0
+	mode_label.text = "%d초 · 전원 동시 도전" % int(duration)
 	practice_actions.visible = false
 	_set_arcades_running(false)
 	var local_idx := _local_player_index()
 	var player_data: Dictionary = GameManager.players[local_idx] if local_idx >= 0 and local_idx < GameManager.players.size() else {}
-	hydro_arcade.call("setup", player_data, int(game_data.get("seed", 1)))
+	if game_id == "hydro_gate":
+		hydro_arcade.call("setup", player_data, int(game_data.get("seed", 1)))
+	else:
+		# A fresh arcade resets every phase, obstacle, held key and animation too.
+		# Some setup methods only initialise the first phase on a newly made node.
+		_build_mode()
 	_set_arcades_running(false)
 	simulation_elapsed = 0.0
 	elapsed = 0.0
@@ -972,6 +1017,26 @@ func _finish_hydro_practice(show_guide: bool = true) -> void:
 	_refresh_goal_progress()
 	if show_guide:
 		_show_guide_popup()
+
+func _current_arcade() -> Node:
+	for arcade in [solar_arcade, wind_arcade, grid_arcade, standby_arcade, hydro_arcade, sort_arcade, battery_arcade, commute_arcade, heat_arcade]:
+		if is_instance_valid(arcade):
+			return arcade
+	return null
+
+func _disconnect_practice() -> void:
+	if is_instance_valid(practice_arcade) and practice_arcade.is_connected("arcade_event", _on_practice_event):
+		practice_arcade.disconnect("arcade_event", _on_practice_event)
+	practice_arcade = null
+	practice_plan = null
+	GameManager.set_local_minigame_practice(round_id, false)
+
+func _on_practice_event(points: int, success: bool, message: String, count_correct: bool) -> void:
+	if not practice_active:
+		return
+	practice_plan.record(points, success, count_correct, practice_arcade)
+	feedback_label.text = message
+	feedback_label.add_theme_color_override("font_color", UI.SUCCESS if success else UI.GOLD)
 
 func _build_mode() -> void:
 	_clear_arena()

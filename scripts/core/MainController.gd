@@ -51,7 +51,7 @@ func _input(event: InputEvent) -> void:
 		elif is_instance_valid(game_board) and is_instance_valid(game_board.quiz_modal) and game_board.quiz_modal.close_top_overlay():
 			pass
 		elif is_instance_valid(game_board) and is_instance_valid(game_board.minigame_modal) and game_board.minigame_modal.practice_active:
-			game_board.minigame_modal._finish_hydro_practice()
+			game_board.minigame_modal._finish_practice()
 		else:
 			request_game_exit()
 		get_viewport().set_input_as_handled()

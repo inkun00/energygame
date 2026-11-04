@@ -77,7 +77,7 @@ func _build_menu() -> void:
 	heading.add_theme_color_override("font_color", Color("fff0a6"))
 	content.add_child(heading)
 	var intro := Label.new()
-	intro.text = "그림을 보고 미션을 골라요. 나와 AI 3명이 같은 조건으로 도전해요."
+	intro.text = "미션을 고르면 P로 조작 연습을 할 수 있어요. 준비되면 나와 AI 3명이 함께 도전해요."
 	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	intro.add_theme_font_size_override("font_size", 18)
 	intro.add_theme_color_override("font_color", Color("c9e5e1"))
