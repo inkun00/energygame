@@ -19,6 +19,7 @@ const HEAT_LEAK_DASH = preload("res://scripts/minigames/HeatLeakDash3D.gd")
 const LEARNING_FEEDBACK = preload("res://scripts/minigames/MiniGameLearningFeedback.gd")
 const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PRACTICE = preload("res://scripts/minigames/MiniGamePractice.gd")
+const GUIDE_PREVIEW = preload("res://scripts/ui/MiniGameGuidePreview.gd")
 
 const STANDBY_DEVICES := [
 	{"name": "꺼진 TV", "watt": 3, "waste": true},
@@ -59,7 +60,8 @@ var round_started_locally := false
 var guide_title_label: Label
 var guide_badge_label: Label
 var guide_objective_label: Label
-var guide_controls_container: VBoxContainer
+var guide_controls_container: GridContainer
+var guide_preview: Control
 var guide_lesson_label: Label
 var guide_tip_label: Label
 var guide_rewards_label: Label
@@ -537,6 +539,8 @@ func _on_submission_changed(state: Dictionary) -> void:
 	submission_label.text = "점수 제출 %d / %d명%s" % [int(state.get("submitted_count", 0)), int(state.get("player_count", 4)), "  ·  내 점수 제출 완료" if submitted else ""]
 
 func _begin_local_round() -> void:
+	if is_instance_valid(guide_preview):
+		guide_preview.call("clear")
 	if round_started_locally or not active or submitted:
 		return
 	# A host timeout/reconnect can start the round while a player is practicing.
@@ -561,6 +565,8 @@ func _begin_local_round() -> void:
 	feedback_label.text = "게임 시작! 조건을 보고 알맞게 선택해요."
 
 func _on_minigame_finished(results: Array) -> void:
+	if is_instance_valid(guide_preview):
+		guide_preview.call("clear")
 	if not visible:
 		return
 	# A reconnect can deliver results without the intervening playing state.
@@ -637,6 +643,8 @@ func _on_turn_changed(_player_idx: int) -> void:
 		visible = false
 
 func cancel_minigame() -> void:
+	if is_instance_valid(guide_preview):
+		guide_preview.call("clear")
 	_disconnect_practice()
 	finishing_animation = false
 	pending_results.clear()
@@ -710,114 +718,63 @@ func _build_guide_ui() -> void:
 	guide_panel = PanelContainer.new()
 	guide_panel.name = "GuidePanel"
 	guide_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	guide_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("071e29fc"), Color("42d6b0"), 24.0, 24))
+	guide_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("102c38fc"), UI.TEAL_DARK, 16.0, 18))
 	guide_panel.visible = false
 	card.add_child(guide_panel)
-
-	var guide_content := VBoxContainer.new()
-	guide_content.add_theme_constant_override("separation", 10)
-	guide_panel.add_child(guide_content)
-
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 7)
+	guide_panel.add_child(content)
 	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 14)
-	guide_content.add_child(header)
-
+	header.add_theme_constant_override("separation", 12)
+	content.add_child(header)
 	guide_title_label = Label.new()
 	guide_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	guide_title_label.add_theme_font_size_override("font_size", 28)
-	guide_title_label.add_theme_color_override("font_color", Color("fff0a6"))
+	guide_title_label.add_theme_font_size_override("font_size", 26)
+	guide_title_label.add_theme_color_override("font_color", UI.GOLD)
 	header.add_child(guide_title_label)
-
-	var badge_box := PanelContainer.new()
-	var badge_style := StyleBoxFlat.new()
-	badge_style.bg_color = Color("0d3744")
-	badge_style.border_color = Color("38bca8")
-	badge_style.set_border_width_all(1)
-	badge_style.set_corner_radius_all(12)
-	badge_style.content_margin_left = 14
-	badge_style.content_margin_right = 14
-	badge_style.content_margin_top = 4
-	badge_style.content_margin_bottom = 4
-	badge_box.add_theme_stylebox_override("panel", badge_style)
-	header.add_child(badge_box)
-
 	guide_badge_label = Label.new()
-	guide_badge_label.text = "게임 방법 안내"
-	guide_badge_label.add_theme_font_size_override("font_size", 15)
-	guide_badge_label.add_theme_color_override("font_color", Color("8fffe0"))
-	badge_box.add_child(guide_badge_label)
-
-	var div := ColorRect.new()
-	div.custom_minimum_size = Vector2(0, 2)
-	div.color = Color("1e4a59")
-	guide_content.add_child(div)
-
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	guide_content.add_child(scroll)
-
-	var body := VBoxContainer.new()
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", 10)
-	scroll.add_child(body)
-
-	var obj_box := _make_guide_section("미션 목표", Color("79efaa"))
-	body.add_child(obj_box)
+	guide_badge_label.add_theme_font_size_override("font_size", 14)
+	guide_badge_label.add_theme_color_override("font_color", UI.TEXT_MUTED)
+	header.add_child(guide_badge_label)
 	guide_objective_label = Label.new()
 	guide_objective_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	guide_objective_label.add_theme_font_size_override("font_size", 16)
-	guide_objective_label.add_theme_color_override("font_color", Color("e0f6f1"))
-	obj_box.get_child(0).add_child(guide_objective_label)
-
-	var ctrl_box := _make_guide_section("조작", Color("79d7ef"))
-	body.add_child(ctrl_box)
-	guide_controls_container = VBoxContainer.new()
-	guide_controls_container.add_theme_constant_override("separation", 6)
-	ctrl_box.get_child(0).add_child(guide_controls_container)
-
-	var lesson_box := _make_guide_section("에너지 원리", Color("ffd66e"))
-	# 원리는 설명을 읽는 대신 게임 안의 물·빛·도시 반응으로 경험합니다.
-	lesson_box.visible = false
-	body.add_child(lesson_box)
+	guide_objective_label.add_theme_font_size_override("font_size", 18)
+	guide_objective_label.add_theme_color_override("font_color", UI.TEXT)
+	content.add_child(guide_objective_label)
+	guide_preview = GUIDE_PREVIEW.new()
+	content.add_child(guide_preview)
+	guide_controls_container = GridContainer.new()
+	guide_controls_container.columns = 2
+	guide_controls_container.add_theme_constant_override("h_separation", 22)
+	guide_controls_container.add_theme_constant_override("v_separation", 3)
+	content.add_child(guide_controls_container)
+	# Retain these fields for callers that inspect guide content, without adding
+	# explanation panels that repeat the scene's cause and effect.
 	guide_lesson_label = Label.new()
-	guide_lesson_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	guide_lesson_label.add_theme_font_size_override("font_size", 15)
-	guide_lesson_label.add_theme_color_override("font_color", Color("dbeff0"))
-	lesson_box.get_child(0).add_child(guide_lesson_label)
-
-	var tip_box := _make_guide_section("목표와 보너스", Color("ffb86c"))
-	body.add_child(tip_box)
+	guide_lesson_label.hide()
+	content.add_child(guide_lesson_label)
 	guide_tip_label = Label.new()
-	guide_tip_label.visible = false
-	guide_tip_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	guide_tip_label.add_theme_font_size_override("font_size", 15)
-	guide_tip_label.add_theme_color_override("font_color", Color("ffeac2"))
-	tip_box.get_child(0).add_child(guide_tip_label)
-
+	guide_tip_label.hide()
+	content.add_child(guide_tip_label)
 	guide_rewards_label = Label.new()
-	guide_rewards_label.text = "목표를 달성하고 1점 이상 얻으면 순위에 따라 에너지를 받아요."
 	guide_rewards_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	guide_rewards_label.add_theme_font_size_override("font_size", 15)
-	guide_rewards_label.add_theme_color_override("font_color", Color("95f2d6"))
-	tip_box.get_child(0).add_child(guide_rewards_label)
-
+	guide_rewards_label.add_theme_font_size_override("font_size", 13)
+	guide_rewards_label.add_theme_color_override("font_color", UI.TEXT_MUTED)
+	content.add_child(guide_rewards_label)
 	var footer := HBoxContainer.new()
-	footer.alignment = BoxContainer.ALIGNMENT_CENTER
-	guide_content.add_child(footer)
+	footer.add_theme_constant_override("separation", 12)
+	content.add_child(footer)
 	guide_practice_button = Button.new()
-	guide_practice_button.text = "조작 연습 (P)"
-	guide_practice_button.custom_minimum_size = Vector2(190, 52)
+	guide_practice_button.text = "직접 연습 (P)"
+	guide_practice_button.custom_minimum_size = Vector2(190, 48)
 	guide_practice_button.add_theme_font_size_override("font_size", 18)
 	guide_practice_button.pressed.connect(_start_practice)
 	UI.apply_secondary_button(guide_practice_button)
 	footer.add_child(guide_practice_button)
-
 	guide_start_button = Button.new()
-	guide_start_button.text = "게임 시작!  (Space 또는 Enter)"
-	guide_start_button.custom_minimum_size = Vector2(420, 52)
+	guide_start_button.text = "준비 완료  (Space / Enter)"
+	guide_start_button.custom_minimum_size = Vector2(0, 48)
 	guide_start_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	guide_start_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	guide_start_button.add_theme_font_size_override("font_size", 20)
 	guide_start_button.pressed.connect(dismiss_guide)
 	UI.apply_primary_button(guide_start_button)
@@ -855,11 +812,11 @@ func _populate_guide_content() -> void:
 	var duration_val := int(game_data.get("duration", 30))
 	guide_title_label.text = title
 	guide_badge_label.text = "게임 방법 · %d초" % duration_val
-	guide_objective_label.text = str(game_data.get("objective", "제한시간 안에 최고 점수를 달성하세요."))
+	guide_objective_label.text = str(GUIDE_PREVIEW.OBJECTIVES.get(game_id, game_data.get("objective", "제한시간 안에 최고 점수를 달성하세요.")))
 	guide_lesson_label.text = str(game_data.get("lesson", ""))
 	guide_tip_label.text = str(game_data.get("tip", ""))
 	guide_practice_button.visible = true
-	guide_rewards_label.text = "%s\n목표를 달성하고 1점 이상 얻으면 1~4위 보너스 20 / 10 / 5 / 1. 같은 점수는 공동 순위예요." % LEARNING_FEEDBACK.goal_requirement(game_id)
+	guide_rewards_label.text = "%s · 성공 시 순위 보너스 20 / 10 / 5 / 1 · 같은 점수는 공동 순위" % LEARNING_FEEDBACK.goal_requirement(game_id)
 
 	for child in guide_controls_container.get_children():
 		guide_controls_container.remove_child(child)
@@ -880,7 +837,8 @@ func _populate_guide_content() -> void:
 
 func _create_control_row(key_text: String, action_text: String) -> HBoxContainer:
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 12)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("separation", 8)
 
 	var key_badge := PanelContainer.new()
 	var key_style := StyleBoxFlat.new()
@@ -925,6 +883,11 @@ func _show_guide_popup() -> void:
 	if is_instance_valid(content_node):
 		content_node.visible = false
 	_populate_guide_content()
+	var current := _current_arcade()
+	if is_instance_valid(current):
+		var local_index := _local_player_index()
+		var player_data: Dictionary = GameManager.players[local_index] if local_index >= 0 and local_index < GameManager.players.size() else {}
+		guide_preview.call("configure", current.get_script(), game_id, player_data, 20260921)
 	if is_instance_valid(guide_panel):
 		guide_panel.visible = true
 	if is_instance_valid(guide_start_button):
@@ -934,6 +897,7 @@ func _show_guide_popup() -> void:
 func dismiss_guide() -> void:
 	if not guide_open or practice_active:
 		return
+	guide_preview.call("clear")
 	guide_open = false
 	if is_instance_valid(guide_panel):
 		guide_panel.visible = false
@@ -956,6 +920,7 @@ func _start_hydro_practice() -> void:
 func _start_practice() -> void:
 	if not is_guide_open() or round_started_locally or not active:
 		return
+	guide_preview.call("clear")
 	practice_arcade = _current_arcade()
 	if not is_instance_valid(practice_arcade):
 		return

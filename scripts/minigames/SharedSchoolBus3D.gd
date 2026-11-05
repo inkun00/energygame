@@ -217,7 +217,7 @@ func _acquire_dropoff_student(record: Dictionary) -> bool:
 		(slot["node"] as Node3D).visible = true
 		var animator := slot["animator"] as AnimationPlayer
 		if animator:
-			animator.play("sprint")
+			_play_student_animation(animator, "sprint", float(record.get("pose_phase", 0.0)), 0.96 + float(index % 3) * 0.06)
 		return true
 	return false
 
@@ -310,7 +310,7 @@ func _build_segment(index: int) -> Dictionary:
 			var column := student_index % 7
 			var row := student_index / 7
 			var base_x := stop_x + (float(column) - 3.0) * 0.48
-			var base_z := -0.18 - float(row) * 0.38
+			var base_z := -0.10 - float(row) * 0.53 - float(column % 2) * 0.12
 			var is_late: bool = student_index >= count - late_count
 			var late_order: int = student_index - (count - late_count) if is_late else -1
 			student_states.append({"node": null, "animator": null, "base_x": base_x, "base_z": base_z, "late": is_late, "late_order": late_order, "approaching": false, "arrived": not is_late, "boarded": false, "phase": rng.randf_range(0.0, TAU), "run_speed": 1.4 + float(late_order % 4) * 0.30 if is_late else 0.0, "variant": (stop_index + student_index) % 2})
@@ -412,7 +412,10 @@ func _activate_stop(stop: Dictionary) -> void:
 		var student := student_scene.instantiate() as Node3D
 		student.name = "WaitingStudent"
 		var start_x := stop_x + 3.4 + float(int(state["late_order"]) % 6) * 0.85 if bool(state["late"]) else float(state["base_x"])
-		student.position = Vector3(start_x, 0.255, float(state["base_z"]))
+		state["approach_x"] = start_x
+		state["approach_start_x"] = start_x
+		state["approach_z"] = -0.22 - float(posmod(int(state["late_order"]), 3)) * 0.56
+		student.position = Vector3(start_x, 0.255, float(state["approach_z"] if bool(state["late"]) else state["base_z"]))
 		student.scale = Vector3.ONE * 0.42
 		student.rotation.y = PI * 0.5 if bool(state["late"]) else PI
 		(stop["root"] as Node3D).add_child(student)
@@ -420,7 +423,7 @@ func _activate_stop(stop: Dictionary) -> void:
 		(stop["students"] as Array).append(student)
 		var animator := student.find_child("AnimationPlayer", true, false) as AnimationPlayer
 		if animator:
-			animator.play("idle" if bool(state["late"]) else "walk")
+			_play_student_animation(animator, "idle", float(state["phase"]), 0.92 + float(state["variant"]) * 0.12)
 		state["node"] = student
 		state["animator"] = animator
 
@@ -457,21 +460,30 @@ func _animate_students(delta: float) -> void:
 					if bus_x >= stop_x - 9.0:
 						state["approaching"] = true
 					if bool(state["approaching"]):
-						student.position.x = move_toward(student.position.x, float(state["base_x"]), float(state["run_speed"]) * delta)
-						_face_student(student, Vector3(-1.0, 0.0, 0.0))
-						if animator and animator.current_animation != "sprint":
-							animator.play("sprint")
-						if absf(student.position.x - float(state["base_x"])) < 0.05:
+						# The original x-speed and arrival threshold remain authoritative;
+						# lane weaving and gait offsets affect only the visible model.
+						state["approach_x"] = move_toward(float(state["approach_x"]), float(state["base_x"]), float(state["run_speed"]) * delta)
+						var previous := student.position
+						var remaining := absf(float(state["approach_x"]) - float(state["base_x"]))
+						var span := maxf(0.01, absf(float(state["approach_start_x"]) - float(state["base_x"])))
+						var arrival := 1.0 - remaining / span
+						student.position.x = float(state["approach_x"])
+						student.position.z = lerpf(float(state["approach_z"]), float(state["base_z"]), smoothstep(0.48, 1.0, arrival))
+						student.position.z += sin(elapsed * 2.1 + float(state["phase"])) * 0.06 * (1.0 - arrival)
+						_face_student(student, student.position - previous)
+						_play_student_animation(animator, "sprint", float(state["phase"]), 0.88 + float(state["run_speed"]) * 0.11)
+						if remaining < 0.05:
 							state["arrived"] = true
 							running_count -= 1
-					elif animator and animator.current_animation != "idle":
-						animator.play("idle")
+					elif animator:
+						_play_student_animation(animator, "idle", float(state["phase"]), 0.92)
 				if bool(state["arrived"]):
 					ready_count += 1
 					student.position.x = float(state["base_x"]) + sin(elapsed * 1.7 + float(state["phase"])) * 0.10
 					student.position.z = float(state["base_z"]) + sin(elapsed * 1.15 + float(state["phase"])) * 0.05
-					if animator and animator.current_animation != "idle":
-						animator.play("idle")
+					if animator:
+						_play_student_animation(animator, "idle", float(state["phase"]), 0.92 + float(state["variant"]) * 0.12)
+					student.rotation.y = PI + sin(elapsed * 0.45 + float(state["phase"])) * 0.16
 			stop["waiting"] = ready_count
 			(stop["label"] as Label3D).text = "정류장 · Space" if absf(bus_x - stop_x) <= PICKUP_REACH and absf(bus_speed) <= STOP_SPEED_LIMIT else "정류장"
 			(stop["label"] as Label3D).modulate = Color("ffc288") if running_count > 0 else Color("fff3c4")
@@ -501,10 +513,10 @@ func _attempt_pickup() -> void:
 		if bool(state["arrived"]) and not bool(state["boarded"]) and passengers + boarding < BUS_CAPACITY:
 			state["boarded"] = true
 			var student := state["node"] as Node3D
-			boarding_students.append({"node": student, "age": 0.0, "delay": float(boarding) * 0.025, "start": student.position, "target": Vector3(bus_x + 1.08, 0.335, 1.98)})
+			boarding_students.append({"node": student, "age": 0.0, "delay": float(boarding) * 0.025, "start": student.position, "target": Vector3(bus_x + 1.08, 0.335, 1.98), "lane": boarding % 3 - 1})
 			var animator := state["animator"] as AnimationPlayer
 			if animator:
-				animator.play("walk")
+				_play_student_animation(animator, "walk", float(state["phase"]), 1.08)
 			boarding += 1
 	if boarding <= 0:
 		_notice("학생이 아직 정류장으로 뛰어오고 있어요. 잠시 기다리세요!")
@@ -563,7 +575,7 @@ func _spawn_dropoff_students(school_x: float, count: int) -> void:
 		var lane := student_index % 3 - 1
 		var start_x := bus_x + 1.08 + float(lane) * 0.08
 		var delay := float(int(student_index / 3)) * DROPOFF_BATCH_GAP + float(student_index % 3) * 0.025
-		dropped_students.append({"node": null, "age": 0.0, "delay": delay, "start_x": start_x, "lane": lane, "school_x": school_x, "entrance_x": school_x + SCHOOL_ENTRANCE_OFFSET, "variant": student_index % 2})
+		dropped_students.append({"node": null, "age": 0.0, "delay": delay, "start_x": start_x, "lane": lane, "school_x": school_x, "entrance_x": school_x + SCHOOL_ENTRANCE_OFFSET, "variant": student_index % 2, "pose_phase": fposmod(float(student_index) * 2.39996, TAU)})
 
 static func dropoff_path_position(record: Dictionary, progress: float) -> Vector3:
 	var lane := float(record.get("lane", 0))
@@ -577,6 +589,16 @@ static func dropoff_path_position(record: Dictionary, progress: float) -> Vector
 	if t < 0.78:
 		return pavement.lerp(entry_lane, (t - 0.25) / 0.53)
 	return entry_lane.lerp(finish, (t - 0.78) / 0.22)
+
+func _play_student_animation(animator: AnimationPlayer, animation: String, phase: float, pace: float) -> void:
+	if not is_instance_valid(animator) or not animator.has_animation(animation):
+		return
+	animator.speed_scale = pace
+	if animator.current_animation == animation and animator.is_playing():
+		return
+	animator.play(animation, 0.12)
+	var clip := animator.get_animation(animation)
+	animator.seek(fposmod(phase / TAU, 1.0) * clip.length, true)
 
 func _face_student(student: Node3D, direction: Vector3) -> void:
 	if direction.length_squared() > 0.0001:
@@ -593,8 +615,11 @@ func _animate_boarding_students(delta: float) -> void:
 		var progress := clampf((float(record["age"]) - float(record["delay"])) / 0.75, 0.0, 1.0)
 		var start: Vector3 = record["start"]
 		var target: Vector3 = record["target"]
-		student.position = start.lerp(target, progress)
-		_face_student(student, target - start)
+		var previous := student.position
+		var lane := float(record.get("lane", 0))
+		var approach := Vector3(target.x - 0.62 + lane * 0.36, 0.255, 0.68 + lane * 0.17)
+		student.position = start.lerp(approach, progress / 0.58) if progress < 0.58 else approach.lerp(target, (progress - 0.58) / 0.42)
+		_face_student(student, student.position - previous)
 		if progress >= 1.0:
 			student.visible = false
 			boarding_students.remove_at(index)

@@ -4,6 +4,7 @@ class_name LearningVillageUI
 signal stage_visibility_changed(blocking: bool)
 
 const UI = preload("res://scripts/ui/CommercialUI.gd")
+const EnergyVillageView = preload("res://scripts/ui/VillageEnergyView.gd")
 const COMPONENT_PURPOSES := {
 	"solar_panel": "햇빛을 전기로 바꿔요", "wind_blade": "바람을 받아 터빈을 돌려요",
 	"battery": "남는 전기를 저장해요", "insulation": "집 안팎으로 열이 오가는 것을 줄여요",
@@ -49,6 +50,7 @@ var shown_choice_token := -1
 var shown_phase := ""
 var last_blocking := false
 var flow_clock := 0.0
+var energy_village_view: Control
 
 func _ready() -> void:
 	name = "LearningVillageUI"
@@ -120,11 +122,15 @@ func _fit_layout() -> void:
 	column.add_theme_constant_override("separation", 8 if compact else 12)
 	content.add_theme_constant_override("separation", 8 if compact else 12)
 	heading.add_theme_font_size_override("font_size", 26 if compact else 30)
+	panel.offset_top = 24 if screen == "trial" else 55
+	panel.offset_bottom = -28 if screen == "trial" else -30
+	panel.offset_left = 32 if screen == "trial" else 52
+	panel.offset_right = -32 if screen == "trial" else -52
 	for view in district_views:
-		view["building"].custom_minimum_size = Vector2(140, 42 if compact else 105)
-		view["building"].get_parent().add_theme_constant_override("separation", 4 if compact else 7)
+		view["flow"].add_theme_font_size_override("font_size", 15 if compact else 16)
+		view["supply_label"].add_theme_font_size_override("font_size", 16 if compact else 17)
 	for illustration in facility_images: illustration.custom_minimum_size.y = 32 if compact else 40
-	if is_instance_valid(trial_message): trial_message.add_theme_font_size_override("font_size", 20 if compact else 22)
+	if is_instance_valid(trial_message): trial_message.add_theme_font_size_override("font_size", 17 if compact else 19)
 	for button in option_buttons:
 		var illustration := button.find_child("ComponentImage", true, false) as TextureRect
 		if illustration: illustration.custom_minimum_size.y = 104 if compact else 140
@@ -252,6 +258,7 @@ func _show_screen(value: String) -> void:
 		mode_buttons.clear()
 		district_views.clear()
 		facility_images.clear()
+		energy_village_view = null
 		shown_phase = ""
 		match screen:
 			"component": _build_component()
@@ -405,55 +412,38 @@ func _confirm_plan() -> void:
 func _build_trial() -> void:
 	heading.text = "우리 마을에 전기 보내기"
 	subheading.text = "1 남는 전기 저장  ·  2 배터리 전기 사용"
-	trial_phase_bar = _bar(UI.GOLD, 10)
+	trial_phase_bar = _bar(UI.GOLD, 6)
 	content.add_child(trial_phase_bar)
-	var facilities := HBoxContainer.new()
-	facilities.alignment = BoxContainer.ALIGNMENT_CENTER
-	facilities.add_theme_constant_override("separation", 12)
-	content.add_child(facilities)
-	for project_idx in trial_state.get("built_ids", []):
-		var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[int(project_idx)]
-		var image := _image(str(project["image"]), Vector2(54, 48))
-		image.tooltip_text = str(project["name"]) + " · " + PROJECT_PURPOSES[int(project_idx)]
-		image.mouse_filter = Control.MOUSE_FILTER_PASS
-		facilities.add_child(image)
-		facility_images.append(image)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 12)
-	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	content.add_child(row)
+	energy_village_view = EnergyVillageView.new()
+	energy_village_view.custom_minimum_size.y = 210
+	energy_village_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	energy_village_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_child(energy_village_view)
 	for idx in range(GameManager.players.size()):
-		var card := PanelContainer.new()
-		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		card.add_theme_stylebox_override("panel", UI.padded_panel(UI.INK, UI.GOLD if idx == _local_index() else UI.BORDER_MUTED, 12))
-		row.add_child(card)
 		var stack := VBoxContainer.new()
-		stack.add_theme_constant_override("separation", 7)
-		card.add_child(stack)
-		var name_label := _label(_player_name(idx) + (" · 내 구역" if idx == _local_index() else ""), 20, UI.GOLD)
-		name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		stack.name = "District%d" % (idx + 1)
+		stack.add_theme_constant_override("separation", 3)
+		energy_village_view.add_district_marker(stack)
+		var name_label := _label("%d  %s" % [idx + 1, _player_name(idx)], 18, UI.GOLD if idx == _local_index() else UI.TEXT)
+		name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		stack.add_child(name_label)
-		var building := _image("res://assets/buildings/efficiency_building.webp", Vector2(160, 105))
-		building.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		stack.add_child(building)
-		var flow := _label("", 19)
-		flow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		stack.add_child(flow)
-		var supply := _bar(UI.TEAL)
+		var supply := _bar(EnergyVillageView.PLAYER_COLORS[idx % 4], 5)
 		stack.add_child(supply)
-		var supply_label := _label("", 18)
+		var supply_label := _label("", 17)
 		stack.add_child(supply_label)
-		var battery := _bar(UI.GOLD)
+		var battery := _bar(UI.GOLD, 5)
 		stack.add_child(battery)
-		var battery_label := _label("", 18)
+		var battery_label := _label("", 16, UI.TEXT_MUTED)
 		stack.add_child(battery_label)
-		district_views.append({"name": name_label, "building": building, "flow": flow, "supply": supply, "supply_label": supply_label, "battery": battery, "battery_label": battery_label})
-	trial_message = _label("", 22, UI.GOLD)
+		var flow := _label("", 16, UI.TEXT_MUTED)
+		stack.add_child(flow)
+		district_views.append({"name": name_label, "flow": flow, "supply": supply, "supply_label": supply_label, "battery": battery, "battery_label": battery_label})
+	trial_message = _label("", 19, UI.TEXT)
 	trial_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	trial_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(trial_message)
-	mode_buttons["store"] = _button("1  남는 전기 저장", _choose_mode.bind("store"))
-	mode_buttons["supply"] = _button("2  배터리 전기 사용", _choose_mode.bind("supply"))
+	mode_buttons["store"] = _button("1  내 구역에 전기 저장", _choose_mode.bind("store"))
+	mode_buttons["supply"] = _button("2  내 배터리 전기 사용", _choose_mode.bind("supply"))
 	footer.add_child(mode_buttons["store"])
 	footer.add_child(mode_buttons["supply"])
 	trial_retry_button = _button("시설 보완하기", _finish_trial.bind(true))
@@ -472,9 +462,10 @@ func _update_trial() -> void:
 	var summary: Dictionary = trial_state.get("summary", trial_state)
 	timer_label.text = "완료" if complete else "%s · %d초" % ["낮" if phase == "day" else "밤", ceili(float(trial_state.get("phase_remaining", 20.0)))]
 	trial_phase_bar.value = float(trial_state.get("elapsed", 0.0)) / 40.0 * 100.0
-	panel.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL if phase == "day" else Color("0c2038"), UI.GOLD if phase == "day" else UI.TEAL_DARK, 20, 18))
+	panel.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL, UI.TEAL_DARK, 16, 12))
+	energy_village_view.update_snapshot(trial_state, _local_index())
 	for idx in range(mini(players.size(), district_views.size())):
-		district_views[idx]["name"].text = _player_name(idx) + (" · 내 구역" if idx == _local_index() else "")
+		district_views[idx]["name"].text = "%d  %s%s" % [idx + 1, _player_name(idx), " (나)" if idx == _local_index() else ""]
 		_update_district(district_views[idx], players[idx], complete)
 	var own: Dictionary = players[_local_index()] if _local_index() >= 0 and _local_index() < players.size() else {}
 	for mode in mode_buttons:
@@ -525,14 +516,13 @@ func _update_district(view: Dictionary, district: Dictionary, complete: bool) ->
 	if complete: ratio = float(district.get("coverage", ratio))
 	if complete: view["flow"].modulate.a = 1.0
 	view["supply"].value = ratio * 100.0
-	view["supply_label"].text = ("40초 동안 %d%% 공급" if complete else "필요한 전기 %d%% 공급") % roundi(ratio * 100.0)
-	view["building"].modulate = Color.WHITE.lerp(Color("334252"), (1.0 - ratio) * 0.8)
-	view["flow"].text = "남는 전기 → 배터리" if float(district.get("charging", 0.0)) > 0.01 else ("배터리  →  집" if float(district.get("discharging", 0.0)) > 0.01 else ("발전소  →  집" if supplied > 0.01 else "전기 부족  ···  집"))
+	view["supply_label"].text = ("전체 공급 %d%%" if complete else "전기 공급 %d%%") % roundi(ratio * 100.0)
+	view["flow"].text = "시험 완료" if complete else "남는 전기 저장 중" if float(district.get("charging", 0.0)) > 0.01 else ("배터리 전기 사용 중" if float(district.get("discharging", 0.0)) > 0.01 else ("발전소에서 공급 중" if supplied > 0.01 else "전기가 부족해요"))
 	view["flow"].add_theme_color_override("font_color", UI.SUCCESS if ratio >= 0.99 else UI.GOLD)
 	var capacity := float(district.get("capacity", 0.0))
 	var stored := float(district.get("battery", 0.0))
 	view["battery"].value = stored / maxf(capacity, 0.001) * 100.0
-	view["battery_label"].text = "저장소 없음" if capacity <= 0.0 else "배터리 %d%% · %s" % [roundi(stored / capacity * 100.0), "저장" if str(district.get("mode", "supply")) == "store" else "사용"]
+	view["battery_label"].text = "저장소 없음" if capacity <= 0.0 else "배터리 %d%%" % roundi(stored / capacity * 100.0)
 
 func _choose_mode(mode: String) -> void:
 	GameManager.set_energy_trial_mode(_local_index(), mode)

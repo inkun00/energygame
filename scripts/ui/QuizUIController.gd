@@ -226,7 +226,7 @@ func _build_choice_buttons(disabled: bool) -> void:
 		button.custom_minimum_size = Vector2(0, 50 + display_text.count("\n") * 20)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.add_theme_font_size_override("font_size", 21)
-		button.add_theme_constant_override("outline_size", 2)
+		button.add_theme_constant_override("outline_size", 0)
 		button.disabled = disabled
 		UI.apply_secondary_button(button, choice_accents[option_index])
 		button.pressed.connect(_on_choice_pressed.bind(option_value))
@@ -550,7 +550,7 @@ func _apply_commercial_ui() -> void:
 	if dimmer:
 		dimmer.color = Color(0.005, 0.02, 0.03, 0.84)
 	if panel:
-		panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("102d39"), Color("4b8ca0"), 20.0, 18))
+		panel.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL, UI.BORDER_MUTED, 20.0, 18))
 	if title_label:
 		title_label.add_theme_color_override("font_color", UI.GOLD)
 	if category_badge:

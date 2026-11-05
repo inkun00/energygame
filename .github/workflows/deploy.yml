@@ -102,6 +102,10 @@ jobs:
             AdventurePresentationTest \
             GuidedTutorialTest \
             BoardReadabilityTest \
+            DesignPolishTest \
+            CommercialPolishPreview \
+            MiniGameGuidePreviewTest \
+            VillageEnergyViewTest \
             MiniGamesCauseEffectTest \
             MiniGamesBClarityTest \
             UiFlowRegressionTest \

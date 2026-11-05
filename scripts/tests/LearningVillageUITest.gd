@@ -93,12 +93,20 @@ func _run() -> void:
 	for idx in range(1, 4): gm.set_energy_trial_mode(idx, "store")
 	gm._update_energy_trial(20.0)
 	check(ui.timer_label.text.begins_with("밤") and ui.district_views[0]["battery"].value > 0.0, "Day/night transition displays the charged battery")
+	if "--snapshots" in OS.get_cmdline_user_args():
+		await create_timer(0.7).timeout
+		await RenderingServer.frame_post_draw
+		root.get_texture().get_image().save_png("res://.godot/learning-trial-night.png")
 	await _key(KEY_2)
 	for idx in range(1, 4): gm.set_energy_trial_mode(idx, "supply")
 	gm._update_energy_trial(20.0)
 	check(ui.trial_confirm_button.visible and not ui.mode_buttons["store"].visible, "Completed trial replaces controls with result confirmation")
 	check(ui.subheading.text.contains("낮 100% / 밤 100%"), "Final result uses actual day/night supplied demand")
 	check(not ui.trial_retry_button.visible, "Successful supply does not offer an unnecessary retry")
+	if "--snapshots" in OS.get_cmdline_user_args():
+		await process_frame
+		await RenderingServer.frame_post_draw
+		root.get_texture().get_image().save_png("res://.godot/learning-trial-complete.png")
 	ui.trial_confirm_button.pressed.emit()
 	check(ui.trial_confirm_button.disabled and gm.energy_trial["ready"].has(0), "Result acknowledgement waits for other students")
 	main.switch_to_lobby()

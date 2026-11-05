@@ -10,6 +10,8 @@ const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 const CARGO_CARD = preload("res://assets/open_source/kenney_adventure/panel_brown.webp")
+const GARDEN_TREE = preload("res://assets/third_party/kenney/solar_dash/tree_pineSmallA.glb")
+const GARDEN_BUSH = preload("res://assets/third_party/kenney/solar_dash/plant_bushLarge.glb")
 const COAL_ROCK = preload("res://assets/third_party/kenney/solar_dash/rock_largeA.glb")
 const SOURCES := [
 	{"name": "햇빛", "kind": 0, "shape": "sun", "reason": "햇빛은 다음 날에도 다시 비춰요."},
@@ -124,12 +126,13 @@ func _build_world() -> void:
 	left_material = _material(Color("70e8ac"), true)
 	right_material = _material(Color("e8b779"), true)
 	idle_light_material = _material(Color("718590"), false)
-	_box("SortingFloor", world, Vector3(0, -0.17, 0), Vector3(12.0, 0.35, 6.0), VISUAL_STYLE.FIELD)
+	_box("SortingFloor", world, Vector3(0, -0.17, 0), Vector3(15.0, 0.35, 8.0), VISUAL_STYLE.FIELD)
+	_build_learning_garden()
 	_box("Runway", world, Vector3(0, 0.02, 1.2), Vector3(9.0, 0.07, 2.0), VISUAL_STYLE.CREAM)
 	for mark in range(-3, 4):
 		_box("RunwayDash%d" % mark, world, Vector3(float(mark) * 1.1, 0.065, 1.2), Vector3(0.4, 0.03, 0.08), Color("f8f6d9"), true)
-	_make_bin(-4.65, Color("33aa76"), 0)
-	_make_bin(4.65, Color("8e6255"), 1)
+	_make_bin(-4.65, Color("62a998"), 0)
+	_make_bin(4.65, Color("bc9675"), 1)
 	_box("CenterPickup", world, Vector3(0, 0.09, 0.0), Vector3(1.6, 0.13, 1.15), Color("edf6a8"), true)
 	icon_anchor = Node3D.new()
 	icon_anchor.name = "CarriedEnergySource"
@@ -161,8 +164,31 @@ func _build_world() -> void:
 	icon_anchor.add_child(carried_name)
 	hand_link = _box("CarryingHandle", world, Vector3.ZERO, Vector3(0.42, 0.055, 0.06), Color("f5d590"))
 
+func _build_learning_garden() -> void:
+	# Reuse the same CC0 garden props and matte treatment as the solar course.
+	# All decoration stays behind the playable delivery line.
+	_box("GardenBackCurb", world, Vector3(0, 0.07, -2.65), Vector3(14.0, 0.18, 0.20), VISUAL_STYLE.CREAM)
+	for index in range(5):
+		var tree := GARDEN_TREE.instantiate() as Node3D
+		tree.name = "KenneyGardenTree%d" % index
+		tree.position = Vector3(-6.4 + float(index) * 3.2, 0.01, -3.0)
+		tree.scale = Vector3.ONE * (0.85 if index % 2 == 0 else 0.65)
+		world.add_child(tree)
+		VISUAL_STYLE.prepare_imported(tree)
+	for side in [-1.0, 1.0]:
+		var shrub := GARDEN_BUSH.instantiate() as Node3D
+		shrub.name = "KenneyGardenShrub"
+		shrub.position = Vector3(side * 6.5, 0.04, -0.8)
+		shrub.scale = Vector3.ONE * 0.7
+		world.add_child(shrub)
+		VISUAL_STYLE.prepare_imported(shrub)
+		_box("StationPlinth", world, Vector3(side * 4.65, 0.06, -0.35), Vector3(2.7, 0.18, 2.2), VISUAL_STYLE.CREAM)
+		_box("DeliveryLaneEdge", world, Vector3(side * 2.6, 0.075, 0.24), Vector3(3.5, 0.025, 0.07), Color("b8c9ad"))
+
 func _make_bin(x: float, color: Color, index: int) -> void:
 	_box("CollectionBin%d" % index, world, Vector3(x, 0.65, -0.65), Vector3(2.2, 1.3, 1.5), color)
+	_box("BinFoot%d" % index, world, Vector3(x, 0.17, -0.65), Vector3(2.28, 0.12, 1.58), color.darkened(0.15))
+	_box("BinFrontInset%d" % index, world, Vector3(x, 0.73, 0.115), Vector3(1.86, 0.70, 0.045), color.lightened(0.15))
 	_box("BinRim%d" % index, world, Vector3(x, 1.35, -0.65), Vector3(2.35, 0.18, 1.65), color.lightened(0.28), true)
 	var lamp := _sphere("DeliveryLamp%d" % index, world, Vector3(x, 2.15, 0.0), 0.20, Color("718590"))
 	if index == 0:
@@ -173,8 +199,10 @@ func _make_bin(x: float, color: Color, index: int) -> void:
 	label.position = Vector3(x, 1.18, 0.17)
 	label.text = "다시 얻어요" if index == 0 else "곧 다시 안 생겨요"
 	label.font_size = 44
-	label.pixel_size = 0.009
-	label.outline_size = 9
+	label.pixel_size = 0.008
+	label.outline_size = 5
+	label.modulate = Color("f5f4e2")
+	label.outline_modulate = VISUAL_STYLE.INK
 	label.no_depth_test = true
 	world.add_child(label)
 
@@ -190,7 +218,8 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	hero.scale = Vector3.ONE * 2.3
 	hero.position = Vector3(0, 0.10, 1.45)
 	if hero.shadow_mesh:
-		hero.shadow_mesh.visible = false
+		hero.shadow_mesh.visible = true
+	VISUAL_STYLE.update_contact_shadow(hero, 0.10, 0.0)
 	hero.call("_set_avatar_animation_state", false)
 	VISUAL_STYLE.style_hero(hero)
 
@@ -279,6 +308,8 @@ func _build_source_shape(shape: String) -> void:
 
 func _process(delta: float) -> void:
 	visual_time += delta
+	if is_instance_valid(hero):
+		VISUAL_STYLE.update_contact_shadow(hero, 0.10, 0.0)
 	flash_remaining = maxf(0.0, flash_remaining - delta)
 	if flash_remaining <= 0.0:
 		flash.color = Color.TRANSPARENT

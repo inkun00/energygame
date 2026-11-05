@@ -68,15 +68,15 @@ func _process(delta: float) -> void:
 			light.rotation.y += delta * 0.34
 
 func _create_materials() -> void:
-	grass_material = _material(Color("527b64"), 0.92)
-	path_material = _material(Color("b9ab85"), 0.90)
-	water_material = _material(Color("447f89"), 0.86)
+	grass_material = _material(Color("83aa72"), 0.92)
+	path_material = _material(Color("d3bb8b"), 0.90)
+	water_material = _material(Color("69b9c4"), 0.86)
 	wood_material = _material(Color("79664d"), 0.88)
 	leaf_materials = [
-		_material(Color("557f64"), 0.9),
-		_material(Color("6f9472"), 0.9),
-		_material(Color("7ca18a"), 0.9),
-		_material(Color("87996c"), 0.9)
+		_material(Color("6d9d62"), 0.9),
+		_material(Color("8eb56e"), 0.9),
+		_material(Color("9bc186"), 0.9),
+		_material(Color("b4bd79"), 0.9)
 	]
 	glow_materials = [
 		_material(Color("75f4cf"), 0.2, Color("45d8bd"), 0.3),

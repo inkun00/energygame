@@ -34,6 +34,14 @@ func _ready() -> void:
 	focus_mode = Control.FOCUS_ALL
 	mouse_default_cursor_shape = Control.CURSOR_CAN_DROP
 	_create_build_preview()
+	resized.connect(_reposition_buildings)
+	queue_redraw()
+
+func _reposition_buildings() -> void:
+	for visual: Control in placed_project_nodes.values():
+		if not is_instance_valid(visual): continue
+		var normalized: Vector2 = visual.get_meta("normalized_center", Vector2(0.5, 0.5))
+		visual.position = _clamp_icon_position(normalized * size - BUILDING_SIZE * 0.5)
 	queue_redraw()
 
 func reset_map() -> void:
@@ -45,6 +53,7 @@ func reset_map() -> void:
 		if is_instance_valid(project_node):
 			project_node.queue_free()
 	placed_project_nodes.clear()
+	for assembly in find_children("AssemblyParts*", "", false, false): assembly.queue_free()
 	occupied_cell_ids.clear()
 	reserved_cell_ids.clear()
 	pending_project_cells.clear()
@@ -70,7 +79,7 @@ func set_environment_health(health: int, animate: bool = true) -> void:
 	health_tween = create_tween()
 	health_tween.tween_method(_set_environment_health_visual, environment_health_visual, target, 0.65).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
-func sync_projects(projects: Array, built_project_ids: Array[int], placements: Dictionary, owners: Dictionary, players: Array, health: int) -> void:
+func sync_projects(projects: Array, built_project_ids: Array[int], placements: Dictionary, owners: Dictionary, players: Array, health: int, animate_new: bool = true) -> void:
 	for project_index in built_project_ids:
 		if project_index < 0 or project_index >= projects.size() or placed_project_nodes.has(project_index):
 			continue
@@ -91,7 +100,7 @@ func sync_projects(projects: Array, built_project_ids: Array[int], placements: D
 			requested_position = _get_cell_center_from_id(cell_id)
 		var owner_index := int(owners.get(project_index, -1))
 		var owner_data: Dictionary = players[owner_index] if owner_index >= 0 and owner_index < players.size() else {}
-		_add_building(project_index, str(project.get("image", "")), str(project.get("name", "시설")), requested_position, owner_data)
+		_add_building(project_index, str(project.get("image", "")), str(project.get("name", "시설")), requested_position, owner_data, animate_new)
 		if int(selected_project_payload.get("project_index", -1)) == project_index:
 			cancel_selection()
 	set_environment_health(health)
@@ -242,19 +251,47 @@ func _clear_drag_state() -> void:
 		build_preview.visible = false
 	queue_redraw()
 
-func _add_building(project_index: int, image_path: String, project_name: String, center_position: Vector2, owner_data: Dictionary = {}) -> void:
+func _add_building(project_index: int, image_path: String, project_name: String, center_position: Vector2, owner_data: Dictionary = {}, animate_new: bool = true) -> void:
 	var visual := _create_project_visual("PlacedProject%d" % project_index, image_path, project_name, Color("63dcb2"), false)
 	visual.position = _clamp_icon_position(center_position - BUILDING_SIZE * 0.5)
 	visual.z_index = 3
+	visual.set_meta("normalized_center", center_position / size.max(Vector2.ONE))
 	add_child(visual)
 	placed_project_nodes[project_index] = visual
 	visual.pivot_offset = BUILDING_SIZE * 0.5
-	visual.scale = Vector2(0.18, 0.18)
-	visual.modulate = Color(1.20, 1.20, 0.88, 0.0)
 	_add_owner_badge(visual, owner_data)
-	var place_tween := create_tween().set_parallel(true)
-	place_tween.tween_property(visual, "scale", Vector2.ONE, 0.42).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	place_tween.tween_property(visual, "modulate", Color.WHITE, 0.24)
+	if not animate_new: return
+	_gather_building_parts(project_index, center_position)
+	visual.scale = Vector2(0.84, 0.84)
+	visual.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	var place_tween := create_tween()
+	place_tween.tween_interval(0.18)
+	place_tween.tween_property(visual, "modulate", Color.WHITE, 0.16)
+	place_tween.parallel().tween_property(visual, "scale", Vector2(1.06, 1.06), 0.24).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	place_tween.tween_property(visual, "scale", Vector2.ONE, 0.14).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
+func _gather_building_parts(project_index: int, center_position: Vector2) -> void:
+	if project_index < 0 or project_index >= GameManager.CONSTRUCTION_PROJECTS.size(): return
+	var assembly := Control.new()
+	assembly.name = "AssemblyParts%d" % project_index
+	assembly.position = center_position
+	assembly.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	assembly.z_index = 5
+	add_child(assembly)
+	var parts: Array = (GameManager.CONSTRUCTION_PROJECTS[project_index]["requirements"] as Dictionary).keys()
+	var gather := assembly.create_tween().set_parallel(true)
+	for idx in range(mini(parts.size(), 3)):
+		var part := TextureRect.new()
+		part.texture = load(str(GameManager.ITEM_DEFINITIONS[parts[idx]]["asset"]))
+		part.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		part.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		part.size = Vector2(27, 27)
+		part.position = Vector2.from_angle(-PI * 0.5 + float(idx) * TAU / 3.0) * 37 - part.size * 0.5
+		part.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		assembly.add_child(part)
+		gather.tween_property(part, "position", -part.size * 0.5, 0.24).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	gather.chain().tween_property(assembly, "modulate:a", 0.0, 0.12)
+	gather.chain().tween_callback(assembly.queue_free)
 
 func _add_owner_badge(visual: Control, owner_data: Dictionary) -> void:
 	if owner_data.is_empty():
@@ -311,7 +348,7 @@ func _create_project_visual(node_name: String, image_path: String, project_name:
 	return visual
 
 func _default_position(project_index: int) -> Vector2:
-	var cell_id := _get_closest_cell_id(project_index, size * 0.5, true)
+	var cell_id := _get_closest_cell_id(project_index, size * 0.5, false)
 	if not cell_id.is_empty():
 		return _get_cell_center_from_id(cell_id)
 	var terrains := _get_project_terrains(project_index)

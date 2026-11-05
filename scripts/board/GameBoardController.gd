@@ -510,7 +510,7 @@ func _build_3d_board_base() -> void:
 	base_mesh.position = Vector3(0, -0.2, 0)
 	
 	board_base_material = StandardMaterial3D.new()
-	board_base_material.albedo_color = Color("263136")
+	board_base_material.albedo_color = Color("365a4c")
 	board_base_material.roughness = 0.9
 	board_base_material.metallic = 0.0
 	base_mesh.material_override = board_base_material
@@ -525,7 +525,7 @@ func _build_3d_board_base() -> void:
 	rim_mesh.mesh = rim_box
 	rim_mesh.position = Vector3(0, -0.28, 0)
 	var rim_mat := StandardMaterial3D.new()
-	rim_mat.albedo_color = Color("738476")
+	rim_mat.albedo_color = Color("b6b991")
 	rim_mat.metallic = 0.05
 	rim_mat.roughness = 0.85
 	rim_mesh.material_override = rim_mat
@@ -869,7 +869,7 @@ func _reset_kingdom_visuals() -> void:
 		for landmark in renewable_landmarks.get_children():
 			landmark.queue_free()
 	if board_base_material:
-		board_base_material.albedo_color = Color("263136")
+		board_base_material.albedo_color = Color("365a4c")
 		board_base_material.emission_enabled = false
 	if world_environment and world_environment.environment:
 		world_environment.environment.ambient_light_color = Color("c5d4c9")
@@ -878,7 +878,7 @@ func _reset_kingdom_visuals() -> void:
 func _on_kingdom_progress_changed(projects_built: int, total_projects: int, health: int) -> void:
 	var recovery := clampf(float(health) / 100.0, 0.0, 1.0)
 	if board_base_material:
-		board_base_material.albedo_color = Color("263136").lerp(Color("126b50"), recovery)
+		board_base_material.albedo_color = Color("365a4c").lerp(Color("568f63"), recovery)
 		board_base_material.emission_enabled = recovery > 0.0
 		board_base_material.emission = Color("1fbf80") * recovery * 0.32
 	if world_environment and world_environment.environment:

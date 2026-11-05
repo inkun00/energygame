@@ -6,6 +6,7 @@ const UI = preload("res://scripts/ui/CommercialUI.gd")
 var inventory_labels: Dictionary = {}
 var recipe_cards: Array[PanelContainer] = []
 var recipe_labels: Array[Label] = []
+var recipe_slots: Array[Array] = []
 var goal_buttons: Array[Button] = []
 var inventory: Dictionary = {}
 var selected_goal := -1
@@ -85,18 +86,20 @@ func _image(path: String, dimensions: Vector2) -> TextureRect:
 
 func _build_summary() -> void:
 	summary = PanelContainer.new()
-	summary.position = Vector2(12, 634)
-	summary.size = Vector2(1256, 74)
-	summary.add_theme_stylebox_override("panel", UI.padded_panel(UI.INK, UI.TEAL_DARK, 8))
+	summary.name = "MaterialDock"
+	summary.add_theme_stylebox_override("panel", UI.padded_panel(UI.INK, UI.BORDER_MUTED, 6))
 	add_child(summary)
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 24)
+	row.add_theme_constant_override("separation", 12)
 	summary.add_child(row)
-	var heading := VBoxContainer.new()
-	heading.custom_minimum_size.x = 270
+	var heading := HBoxContainer.new()
+	heading.alignment = BoxContainer.ALIGNMENT_CENTER
+	heading.custom_minimum_size.x = 280
+	heading.add_theme_constant_override("separation", 12)
 	row.add_child(heading)
-	heading.add_child(_label("함께 건설할 내 재료", 18, UI.TEAL))
-	goal_name = _label("재료를 모아보세요", 22)
+	heading.add_child(_label("내 재료", 18, UI.TEAL))
+	goal_name = _label("재료 0개", 20)
+	goal_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	goal_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	heading.add_child(goal_name)
 	var materials := VBoxContainer.new()
@@ -105,7 +108,7 @@ func _build_summary() -> void:
 	materials.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_child(materials)
 	goal_materials = _label("모험에서 재료를 모아 종료 후 마을을 건설해요", 20)
-	goal_materials.custom_minimum_size.x = 420
+	goal_materials.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	goal_materials.custom_minimum_size.y = 50
 	materials.add_child(goal_materials)
 	goal_progress = ProgressBar.new()
@@ -118,11 +121,11 @@ func _build_summary() -> void:
 	summary_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(summary_spacer)
 	summary_toggle = _button("재료 펼치기", toggle_summary)
-	summary_toggle.custom_minimum_size = Vector2(150, 44)
+	summary_toggle.custom_minimum_size = Vector2(138, 36)
 	summary_toggle.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(summary_toggle)
-	catalog_open_button = _button("재료 가방 & 건설 도감", open_catalog)
-	catalog_open_button.custom_minimum_size = Vector2(260, 44)
+	catalog_open_button = _button("가방 · 건설 도감", open_catalog)
+	catalog_open_button.custom_minimum_size = Vector2(220, 36)
 	catalog_open_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(catalog_open_button)
 	_apply_summary_layout()
@@ -133,8 +136,11 @@ func toggle_summary() -> void:
 
 func _apply_summary_layout() -> void:
 	summary_details.visible = summary_expanded
-	summary.position.y = 580 if summary_expanded else 634
-	summary.size.y = 128 if summary_expanded else 74
+	summary.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	summary.offset_left = 12
+	summary.offset_right = -12
+	summary.offset_top = -140 if summary_expanded else -64
+	summary.offset_bottom = -12
 	summary_toggle.text = "재료 접기" if summary_expanded else "재료 펼치기"
 	# Keep the bag button on the right when the detail column is collapsed.
 	summary_spacer.visible = not summary_expanded
@@ -149,8 +155,11 @@ func _build_catalog() -> void:
 	dimmer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	catalog.add_child(dimmer)
 	var panel := PanelContainer.new()
-	panel.position = Vector2(100, 75)
-	panel.size = Vector2(1080, 570)
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	panel.offset_left = 100
+	panel.offset_right = -100
+	panel.offset_top = 75
+	panel.offset_bottom = -75
 	panel.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL, UI.TEAL_DARK, 18))
 	catalog.add_child(panel)
 	var content := VBoxContainer.new()
@@ -168,10 +177,16 @@ func _build_catalog() -> void:
 	columns.add_theme_constant_override("separation", 22)
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(columns)
+	var bag_scroll := ScrollContainer.new()
+	bag_scroll.custom_minimum_size.x = 220
+	bag_scroll.focus_mode = Control.FOCUS_ALL
+	bag_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	bag_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	columns.add_child(bag_scroll)
 	var bag := VBoxContainer.new()
-	bag.custom_minimum_size.x = 280
+	bag.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bag.add_theme_constant_override("separation", 6)
-	columns.add_child(bag)
+	bag_scroll.add_child(bag)
 	for id in GameManager.ITEM_DEFINITIONS:
 		var data: Dictionary = GameManager.ITEM_DEFINITIONS[id]
 		var row := HBoxContainer.new()
@@ -199,7 +214,8 @@ func _build_catalog() -> void:
 	for index in range(GameManager.CONSTRUCTION_PROJECTS.size()):
 		var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[index]
 		var card := PanelContainer.new()
-		card.custom_minimum_size = Vector2(680, 144)
+		card.custom_minimum_size = Vector2(0, 160)
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		card.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL_RAISED, UI.PANEL_SOFT, 6, 8))
 		grid.add_child(card)
 		recipe_cards.append(card)
@@ -214,9 +230,25 @@ func _build_catalog() -> void:
 		project_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		project_title.custom_minimum_size.y = 28
 		details.add_child(project_title)
-		var counts := _label("", 20, UI.TEXT)
+		var slots := HBoxContainer.new()
+		slots.name = "ComponentSlots"
+		slots.add_theme_constant_override("separation", 6)
+		details.add_child(slots)
+		var slot_records: Array = []
+		for item_id in project["requirements"]:
+			for unit in range(int(project["requirements"][item_id])):
+				var slot := PanelContainer.new()
+				slot.name = str(item_id) + str(unit)
+				slot.custom_minimum_size = Vector2(42, 42)
+				slot.tooltip_text = str(GameManager.ITEM_DEFINITIONS[item_id]["name"])
+				slots.add_child(slot)
+				var icon := _image(str(GameManager.ITEM_DEFINITIONS[item_id]["asset"]), Vector2(34, 34))
+				slot.add_child(icon)
+				slot_records.append({"panel": slot, "icon": icon, "item": item_id, "unit": unit, "filled": false})
+		recipe_slots.append(slot_records)
+		var counts := _label("", 16, UI.TEXT_MUTED)
 		counts.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		counts.custom_minimum_size.y = 50
+		counts.custom_minimum_size.y = 22
 		details.add_child(counts)
 		recipe_labels.append(counts)
 		var status := _label("재료 부족", 20, UI.TEXT_MUTED)
@@ -299,7 +331,19 @@ func refresh(new_inventory: Dictionary) -> void:
 		var counts: Array[String] = []
 		for id in GameManager.CONSTRUCTION_PROJECTS[index]["requirements"]:
 			counts.append("%s %d/%d" % [GameManager.ITEM_DEFINITIONS[id]["name"], int(inventory.get(id, 0)), GameManager.CONSTRUCTION_PROJECTS[index]["requirements"][id]])
-		recipe_labels[index].text = "\n".join(counts)
+		recipe_labels[index].text = " · ".join(counts)
+		for slot_record in recipe_slots[index]:
+			var filled := int(inventory.get(slot_record["item"], 0)) > int(slot_record["unit"])
+			var slot: PanelContainer = slot_record["panel"]
+			var icon: TextureRect = slot_record["icon"]
+			slot.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL_SOFT if filled else UI.INK, UI.SUCCESS if filled else UI.BORDER_MUTED, 4, 8))
+			icon.modulate = Color.WHITE if filled else Color(0.55, 0.65, 0.66, 0.28)
+			slot.tooltip_text = "%s · %s" % [GameManager.ITEM_DEFINITIONS[slot_record["item"]]["name"], "모았어요" if filled else "더 모아요"]
+			if filled and not bool(slot_record["filled"]) and catalog.visible:
+				icon.pivot_offset = Vector2(17, 17)
+				icon.scale = Vector2.ONE * 0.76
+				icon.create_tween().tween_property(icon, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			slot_record["filled"] = filled
 		var ready := missing_materials(index).is_empty()
 		var status := recipe_cards[index].find_child("Status", true, false) as Label
 		var missing := missing_materials(index)

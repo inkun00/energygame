@@ -52,7 +52,7 @@ func setup_tile_3d(idx: int) -> void:
 	border_mesh.mesh = border_box
 	border_mesh.position = Vector3(0, -0.055, 0)
 	var border_material := StandardMaterial3D.new()
-	border_material.albedo_color = Color("657568")
+	border_material.albedo_color = Color("456d5c")
 	border_material.metallic = 0.05
 	border_material.roughness = 0.85
 	border_mesh.material_override = border_material
@@ -99,19 +99,19 @@ func _refresh_tile_style() -> void:
 	block_material.emission_energy_multiplier = 1.0
 	var t_type = tile_data.get("type", BoardGrid.TileType.QUIZ_OX)
 	match t_type:
-		BoardGrid.TileType.START: block_material.albedo_color = Color("51876a")
-		BoardGrid.TileType.FINISH: block_material.albedo_color = Color("b69852")
-		BoardGrid.TileType.LADDER: block_material.albedo_color = Color("b79d64")
-		BoardGrid.TileType.SLIDE: block_material.albedo_color = Color("aa6460")
-		BoardGrid.TileType.POWERPLANT: block_material.albedo_color = Color("508b91")
-		BoardGrid.TileType.CHANCE_CARD: block_material.albedo_color = Color("7b789b")
-		BoardGrid.TileType.REST_TURN: block_material.albedo_color = Color("73877b")
+		BoardGrid.TileType.START: block_material.albedo_color = Color("91c98a")
+		BoardGrid.TileType.FINISH: block_material.albedo_color = Color("e7c878")
+		BoardGrid.TileType.LADDER: block_material.albedo_color = Color("dbbe77")
+		BoardGrid.TileType.SLIDE: block_material.albedo_color = Color("d99486")
+		BoardGrid.TileType.POWERPLANT: block_material.albedo_color = Color("8fc4be")
+		BoardGrid.TileType.CHANCE_CARD: block_material.albedo_color = Color("a6abd1")
+		BoardGrid.TileType.REST_TURN: block_material.albedo_color = Color("a9bfa2")
 		BoardGrid.TileType.MINIGAME:
-			block_material.albedo_color = Color("59676b") if minigame_completed else Color("9b5fc0")
+			block_material.albedo_color = Color("84998c") if minigame_completed else Color("b29bd9")
 			block_material.emission_enabled = not minigame_completed
 			block_material.emission = Color("7a35aa") if not minigame_completed else Color.BLACK
 			block_material.emission_energy_multiplier = 0.35
-		_: block_material.albedo_color = Color("4f6a80")
+		_: block_material.albedo_color = Color("91b9b6")
 	base_emission_enabled = block_material.emission_enabled
 	base_emission = block_material.emission
 	_refresh_kind_badge()

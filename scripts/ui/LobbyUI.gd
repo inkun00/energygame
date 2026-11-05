@@ -60,6 +60,7 @@ var _room_count_label: Label
 var _room_status_label: Label
 var _room_start_button: Button
 var _room_browser: Control
+var _room_portraits: Array[TextureRect] = []
 
 var _hero_base_y := 178.0
 var _intro_finished := false
@@ -133,7 +134,7 @@ func _ready() -> void:
 func _apply_commercial_ui() -> void:
 	var top_bar := get_node_or_null("TopBar") as ColorRect
 	if top_bar:
-		top_bar.color = Color(0.015, 0.07, 0.09, 0.94)
+		top_bar.color = Color(0.035, 0.105, 0.075, 0.88)
 	var frame := get_node_or_null("MenuPanel/Frame") as CanvasItem
 	var old_shadow := get_node_or_null("MenuPanel/Shadow") as CanvasItem
 	if frame:
@@ -144,15 +145,15 @@ func _apply_commercial_ui() -> void:
 	shell.name = "CommercialShell"
 	shell.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shell.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	shell.add_theme_stylebox_override("panel", UI.panel(Color("0b2530e8"), Color("3e8f94"), 18, 2, 14))
+	shell.add_theme_stylebox_override("panel", UI.panel(Color("16362fee"), UI.BORDER_MUTED, 22, 1, 12))
 	menu_panel.add_child(shell)
 	menu_panel.move_child(shell, 0)
 
 	var form_backdrop := get_node_or_null("MenuPanel/FormBackdrop") as Panel
 	if form_backdrop:
-		form_backdrop.add_theme_stylebox_override("panel", UI.padded_panel(Color("102f3aeb"), Color("2d6570"), 12.0, 13))
+		form_backdrop.add_theme_stylebox_override("panel", UI.padded_panel(Color("0e2821d9"), UI.BORDER_MUTED, 12.0, 14))
 	if hero_badge:
-		hero_badge.add_theme_stylebox_override("panel", UI.padded_panel(Color("0b2631e8"), UI.TEAL_DARK, 12.0, 13))
+		hero_badge.add_theme_stylebox_override("panel", UI.padded_panel(Color("15362ee8"), UI.TEAL_DARK, 12.0, 14))
 	if hero_glow:
 		hero_glow.visible = true
 		hero_glow.add_theme_stylebox_override("panel", UI.panel(Color("54e2c018"), Color("54e2c038"), 96, 1, 18))
@@ -193,6 +194,12 @@ func _apply_commercial_ui() -> void:
 func _process(_delta: float) -> void:
 	if _room_popup and _room_popup.visible:
 		_room_status_label.text = status_label.text
+		for index in range(_room_portraits.size()):
+			var portrait := _room_portraits[index]
+			if is_instance_valid(portrait):
+				var breath := sin(Time.get_ticks_msec() * 0.0018 + index * 1.7)
+				portrait.pivot_offset = Vector2(portrait.size.x * 0.5, portrait.size.y)
+				portrait.scale = Vector2(1.0 + breath * 0.003, 1.0 + breath * 0.008)
 	if not _intro_finished or not is_instance_valid(hero_portrait):
 		return
 	var time := Time.get_ticks_msec() / 1000.0
@@ -718,7 +725,7 @@ func _build_room_popup() -> void:
 	_room_popup.add_child(center)
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(1080, 570)
-	panel.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL, UI.TEAL_DARK, 28, 20))
+	panel.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL, UI.BORDER_MUTED, 24, 22))
 	center.add_child(panel)
 	var content := VBoxContainer.new()
 	content.add_theme_constant_override("separation", 16)
@@ -732,10 +739,23 @@ func _build_room_popup() -> void:
 	header.add_child(_room_count_label)
 	_room_code_label = _room_label("방 코드", 34, UI.GOLD)
 	content.add_child(_room_code_label)
-	content.add_child(_room_label("친구에게 6자리 코드를 알려주고 함께 모험을 준비하세요.", 18, UI.TEXT_MUTED))
+	content.add_child(_room_label("친구에게 6자리 방 코드를 알려 주세요.", 18, UI.TEXT_MUTED))
+	var departure_stage := PanelContainer.new()
+	departure_stage.name = "DepartureStage"
+	departure_stage.add_theme_stylebox_override("panel", UI.padded_panel(Color("365e47"), Color("668d5f"), 12, 18))
+	departure_stage.clip_contents = true
+	content.add_child(departure_stage)
+	var landscape := TextureRect.new()
+	landscape.name = "VillageBackdrop"
+	landscape.texture = preload("res://assets/maps/energy_village_map.webp")
+	landscape.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	landscape.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	landscape.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	landscape.modulate = Color(0.7, 0.9, 0.7, 0.22)
+	departure_stage.add_child(landscape)
 	_room_cards = HBoxContainer.new()
 	_room_cards.add_theme_constant_override("separation", 14)
-	content.add_child(_room_cards)
+	departure_stage.add_child(_room_cards)
 	_room_status_label = _room_label("", 18, UI.TEXT_MUTED)
 	_room_status_label.custom_minimum_size.y = 50
 	_room_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -787,6 +807,7 @@ func _show_room_popup(players_data: Dictionary) -> void:
 	for child in _room_cards.get_children():
 		_room_cards.remove_child(child)
 		child.queue_free()
+	_room_portraits.clear()
 	var peer_ids := players_data.keys()
 	peer_ids.sort()
 	for slot in range(NetworkManager.room_capacity):
@@ -800,9 +821,12 @@ func _show_room_popup(players_data: Dictionary) -> void:
 				break
 		var accent: Color = character.get("color", UI.TEAL_DARK)
 		var card := PanelContainer.new()
-		card.custom_minimum_size = Vector2(0, 265)
+		card.custom_minimum_size = Vector2(0, 254)
 		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		card.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL_RAISED if occupied else UI.INK, accent if occupied else Color("31515c"), 14, 12))
+		var card_style := UI.padded_panel(Color(0.03, 0.12, 0.08, 0.18), Color.TRANSPARENT, 9, 14)
+		card_style.shadow_size = 0
+		card_style.set_border_width_all(0)
+		card.add_theme_stylebox_override("panel", card_style)
 		_room_cards.add_child(card)
 		var column := VBoxContainer.new()
 		column.add_theme_constant_override("separation", 8)
@@ -813,13 +837,38 @@ func _show_room_popup(players_data: Dictionary) -> void:
 		var badge := _room_label(tag if occupied else "빈 자리", 16, accent if occupied else UI.TEXT_MUTED)
 		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		column.add_child(badge)
+		var hero_stage := Control.new()
+		hero_stage.custom_minimum_size.y = 150
+		column.add_child(hero_stage)
+		var platform := Panel.new()
+		platform.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		platform.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+		platform.offset_left = 18
+		platform.offset_right = -18
+		platform.offset_top = -22
+		platform.offset_bottom = -1
+		var platform_style := UI.panel(Color("577c4b") if occupied else Color("3b5840"), accent.darkened(0.22) if occupied else UI.BORDER_MUTED, 32, 1, 4)
+		platform_style.border_width_bottom = 5
+		platform.add_theme_stylebox_override("panel", platform_style)
+		hero_stage.add_child(platform)
 		var portrait := TextureRect.new()
-		portrait.custom_minimum_size.y = 140
+		portrait.name = "RoomPortrait"
+		portrait.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		portrait.offset_bottom = -10
+		portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		if not character.is_empty():
 			portrait.texture = load(str(character["icon"]))
-		column.add_child(portrait)
+			hero_stage.add_child(portrait)
+			_room_portraits.append(portrait)
+		else:
+			portrait.queue_free()
+			var empty_slot := _room_label("?", 68, Color("a0b59c"))
+			empty_slot.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			empty_slot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			empty_slot.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			hero_stage.add_child(empty_slot)
 		var nickname := _room_label(str(info.get("name", "플레이어")) if occupied else "친구를 기다리는 중", 22, UI.TEXT if occupied else UI.TEXT_MUTED)
 		nickname.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		nickname.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS

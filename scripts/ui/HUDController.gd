@@ -89,6 +89,10 @@ var open_market_recipe_button: Button
 var open_market_recipe_popover: PanelContainer
 var open_market_recipe_grid: GridContainer
 var _open_market_hovered_item_id: String = ""
+var _inventory_snapshot: Dictionary = {}
+var _inventory_snapshot_ready := false
+var _reward_flight_count := 0
+var _pending_material_deliveries: Dictionary = {}
 
 func _local_player_index() -> int:
 	if NetworkManager and NetworkManager.is_online:
@@ -158,6 +162,8 @@ func _ready() -> void:
 		GameManager.lap_reward_requested.connect(_on_lap_reward_requested)
 		GameManager.lap_reward_completed.connect(_on_lap_reward_completed)
 		GameManager.open_market_state_changed.connect(_on_open_market_state_changed)
+		GameManager.minigame_started.connect(func(_definition: Dictionary): _clear_transient_feedback())
+		GameManager.quiz_requested.connect(func(_player_idx: int, _quiz: Dictionary): _clear_transient_feedback())
 
 
 func restore_online_ui() -> void:
@@ -179,7 +185,9 @@ func restore_online_ui() -> void:
 func _on_learning_stage_visibility_changed(blocking: bool) -> void:
 	if not blocking:
 		_refresh_primary_action_controls()
+		call_deferred("_deliver_pending_materials")
 		return
+	_clear_transient_feedback()
 	_hide_lap_reward_panel()
 	_hide_open_market_panel()
 	_cancel_special_skill_targeting()
@@ -212,6 +220,9 @@ func _create_construction_scroll() -> void:
 	construction_list.custom_minimum_size.x = 300
 
 func initialize_hud() -> void:
+	_clear_transient_feedback()
+	_inventory_snapshot_ready = false
+	_inventory_snapshot.clear()
 	learning_village_ui.reset()
 	adventure_planner.begin_exploration(_local_player_index())
 	if is_instance_valid(ending_cinematic):
@@ -251,13 +262,14 @@ func initialize_hud() -> void:
 
 func _create_player_panel(p_data: Dictionary) -> Control:
 	var p_box = PanelContainer.new()
-	p_box.custom_minimum_size = Vector2(296, 92)
+	p_box.custom_minimum_size = Vector2(232, 64)
+	p_box.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	p_box.mouse_filter = Control.MOUSE_FILTER_STOP
 	p_box.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	p_box.tooltip_text = "%s의 상세 상태 보기" % p_data.get("name", "플레이어")
 	
 	var panel_color: Color = p_data.get("char_color", Color(0.3, 0.8, 0.5))
-	var sb := UI.padded_panel(Color("112b36"), panel_color.darkened(0.16), 8.0, 9)
+	var sb := UI.padded_panel(UI.INK, panel_color.darkened(0.35), 8.0, 12)
 	sb.shadow_size = 4
 	p_box.add_theme_stylebox_override("panel", sb)
 	p_box.set_meta("player_color", panel_color)
@@ -280,7 +292,8 @@ func _create_player_panel(p_data: Dictionary) -> Control:
 	h_box.add_child(turn_marker)
 	
 	var avatar = TextureRect.new()
-	avatar.custom_minimum_size = Vector2(52, 52)
+	avatar.name = "Avatar"
+	avatar.custom_minimum_size = Vector2(44, 44)
 	avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	var icon_path = p_data.get("char_icon", "res://assets/images/char_captain_eco.webp")
@@ -298,20 +311,20 @@ func _create_player_panel(p_data: Dictionary) -> Control:
 	name_lbl.name = "NameLabel"
 	name_lbl.text = p_data.get("name", "")
 	name_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	name_lbl.custom_minimum_size = Vector2(155, 0)
-	name_lbl.add_theme_font_size_override("font_size", 20)
+	name_lbl.custom_minimum_size = Vector2(0, 0)
+	name_lbl.add_theme_font_size_override("font_size", 18)
 	name_lbl.add_theme_color_override("font_color", Color(1, 1, 1))
 	name_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.95))
-	name_lbl.add_theme_constant_override("outline_size", 3)
+	name_lbl.add_theme_constant_override("outline_size", 0)
 	v_info.add_child(name_lbl)
 	
 	var stat_lbl = Label.new()
 	stat_lbl.name = "StatLabel"
 	stat_lbl.text = "에너지 %d  ·  SP %d" % [p_data.get("energy", 0), p_data.get("skill_energy", 0)]
 	stat_lbl.add_theme_font_size_override("font_size", 20)
-	stat_lbl.add_theme_color_override("font_color", Color(0.48, 0.98, 0.90))
+	stat_lbl.add_theme_color_override("font_color", UI.TEAL)
 	stat_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	stat_lbl.add_theme_constant_override("outline_size", 2)
+	stat_lbl.add_theme_constant_override("outline_size", 0)
 	v_info.add_child(stat_lbl)
 
 	_set_descendant_mouse_filter_ignore(p_box)
@@ -941,6 +954,7 @@ func _on_open_market_state_changed(state: Dictionary) -> void:
 	if not bool(state.get("active", false)):
 		_hide_open_market_panel()
 		return
+	_clear_transient_feedback()
 	_hide_lap_reward_panel()
 	_set_center_dice_visible(false, false)
 	if turn_prompt_label:
@@ -1332,6 +1346,15 @@ func _update_kingdom_mission(projects_built: int, total_projects: int, _health: 
 func _on_player_inventory_changed(player_idx: int, inventory: Dictionary) -> void:
 	var local_idx := _local_player_index()
 	if player_idx == local_idx:
+		if _inventory_snapshot_ready and not GameManager.village_construction_active:
+			for item_id in inventory:
+				var gained := int(inventory[item_id]) - int(_inventory_snapshot.get(item_id, 0))
+				if gained > 0:
+					if is_blocking_overlay_visible():
+						if learning_village_ui.screen == "component":
+							_pending_material_deliveries[str(item_id)] = int(_pending_material_deliveries.get(str(item_id), 0)) + gained
+					else:
+						_play_material_delivery(str(item_id), gained)
 		_update_inventory(player_idx, inventory)
 	if player_idx == local_idx:
 		_update_kingdom_mission(GameManager.projects_built, GameManager.CONSTRUCTION_PROJECTS.size(), GameManager.kingdom_health)
@@ -1388,6 +1411,8 @@ func _refresh_construction_guide(_player_idx: int, inventory: Dictionary) -> voi
 	adventure_planner.refresh(inventory)
 
 func _update_inventory(player_idx: int, inventory: Dictionary) -> void:
+	_inventory_snapshot = inventory.duplicate()
+	_inventory_snapshot_ready = true
 	if not item_icons:
 		return
 	for item_id in GameManager.ITEM_DEFINITIONS:
@@ -1395,6 +1420,72 @@ func _update_inventory(player_idx: int, inventory: Dictionary) -> void:
 		if count_label:
 			count_label.text = "×%d" % inventory.get(item_id, 0)
 	_refresh_construction_guide(player_idx, inventory)
+
+func _play_material_delivery(item_id: String, gained: int) -> void:
+	if not _board_feedback_allowed() or not GameManager.ITEM_DEFINITIONS.has(item_id) or _reward_flight_count >= 4:
+		return
+	var token := PanelContainer.new()
+	token.name = "MaterialDelivery"
+	token.set_meta("material_delivery", true)
+	token.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	token.z_index = 90
+	token.custom_minimum_size = Vector2(82, 64)
+	token.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL_RAISED, UI.GOLD, 6.0, 14))
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	token.add_child(row)
+	var icon := _create_asset_texture_rect(str(GameManager.ITEM_DEFINITIONS[item_id]["asset"]), Vector2(44, 44))
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(icon)
+	var amount := Label.new()
+	amount.text = "+%d" % gained
+	amount.add_theme_font_size_override("font_size", 22)
+	amount.add_theme_color_override("font_color", UI.GOLD)
+	amount.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(amount)
+	add_child(token)
+	var source := Vector2(size.x * 0.5, 150.0)
+	var local_idx := _local_player_index()
+	if local_idx >= 0 and local_idx < player_panel_nodes.size():
+		source = player_panel_nodes[local_idx].get_global_rect().get_center() - global_position + Vector2(-40, 72)
+	token.position = source
+	token.pivot_offset = Vector2(41, 32)
+	token.scale = Vector2(0.72, 0.72)
+	_reward_flight_count += 1
+	var tween := token.create_tween()
+	tween.tween_property(token, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.tween_interval(0.42)
+	tween.tween_method(func(progress: float):
+		var target := Vector2(size.x - 168.0, size.y - 68.0)
+		token.position = source.lerp(target, progress) + Vector2(0, -sin(progress * PI) * 55.0)
+		token.scale = Vector2.ONE.lerp(Vector2(0.48, 0.48), progress)
+	, 0.0, 1.0, 0.65).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	tween.tween_property(token, "modulate:a", 0.0, 0.12)
+	tween.tween_callback(func():
+		_reward_flight_count = maxi(0, _reward_flight_count - 1)
+		token.queue_free()
+	)
+
+func _clear_transient_feedback() -> void:
+	_pending_material_deliveries.clear()
+	if event_banner_tween and event_banner_tween.is_valid():
+		event_banner_tween.kill()
+	if event_banner:
+		event_banner.hide()
+	for child in get_children():
+		if child.has_meta("material_delivery"):
+			remove_child(child)
+			child.queue_free()
+	_reward_flight_count = 0
+
+func _deliver_pending_materials() -> void:
+	var pending := _pending_material_deliveries.duplicate()
+	_pending_material_deliveries.clear()
+	for item_id in pending:
+		_play_material_delivery(str(item_id), int(pending[item_id]))
+
+func _board_feedback_allowed() -> bool:
+	return not is_blocking_overlay_visible() and not GameManager.village_construction_active and GameManager.energy_trial.is_empty() and GameManager.active_minigame.is_empty() and GameManager.active_quiz_data.is_empty() and not GameManager.open_market_active
 
 func _get_inventory_total(inventory: Dictionary) -> int:
 	var total := 0
@@ -1407,32 +1498,42 @@ func update_all_player_panels() -> void:
 		if i < player_panel_nodes.size():
 			var p_data = GameManager.players[i]
 			var panel = player_panel_nodes[i]
+			var is_current := i == GameManager.current_turn_idx
+			panel.custom_minimum_size = Vector2(310, 82) if is_current else Vector2(232, 64)
+			var avatar := panel.find_child("Avatar", true, false) as TextureRect
+			if avatar:
+				avatar.custom_minimum_size = Vector2(58, 58) if is_current else Vector2(44, 44)
 			var stat_lbl = panel.find_child("StatLabel", true, false)
 			if stat_lbl:
 				var energy_rank := 1
 				for other in GameManager.players:
 					if int(other.get("energy", 0)) > int(p_data.get("energy", 0)): energy_rank += 1
-				stat_lbl.text = "에너지 %d · %d위\nSP %d · %d번 칸" % [p_data.get("energy", 0), energy_rank, p_data.get("skill_energy", 0), p_data["position"]]
+				stat_lbl.text = "에너지 %d · %d위" % [p_data.get("energy", 0), energy_rank]
+				if is_current:
+					stat_lbl.text += "\nSP %d · %d번 칸" % [p_data.get("skill_energy", 0), p_data["position"]]
+				stat_lbl.add_theme_font_size_override("font_size", 20)
 				panel.tooltip_text = "%s · 현재 에너지 순위\n종료 시 이동 보상이 합산됩니다.\n%s클릭하면 상세 상태를 볼 수 있어요." % [str(p_data.get("name", "")), "방패 보유 · " if p_data.get("shield", false) else ""]
 			var name_label := panel.find_child("NameLabel", true, false) as Label
 			if name_label:
 				name_label.text = str(p_data.get("name", "")) + (" · 나" if i == _local_player_index() else "")
+				name_label.add_theme_font_size_override("font_size", 20 if is_current else 18)
 			var turn_marker = panel.find_child("TurnMarker", true, false)
 				
 			# 현재 턴 플레이어는 밝은 초록 골드 테두리 및 펄스
-			var is_current = (i == GameManager.current_turn_idx)
 			var sb = panel.get_theme_stylebox("panel") as StyleBoxFlat
 			if sb:
 				var player_color: Color = p_data.get("char_color", Color(0.4, 0.5, 0.6))
 				if is_current:
-					sb.bg_color = Color("1b3b43")
+					sb.bg_color = UI.PANEL_RAISED
 					sb.border_color = UI.GOLD
-					sb.set_border_width_all(3)
+					sb.set_border_width_all(1)
+					sb.border_width_bottom = 4
 					panel.modulate = Color.WHITE
 				else:
-					sb.bg_color = Color("102832")
-					sb.border_color = player_color.darkened(0.25)
-					sb.set_border_width_all(2)
+					sb.bg_color = UI.INK
+					sb.border_color = player_color.darkened(0.35)
+					sb.set_border_width_all(1)
+					sb.border_width_left = 3
 					panel.modulate = Color.WHITE
 			if turn_marker:
 				turn_marker.visible = is_current
@@ -1552,6 +1653,7 @@ func _on_status_message_posted(msg: String) -> void:
 	_show_event_banner(msg)
 
 func _on_game_over(rankings: Array) -> void:
+	_clear_transient_feedback()
 	_hide_lap_reward_panel()
 	_hide_open_market_panel()
 	_set_center_dice_visible(false, false)
@@ -1600,6 +1702,7 @@ func _show_game_over_results(_rankings: Array) -> void:
 	modal_tween.tween_property(victory_modal, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _on_village_construction_started(_inventories: Array) -> void:
+	_clear_transient_feedback()
 	_hide_open_market_panel()
 	if turn_prompt_label:
 		turn_prompt_label.visible = false
@@ -1969,7 +2072,10 @@ func _on_return_to_lobby() -> void:
 func _apply_commercial_ui() -> void:
 	var top_backdrop := get_node_or_null("TopBackdrop") as ColorRect
 	if top_backdrop:
-		top_backdrop.color = Color(0.018, 0.065, 0.09, 0.96)
+		top_backdrop.hide()
+	var top_hud := get_node_or_null("TopHUD") as Control
+	if top_hud:
+		top_hud.position.y = 10.0
 	var status_panel := get_node_or_null("TopHUD/StatusTicker") as PanelContainer
 	if status_panel:
 		status_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("0d2834"), Color("285465"), 5.0, 8))
@@ -2002,9 +2108,14 @@ func _apply_commercial_ui() -> void:
 	if dice_panel:
 		dice_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("122f3b"), Color("4d7280"), 8.0, 11))
 	if event_banner:
-		event_banner.add_theme_stylebox_override("panel", UI.padded_panel(Color(0.05, 0.19, 0.24, 0.98), UI.TEAL, 12.0, 12))
+		event_banner.position = Vector2(335, 106)
+		event_banner.custom_minimum_size = Vector2(620, 46)
+		event_banner.size = Vector2(620, 46)
+		event_banner.add_theme_stylebox_override("panel", UI.padded_panel(UI.INK, UI.BORDER_MUTED, 9.0, 14))
 	if event_banner_label:
-		event_banner_label.add_theme_font_size_override("font_size", 19)
+		event_banner_label.add_theme_font_size_override("font_size", 18)
+		event_banner_label.add_theme_constant_override("outline_size", 0)
+		event_banner_label.add_theme_color_override("font_color", UI.TEXT)
 	if turn_prompt_label:
 		turn_prompt_label.add_theme_font_size_override("font_size", 21)
 		turn_prompt_label.add_theme_constant_override("outline_size", 3)
@@ -2047,10 +2158,15 @@ func _make_button_texture_style(texture: Texture2D, tint: Color) -> StyleBoxText
 func _show_event_banner(message: String) -> void:
 	if not event_banner or not event_banner_label:
 		return
+	if not _board_feedback_allowed():
+		return
 	if event_banner_tween and event_banner_tween.is_valid():
 		event_banner_tween.kill()
 	event_banner.visible = true
 	event_banner_label.text = _readable_status(message)
+	# A previous multiline message can leave a PanelContainer at its old height.
+	# Recompute after label wrapping has updated instead of keeping that rectangle.
+	event_banner.call_deferred("reset_size")
 	event_banner.modulate = Color(1, 1, 1, 0)
 	event_banner.scale = Vector2(0.9, 0.9)
 	event_banner.pivot_offset = event_banner.size / 2.0
@@ -2058,7 +2174,7 @@ func _show_event_banner(message: String) -> void:
 	event_banner_tween.set_parallel(true)
 	event_banner_tween.tween_property(event_banner, "modulate", Color.WHITE, 0.16)
 	event_banner_tween.tween_property(event_banner, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	event_banner_tween.chain().tween_interval(clampf(1.5 + float(message.length()) * 0.035, 2.5, 6.0))
+	event_banner_tween.chain().tween_interval(clampf(1.3 + float(message.length()) * 0.035, 2.0, 5.0))
 	event_banner_tween.chain().tween_property(event_banner, "modulate", Color(1, 1, 1, 0), 0.24)
 	event_banner_tween.chain().tween_callback(func(): event_banner.visible = false)
 
