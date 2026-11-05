@@ -115,6 +115,7 @@ func _run() -> void:
 	for voice in root.get_node("AudioManager").voices:
 		voice.stop()
 		voice.stream = null
-	await process_frame
+	# Dummy audio can mix less often than a fast headless process renders.
+	await create_timer(0.15).timeout
 	if failures.is_empty(): print("[PASS] Learning UI: review/choice handoff, keyboard ownership, shared plan, day/night results, 1024x600 and 1280x720")
 	quit(0 if failures.is_empty() else 1)

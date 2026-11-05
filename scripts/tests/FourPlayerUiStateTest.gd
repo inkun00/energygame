@@ -98,6 +98,7 @@ func _run() -> void:
 	for voice in root.get_node("AudioManager").voices:
 		voice.stop()
 		voice.stream = null
+	await create_timer(0.15).timeout
 	if failures.is_empty():
 		print("[PASS] Four-player UI: construction races, repeated inputs, rejected placements, reconnect overlays")
 		quit(0)
