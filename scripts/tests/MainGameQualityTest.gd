@@ -155,13 +155,17 @@ func _run() -> void:
 	gm.start_minigame_action(1, int(gm.active_minigame["round_id"]))
 	gm._update_minigame(4.0)
 	var round_total: float = gm.minigame_time_remaining
-	gm._minigame_wall_start_msec -= 1000
+	# Stall the game loop while its monotonic clock continues to advance.
+	OS.delay_msec(150)
 	gm._update_minigame(0.001)
-	_expect(gm.minigame_time_remaining <= round_total - 0.9, "낮은 FPS에서도 미니게임 제한시간은 실제 경과시간을 따라야 합니다.")
+	_expect(gm.minigame_time_remaining <= round_total - 0.14, "낮은 FPS에서도 미니게임 제한시간은 실제 경과시간을 따라야 합니다.")
 	var before_pause: float = gm.minigame_time_remaining
-	gm._minigame_wall_pause_msec = Time.get_ticks_msec() - 500
-	gm._minigame_wall_start_msec -= 500
+	paused = true
 	gm._process(0.0)
+	OS.delay_msec(150)
+	paused = false
+	gm._process(0.0)
+	gm._update_minigame(0.0)
 	_expect(absf(gm.minigame_time_remaining - before_pause) < 0.1, "재접속 정지 시간은 미니게임 실제 제한시간에서 제외해야 합니다.")
 	gm.stop_game()
 	await create_timer(1.2).timeout
