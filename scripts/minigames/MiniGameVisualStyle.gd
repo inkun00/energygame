@@ -22,6 +22,14 @@ const WARNING_FLASH_ALPHA := 0.14
 
 static var _imported_materials: Dictionary = {}
 
+static func place_prop(parent: Node3D, scene: PackedScene, ground: Vector3, size: Vector3) -> Node3D:
+	var prop := scene.instantiate() as Node3D
+	prop.position = ground
+	prop.scale = size
+	parent.add_child(prop)
+	prepare_imported(prop)
+	return prop
+
 static func add_environment(world: Node3D, profile: String = "day") -> WorldEnvironment:
 	var node := WorldEnvironment.new()
 	node.name = "ArcadeEnvironment"
@@ -122,6 +130,7 @@ static func update_contact_shadow(hero: Node3D, surface_world_y: float, lift_wor
 	# Mini-games magnify the pawn and sometimes parent it to a physics body, so
 	# feeding raw world height sent the local shadow underground (or into the air).
 	var vertical_scale := maxf(absf(hero.global_basis.get_scale().y), 0.001)
+	hero.call("set_arcade_lift", maxf(0.0, lift_world))
 	var local_surface := hero.position.y + (surface_world_y - hero.global_position.y) / vertical_scale
 	hero.call("_update_ground_shadow", local_surface, maxf(0.0, lift_world) / vertical_scale)
 	var shadow: Variant = hero.get("shadow_mesh")

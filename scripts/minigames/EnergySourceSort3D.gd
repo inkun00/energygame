@@ -9,8 +9,12 @@ signal arcade_event(points: int, success: bool, message: String, count_correct: 
 const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
+const MotionLayer = preload("res://scripts/minigames/ArcadeMotionLayer.gd")
+var motion := MotionLayer.new()
 const CARGO_CARD = preload("res://assets/open_source/kenney_adventure/panel_brown.webp")
-const GARDEN_TREE = preload("res://assets/third_party/kenney/solar_dash/tree_pineSmallA.glb")
+const GARDEN_TREE = preload("res://assets/models/village/broadleaf.glb")
+const HOPPER = preload("res://assets/models/arcade/hopper.glb")
+const AMBER_ENAMEL = preload("res://assets/shaders/sorting_bin_amber.gdshader")
 const GARDEN_BUSH = preload("res://assets/third_party/kenney/solar_dash/plant_bushLarge.glb")
 const COAL_ROCK = preload("res://assets/third_party/kenney/solar_dash/rock_largeA.glb")
 const SOURCES := [
@@ -31,6 +35,11 @@ var world: Node3D
 var hero: Node3D
 var icon_anchor: Node3D
 var source_shape: Node3D
+var flying_source: Node3D
+var flight_origin := Vector3.ZERO
+var flight_destination := Vector3.ZERO
+var flight_age := 0.0
+var flight_rejected := false
 var carried_name: Label3D
 var hand_link: MeshInstance3D
 var carry_direction := 1.0
@@ -57,6 +66,9 @@ var left_material: StandardMaterial3D
 var right_material: StandardMaterial3D
 var idle_light_material: StandardMaterial3D
 
+func _init() -> void:
+	add_child(motion)
+
 func _ready() -> void:
 	stretch = true
 	custom_minimum_size = Vector2(0, 286)
@@ -64,10 +76,13 @@ func _ready() -> void:
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_build_world()
+	motion.attach(self, world, _draw_parcel_motion)
 	_build_overlay()
 	set_process(true)
 
 func setup(player_data: Dictionary, game_seed: int) -> void:
+	motion.clear()
+	flying_source.hide()
 	rng_seed = game_seed
 	item_step = 0
 	hero_x = 0.0
@@ -149,6 +164,10 @@ func _build_world() -> void:
 	source_shape.position = Vector3(0, 0.12, 0.20)
 	source_shape.scale = Vector3.ONE * 0.52
 	icon_anchor.add_child(source_shape)
+	flying_source = Node3D.new()
+	flying_source.name = "SourceInFlight"
+	world.add_child(flying_source)
+	flying_source.hide()
 	carried_name = Label3D.new()
 	carried_name.name = "CarriedSourceName"
 	carried_name.position = Vector3(0, -0.31, 0.50)
@@ -165,14 +184,14 @@ func _build_world() -> void:
 	hand_link = _box("CarryingHandle", world, Vector3.ZERO, Vector3(0.42, 0.055, 0.06), Color("f5d590"))
 
 func _build_learning_garden() -> void:
-	# Reuse the same CC0 garden props and matte treatment as the solar course.
+	# Keep the trees and matte treatment consistent with the solar course.
 	# All decoration stays behind the playable delivery line.
 	_box("GardenBackCurb", world, Vector3(0, 0.07, -2.65), Vector3(14.0, 0.18, 0.20), VISUAL_STYLE.CREAM)
 	for index in range(5):
 		var tree := GARDEN_TREE.instantiate() as Node3D
-		tree.name = "KenneyGardenTree%d" % index
+		tree.name = "GardenTree%d" % index
 		tree.position = Vector3(-6.4 + float(index) * 3.2, 0.01, -3.0)
-		tree.scale = Vector3.ONE * (0.85 if index % 2 == 0 else 0.65)
+		tree.scale = Vector3.ONE * (0.60 if index % 2 == 0 else 0.46)
 		world.add_child(tree)
 		VISUAL_STYLE.prepare_imported(tree)
 	for side in [-1.0, 1.0]:
@@ -186,10 +205,19 @@ func _build_learning_garden() -> void:
 		_box("DeliveryLaneEdge", world, Vector3(side * 2.6, 0.075, 0.24), Vector3(3.5, 0.025, 0.07), Color("b8c9ad"))
 
 func _make_bin(x: float, color: Color, index: int) -> void:
-	_box("CollectionBin%d" % index, world, Vector3(x, 0.65, -0.65), Vector3(2.2, 1.3, 1.5), color)
-	_box("BinFoot%d" % index, world, Vector3(x, 0.17, -0.65), Vector3(2.28, 0.12, 1.58), color.darkened(0.15))
-	_box("BinFrontInset%d" % index, world, Vector3(x, 0.73, 0.115), Vector3(1.86, 0.70, 0.045), color.lightened(0.15))
-	_box("BinRim%d" % index, world, Vector3(x, 1.35, -0.65), Vector3(2.35, 0.18, 1.65), color.lightened(0.28), true)
+	var hopper := VISUAL_STYLE.place_prop(world, HOPPER, Vector3(x, 0.02, -0.65), Vector3(2.35, 1.60, 1.60))
+	if index == 1:
+		var shells := hopper.find_children("*", "MeshInstance3D", true, false)
+		if hopper is MeshInstance3D:
+			shells.append(hopper)
+		for shell: MeshInstance3D in shells:
+			for surface in range(shell.mesh.get_surface_count()):
+				var coat := ShaderMaterial.new()
+				coat.shader = AMBER_ENAMEL
+				var original := shell.get_active_material(surface) as BaseMaterial3D
+				coat.set_shader_parameter("enamel", original.albedo_texture)
+				shell.set_surface_override_material(surface, coat)
+	_box("CategoryStripe%d" % index, world, Vector3(x, 0.48, 0.16), Vector3(1.15, 0.10, 0.035), color, true)
 	var lamp := _sphere("DeliveryLamp%d" % index, world, Vector3(x, 2.15, 0.0), 0.20, Color("718590"))
 	if index == 0:
 		left_light = lamp
@@ -213,8 +241,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	world.add_child(hero)
 	var hero_data := player_data.duplicate(true)
 	hero_data["index"] = 0
-	hero.call("setup_player", hero_data)
-	hero.call("set_side_run_enabled", true)
+	hero.call("setup_arcade_player", hero_data, PLAYER_PAWN.ArcadePose.SIDE)
 	hero.scale = Vector3.ONE * 2.3
 	hero.position = Vector3(0, 0.10, 1.45)
 	if hero.shadow_mesh:
@@ -307,6 +334,8 @@ func _build_source_shape(shape: String) -> void:
 			_sphere("GasFlame", source_shape, Vector3(0, 0.57, 0), 0.18, Color("7edaf7"), true)
 
 func _process(delta: float) -> void:
+	motion.advance(delta)
+	_animate_delivery(delta)
 	visual_time += delta
 	if is_instance_valid(hero):
 		VISUAL_STYLE.update_contact_shadow(hero, 0.10, 0.0)
@@ -350,6 +379,7 @@ func _process(delta: float) -> void:
 	hero_x = clampf(hero_x + axis * RUN_SPEED * delta, -DELIVERY_X, DELIVERY_X)
 	if axis != 0.0:
 		carry_direction = signf(axis)
+		motion.trail(&"dispatch", Vector3(hero_x, 0.23, 1.72), 0.52, 0.31, carry_direction)
 	_update_carried_source()
 	if is_instance_valid(hero):
 		hero.position.x = hero_x
@@ -362,6 +392,25 @@ func _process(delta: float) -> void:
 
 func _deliver(bin_kind: int) -> void:
 	var correct := bin_kind == int(current_source["kind"])
+	var parcel_kind := &"renew" if bin_kind == 0 else &"finite"
+	var bin_x := -4.65 if bin_kind == 0 else 4.65
+	flight_destination = Vector3(bin_x, 1.57, -0.54)
+	flight_origin = world.to_local(source_shape.global_position)
+	motion.mark(parcel_kind if correct else &"return", flight_origin, flight_destination, 0.94)
+	if not motion.reduced:
+		for old_shape in flying_source.get_children():
+			flying_source.remove_child(old_shape)
+			old_shape.queue_free()
+		# Pass the mesh in the runner's hand to the bin. The next item already
+		# requires its own shape; only mistakes rebuild the retained item.
+		flying_source.global_transform = source_shape.global_transform
+		for part in source_shape.get_children():
+			part.reparent(flying_source, false)
+		if not correct: _build_source_shape(str(current_source["shape"]))
+		flight_rejected = not correct
+		flight_age = 0.0
+		flying_source.show()
+	motion.last_trail = Vector3.INF
 	var message := "%s → %s · %s" % [current_source["name"], "다시 얻는 곳" if bin_kind == 0 else "꺼내 쓰는 곳", current_source["reason"]]
 	# Keep a wrong item for another try; copying its answer earns no new prize.
 	var earned := CORRECT_POINTS if correct and not retrying_item else 0
@@ -383,6 +432,52 @@ func _deliver(bin_kind: int) -> void:
 	cooldown = 0.20
 	waiting_for_release = true
 	waiting_direction = -1 if bin_kind == 0 else 1
+
+func _animate_delivery(delta: float) -> void:
+	if not flying_source.visible: return
+	flight_age += delta
+	var progress := minf(1.0, flight_age / 0.47)
+	if flight_rejected and flight_age > 0.47:
+		progress = 1.0 - minf(1.0, (flight_age - 0.47) / 0.13)
+		var hand := Vector3(hero_x + carry_direction * 0.86, 1.10, 2.0)
+		flying_source.position = hand.lerp(flight_destination, progress)
+	else:
+		flying_source.position = flight_origin.lerp(flight_destination, progress)
+	flying_source.position.y += sin(progress * PI) * 0.63
+	flying_source.rotation.z = sin(progress * PI) * signf(flight_destination.x) * 0.20
+	if flight_age >= (0.60 if flight_rejected else 0.47): flying_source.hide()
+
+func _draw_parcel_motion(ink: MotionLayer, kind: StringName, a: Vector2, b: Vector2, t: float, alpha: float, amount: float) -> void:
+	if kind == &"dispatch":
+		var tail := a.lerp(b, t * 0.5)
+		ink.stroke([tail - Vector2.RIGHT * amount * 5, tail], Color(Color("ffe1a2"), alpha * 0.72), 2)
+		return
+	var hue := Color("87efc3") if kind == &"renew" else Color("ffce8b")
+	if kind == &"return": hue = Color("ff9979")
+	hue.a = alpha
+	if t < 0.5 and not ink.reduced:
+		var tip := ink.project(flying_source.global_position)
+		var start := tip + (a - tip).normalized() * 15
+		ink.stroke([start, tip.lerp(start, 0.40)], Color(hue, alpha * 0.72), 2)
+		return
+	var settle := clampf((t - 0.5) / 0.38, 0.0, 1.0)
+	if kind == &"renew":
+		for start in [0.0, PI]:
+			var arc := PackedVector2Array()
+			for i in range(11):
+				arc.append(b + Vector2.from_angle(start + settle * 0.65 + float(i) * 0.21) * 13)
+			ink.stroke(arc, hue)
+			var end := arc[-1]
+			var back := (arc[-2] - end).normalized()
+			ink.stroke([end + back.rotated(0.55) * 5, end, end + back.rotated(-0.55) * 5], hue, 2)
+	elif kind == &"finite":
+		for i in range(3):
+			var strip := b + Vector2(0, 7 - i * 4 - (1 - settle) * i * 3)
+			ink.stroke([strip - Vector2(9-i, 0), strip + Vector2(9-i, 0)], hue, 2.4)
+	else:
+		var side := signf(a.x - b.x)
+		var center := b + Vector2.UP * 11
+		ink.stroke([center + Vector2(side * 7, -5), center, center + Vector2(side * 7, 5)], hue)
 
 func _box(node_name: String, parent: Node3D, where: Vector3, dimensions: Vector3, color: Color, glowing: bool = false) -> MeshInstance3D:
 	var mesh := BoxMesh.new()

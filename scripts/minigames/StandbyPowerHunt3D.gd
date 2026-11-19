@@ -8,7 +8,10 @@ signal arcade_event(points: int, success: bool, message: String, count_correct: 
 const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
+const MotionLayer = preload("res://scripts/minigames/ArcadeMotionLayer.gd")
+var motion := MotionLayer.new()
 const ASSET_ROOT := "res://assets/third_party/kenney/standby_house/"
+const PLUG_MODEL = preload("res://assets/models/arcade/plug.glb")
 const WALL = preload(ASSET_ROOT + "wall.glb")
 const WALL_WINDOW = preload(ASSET_ROOT + "wallWindow.glb")
 const WALL_DOOR = preload(ASSET_ROOT + "wallDoorwayWide.glb")
@@ -95,6 +98,9 @@ var focus_marker: MeshInstance3D
 var focused_device: Dictionary = {}
 var standby_led_material: StandardMaterial3D
 
+func _init() -> void:
+	add_child(motion)
+
 func _ready() -> void:
 	stretch = true
 	custom_minimum_size = Vector2(0, 286)
@@ -104,10 +110,12 @@ func _ready() -> void:
 	rng.seed = 7321
 	_build_viewport()
 	_build_world()
+	motion.attach(self, world, _draw_circuit_motion)
 	_build_overlay()
 	set_process(true)
 
 func setup(player_data: Dictionary, game_seed: int) -> void:
+	motion.clear()
 	rng.seed = game_seed
 	lap_index = 1
 	saved_watts = 0
@@ -162,8 +170,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	world.add_child(hero)
 	var hero_data := player_data.duplicate(true)
 	hero_data["index"] = 0
-	hero.call("setup_player", hero_data)
-	hero.call("set_side_run_enabled", true)
+	hero.call("setup_arcade_player", hero_data, PLAYER_PAWN.ArcadePose.SIDE)
 	hero.position = Vector3(1.0, GROUND_Y, 1.0)
 	hero.scale = Vector3.ONE * 2.8
 	hero.call("_set_avatar_animation_state", false)
@@ -304,11 +311,12 @@ func _build_device(device_index: int, spec: Dictionary) -> void:
 	var plug := MeshInstance3D.new()
 	plug.name = "Plug"
 	var plug_mesh := BoxMesh.new()
-	plug_mesh.size = Vector3(0.25, 0.32, 0.12)
+	plug_mesh.size = Vector3(0.105, 0.085, 0.045)
 	plug.mesh = plug_mesh
 	plug.position = Vector3(0.72, 0.34, 0.45)
 	plug.material_override = neutral_material
 	station.add_child(plug)
+	VISUAL_STYLE.place_prop(plug, PLUG_MODEL, Vector3(0, -0.16, -0.10), Vector3(0.58, 0.31, 0.18))
 	var status := Label3D.new()
 	status.name = "StatusLabel"
 	status.position = Vector3(0, 1.55, 0.15)
@@ -353,6 +361,7 @@ func _build_device(device_index: int, spec: Dictionary) -> void:
 	device_records.append({"node": station, "model": model, "x": float(spec["x"]), "level": level, "name": str(spec["name"]), "room": str(spec["room"]), "waste": is_waste, "powered": not is_waste, "disconnected": false, "watt": watts, "resolved": false, "label": status, "plug": plug, "miss_deadline": -1.0})
 
 func _process(delta: float) -> void:
+	motion.advance(delta)
 	visual_time += delta
 	_animate_scene()
 	if not running or not is_instance_valid(hero):
@@ -365,6 +374,7 @@ func _process(delta: float) -> void:
 	var jump_down := MINIGAME_INPUT.is_pressed(KEY_W) or MINIGAME_INPUT.is_pressed(KEY_UP)
 	if jump_down and not jump_was_down and is_zero_approx(vertical_velocity) and hero.position.y <= _floor_height_at(hero.position.x, hero.position.y) + 0.02:
 		vertical_velocity = JUMP_IMPULSE
+		motion.mark(&"jump", hero.position, hero.position, 0.40)
 	jump_was_down = jump_down
 	_update_jump(delta)
 	run_velocity = move_toward(run_velocity, direction * RUN_SPEED, RUN_ACCELERATION * delta)
@@ -488,6 +498,11 @@ func _resolve_device(record: Dictionary, disconnect: bool) -> void:
 	var watts := int(record["watt"])
 	var status := record["label"] as Label3D
 	var plug := record["plug"] as MeshInstance3D
+	if is_instance_valid(plug):
+		var socket := world.to_local(plug.global_position)
+		var outcome := &"cut" if is_waste else &"fault"
+		if not disconnect: outcome = &"miss" if is_waste else &"steady"
+		motion.mark(outcome, socket + Vector3(-0.58, 0.22, 0), socket + Vector3(0.62, 0.22, 0), 0.90)
 	if disconnect:
 		record["powered"] = false
 		record["disconnected"] = true
@@ -521,6 +536,41 @@ func _resolve_device(record: Dictionary, disconnect: bool) -> void:
 		else:
 			status.text = "%s\n사용 유지 · 안전" % device_name
 			status.modulate = Color("84eab7")
+
+func _draw_circuit_motion(ink: MotionLayer, kind: StringName, a: Vector2, b: Vector2, t: float, alpha: float, _amount: float) -> void:
+	if kind == &"jump":
+		for side in [-1.0, 1.0]:
+			var heel := a + Vector2(side * (4.0 + t * 13), 1.0)
+			ink.stroke([heel, heel + Vector2(side * 4.5, -2.5)], Color(Color("fce6ad"), alpha * 0.70), 2)
+		return
+	var cut := kind == &"cut" or kind == &"fault"
+	var hue := Color("8df3bc") if kind == &"cut" or kind == &"steady" else Color("ff9c69")
+	hue.a = alpha
+	var middle := a.lerp(b, 0.5)
+	var gap := (4.5 + 6.0 * t) if cut else 0.0
+	for side in [-1.0, 1.0]:
+		var tip: Vector2 = middle + Vector2.RIGHT * side * gap
+		var edge := a if side < 0 else b
+		var cable := PackedVector2Array()
+		for i in range(9):
+			var u := float(i) / 8
+			var wave := sin(u * TAU * 1.6 - t * TAU * 1.3) * sin(u * PI)
+			cable.append(edge.lerp(tip, u) + Vector2.UP * wave * (3.8 if not cut else 1.6))
+		ink.stroke(cable, hue, 2.3)
+		if cut:
+			ink.badge(tip, hue, 2.5)
+			for dy in [-1.4, 1.4]:
+				ink.draw_line(tip + Vector2(0, dy), tip + Vector2(-side * 3, dy), hue, 1.3, true)
+	if kind == &"cut":
+		for x in [-1.0, 0.0, 1.0]:
+			var spark := Vector2(x, -1.3).normalized()
+			ink.stroke([middle + spark * (4 + t * 7), middle + spark * (8 + t * 7)], hue, 1.8)
+	elif kind == &"fault":
+		var warn := middle + Vector2.UP * 6
+		ink.stroke([warn - Vector2(4, 4), warn + Vector2(4, 4)], hue)
+		ink.stroke([warn - Vector2(4, -4), warn + Vector2(4, -4)], hue)
+	else:
+		ink.badge(a.lerp(b, t), hue, 2.8)
 
 func _start_new_lap() -> void:
 	for record in device_records:

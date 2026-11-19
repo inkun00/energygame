@@ -34,6 +34,31 @@ WebRTC 테이블은 `schema.sql`에 포함되어 있으며 Worker가 첫 WebRTC 
 6. `npm run test` 후 `npm run deploy`를 실행한다.
 7. 배포 결과 URL(예: `https://energygame-room-directory.<계정>.workers.dev`)을 Godot `project.godot`의 `network/room_directory_url`에 입력한다. 개발 중에는 환경 변수 `ENERGYGAME_ROOM_DIRECTORY_URL`로 덮어쓸 수도 있다.
 
+## 미니게임 명예의 전당
+
+아홉 종목의 개인 최고점을 기존 D1에 보관합니다. 각 종목은 점수 내림차순으로 10명까지 보여 주고, 동점에는 같은 순위를 줍니다. 10명 밖이어도 본인의 정확한 순위를 별도로 돌려줍니다. 실제 조작을 제출한 첫 0점도 기록됩니다.
+
+클라이언트는 기기에서 무작위 키를 만들고 서비스 주소별 인증값을 사용합니다. 서버에 남는 식별자는 해시입니다. 공개 별명은 그 해시로 생성하며 학생 이름과 방 코드를 받지 않습니다. 인증값을 잃거나 다른 브라우저 프로필을 사용하면 새 기록으로 시작합니다.
+
+- `GET /scores/:game`은 상위 기록과 인증된 사용자의 최고점·순위를 반환합니다.
+- `POST /scores/:game/attempts`는 실제 경기 시작에 기기 인증값과 무작위 `round_key`를 받아 15분짜리 시도를 발급합니다. 같은 요청을 재전송하면 기존 시도를 반환합니다.
+- `POST /scores/:game/attempts/:id`는 해당 사용자와 종목, 서버 경과 시간, 게임별 점수 상한과 실제 조작·시도 통계를 확인합니다. 새 경기로 넘어간 미완료 시도는 닫힙니다. 같은 완주의 재전송은 최고점을 한 번만 반영합니다. 서버는 모든 입력을 재생하지 않으므로 기록은 검증 가능한 범위 안의 **클라이언트 보고 점수**입니다.
+- 분당 발급 한도는 기기당 5회, 네트워크당 120회입니다. 제한에 쓰는 네트워크 값은 날짜별 해시이며 시도 내역은 다음 발급 요청에서 24시간이 지난 건부터 정리합니다.
+- 인터넷이나 점수 경로가 없을 때는 기기 기록을 곧바로 표시합니다. 서버 시도를 받은 완주만 만료 전 재전송할 수 있습니다. 오프라인에서 시작한 점수는 기기에 보관합니다.
+
+로컬 확인은 이 디렉터리에서 다음 두 명령을 실행합니다.
+
+```sh
+npx wrangler d1 execute energygame-room-directory --local --file=schema.sql
+npx wrangler dev --local --ip 127.0.0.1 --port 8787
+```
+
+`http://127.0.0.1:8000`의 웹 게임은 같은 호스트의 8787번 포트를 사용합니다. 네이티브 개발판에서는 `ENERGYGAME_LEADERBOARD_URL=http://127.0.0.1:8787`로 지정할 수 있습니다.
+
+GitHub Pages와 Vercel의 공개 게임은 `network/leaderboard_url`에 설정된 동일한 Vercel 순위 API를 사용합니다. API는 Worker와 같은 SQL·점수 검사 코드를 실행합니다. SQLite 파일은 비공개 Vercel Blob에 저장하며, 쓰기 충돌 시 최신 버전을 읽어 해당 요청을 다시 적용합니다. 방 검색과 4인 연결은 기존 Cloudflare 서비스를 사용합니다.
+
+Vercel 배포는 저장소 루트에서 `python tools/stage_vercel_site.py build/web build/production-site`로 웹 빌드와 순위 함수를 모은 뒤, `build/production-site`를 기존 `energygame-minigames-demo` 프로젝트에 배포합니다. 프로젝트의 프로덕션 환경에는 비공개 Blob 저장소가 연결되어 있어야 합니다.
+
 ## 연결 범위
 
 방 코드 서버가 켜져 있고 방장 공유기가 UPnP 포트 매핑을 허용하면 서로 다른 Wi-Fi나 통신사에서도 6자리 코드로 접속할 수 있다. UPnP가 꺼져 있거나 통신사가 CGNAT을 사용하면 직접 연결은 실패할 수 있으며, 이때 같은 네트워크 자동 검색은 계속 작동한다. CGNAT까지 지원하려면 추후 게임 패킷 릴레이 서버가 필요하다.

@@ -3,6 +3,8 @@ class_name TileMarker3D
 
 ## TileMarker3D: 기존 사다리 게임 칸을 입체 블록으로 표현합니다.
 
+const CELL_MESH: ArrayMesh = preload("res://assets/models/board/board_cell.obj")
+
 var tile_index: int = 0
 var tile_data: Dictionary = {}
 var block_mesh: MeshInstance3D
@@ -38,24 +40,21 @@ func setup_tile_3d(idx: int) -> void:
 	var is_terminal := idx in [0, BoardGrid.LAST_TILE_INDEX]
 	var tile_size := Vector3(1.76, 0.40, 1.76) if is_terminal else Vector3(1.66, 0.34, 1.66)
 	
-	# 1. 3D 베이스 블록 (입체 큐브)
 	block_mesh = MeshInstance3D.new()
-	var box = BoxMesh.new()
-	box.size = tile_size
-	block_mesh.mesh = box
+	block_mesh.mesh = CELL_MESH
+	block_mesh.scale = tile_size
 	add_child(block_mesh)
 
 	# 블록 아래에 살짝 큰 금속 받침을 두어 입체적인 보드 피스처럼 보이게 합니다.
 	border_mesh = MeshInstance3D.new()
-	var border_box := BoxMesh.new()
-	border_box.size = tile_size + Vector3(0.10, 0.05, 0.10)
-	border_mesh.mesh = border_box
-	border_mesh.position = Vector3(0, -0.055, 0)
+	border_mesh.mesh = CELL_MESH
+	border_mesh.scale = Vector3(tile_size.x + 0.10, tile_size.y * 0.68, tile_size.z + 0.10)
+	border_mesh.position.y = -tile_size.y * 0.25
 	var border_material := StandardMaterial3D.new()
 	border_material.albedo_color = Color("456d5c")
 	border_material.metallic = 0.05
 	border_material.roughness = 0.85
-	border_mesh.material_override = border_material
+	border_mesh.set_surface_override_material(0, border_material)
 	add_child(border_mesh)
 	move_child(border_mesh, 0)
 	
@@ -64,7 +63,7 @@ func setup_tile_3d(idx: int) -> void:
 	block_material = StandardMaterial3D.new()
 	block_material.roughness = 0.85
 	block_material.metallic = 0.0
-	block_mesh.material_override = block_material
+	block_mesh.set_surface_override_material(0, block_material)
 	_refresh_tile_style()
 	_create_target_ring(tile_size.y)
 

@@ -2,14 +2,19 @@ extends SubViewportContainer
 class_name SharedSchoolBus3D
 const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
+const MotionLayer = preload("res://scripts/minigames/ArcadeMotionLayer.gd")
+var motion := MotionLayer.new()
+var brake_motion_active := false
 
 ## 버스의 가속·제동·짧은 후진을 직접 조작합니다. 정류장과 학교에 정확히
 ## 멈추고 움직이는 학생을 태우며 1인당 운행 에너지를 확인합니다.
 signal arcade_event(points: int, success: bool, message: String, count_correct: bool)
 
 const BUS_MODEL = preload("res://assets/models/school_bus/school_bus.glb")
-const STUDENT_A = preload("res://assets/third_party/school_bus_run/character-a.glb")
-const STUDENT_B = preload("res://assets/third_party/school_bus_run/character-b.glb")
+const BUS_SHELTER = preload("res://assets/models/arcade/shelter.glb")
+const SCHOOL_BUILDING = preload("res://assets/models/arcade/school.glb")
+const STUDENT_A = preload("res://assets/models/school_pupils/eco_school_pupil.glb")
+const STUDENT_B = preload("res://assets/models/school_pupils/eco_school_pupil_lilac.glb")
 const BUS_CAPACITY := 45
 const SEGMENT_LENGTH := 60.0
 const STOP_OFFSETS := [12.0, 29.0, 46.0]
@@ -37,8 +42,8 @@ const PAVEMENT_Y := 0.255
 const BOARDING_SECONDS := 0.75
 # At the pupils' 0.42 scene scale these are the distances their feet cover
 # per second at the imported walk and sprint clips' native playback speed.
-const WALK_SPEED := 2.18
-const SPRINT_SPEED := 3.36
+const WALK_SPEED := 2.72 * 0.42 * 0.82 / 0.8
+const SPRINT_SPEED := 2.72 * 0.42 / 0.6
 const DROPOFF_SECONDS := 0.65
 const DROPOFF_BATCH_GAP := 0.225
 const MAX_VISIBLE_DROPOFF := 9
@@ -83,6 +88,9 @@ var running := false
 var notice := "D/A 길게 가속 · S 정차 · 정류장에서 Space"
 var notice_remaining := 3.0
 
+func _init() -> void:
+	add_child(motion)
+
 func _ready() -> void:
 	stretch = true
 	custom_minimum_size = Vector2(0, 286)
@@ -90,10 +98,13 @@ func _ready() -> void:
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_build_world()
+	motion.attach(self, world, _draw_route_motion)
 	_build_overlay()
 	set_process(true)
 
 func setup(_player_data: Dictionary, game_seed: int) -> void:
+	motion.clear()
+	brake_motion_active = false
 	rng.seed = game_seed
 	bus_x = 0.0
 	furthest_x = 0.0
@@ -149,6 +160,7 @@ func advance_finish_animation(delta: float) -> void:
 	# elapsed/route/learning state after the competitive clock has stopped.
 	if not finish_animation_active:
 		return
+	motion.advance(delta)
 	_animate_boarding_students(delta)
 	_animate_dropoff_students(delta)
 	_animate_school_doors(delta)
@@ -317,8 +329,7 @@ func _build_segment(index: int) -> Dictionary:
 		group.add_child(stop_root)
 		var shelter_x := stop_x + WAITING_OFFSET_X + 0.7
 		_box(stop_root, Vector3(shelter_x, 0.13, -1.0), Vector3(3.2, 0.25, 1.7), Color("e2e3b0"))
-		_box(stop_root, Vector3(shelter_x, 1.22, -1.4), Vector3(0.12, 1.9, 0.12), Color("739094"))
-		_box(stop_root, Vector3(shelter_x, 2.14, -1.4), Vector3(2.6, 0.16, 0.95), Color("6fb5c9"))
+		VISUAL_STYLE.place_prop(stop_root, BUS_SHELTER, Vector3(shelter_x, 0.25, -1.60), Vector3(3.18, 2.13, 1.26))
 		var stop_marker := _box(group, Vector3(stop_x, 0.055, 1.1), Vector3(PICKUP_REACH * 2.0, 0.07, 2.45), Color("e5d98c"), true)
 		_build_parking_outline(group, stop_x, PICKUP_REACH)
 		var student_nodes: Array[Node3D] = []
@@ -340,11 +351,9 @@ func _build_segment(index: int) -> Dictionary:
 	school.position = Vector3(entrance_x, 0.0, SCHOOL_ENTRY_Z)
 	school.rotation.y = SCHOOL_ENTRY_YAW
 	group.add_child(school)
-	_box(school, Vector3(0, 1.10, -0.85), Vector3(2.35, 2.18, 1.55), Color("ead5b1"))
-	_box(school, Vector3(0, 2.31, -0.85), Vector3(2.55, 0.24, 1.8), Color("b5796b"))
-	_box(school, Vector3(0, 0.80, -0.045), Vector3(1.55, 1.50, 0.07), Color("617d8a"))
-	var school_door_left := _box(school, Vector3(-0.38, 0.80, 0.015), Vector3(0.73, 1.46, 0.045), Color("c4e6d8"))
-	var school_door_right := _box(school, Vector3(0.38, 0.80, 0.015), Vector3(0.73, 1.46, 0.045), Color("c4e6d8"))
+	VISUAL_STYLE.place_prop(school, SCHOOL_BUILDING, Vector3(0, 0, -1.08), Vector3(4.48, 3.20, 2.10))
+	var school_door_left := _school_door(school, -1.0)
+	var school_door_right := _school_door(school, 1.0)
 	# A wide marked walkway connects the stopped bus door with all three entry
 	# lanes. Pupils fan out on it instead of overlapping on one diagonal line.
 	_box(group, Vector3(school_x + 2.3, 0.265, -0.68), Vector3(3.6, 0.025, 1.08), Color("e7ddb7"))
@@ -354,6 +363,13 @@ func _build_segment(index: int) -> Dictionary:
 	_box(group, Vector3(school_x, 0.055, 1.1), Vector3(SCHOOL_REACH * 2.0, 0.07, 2.45), Color("e5d98c"), true)
 	_build_parking_outline(group, school_x, SCHOOL_REACH)
 	return {"root": group, "stops": stops, "school_x": school_x, "entrance_x": entrance_x, "school_served": false, "school_missed_notice": false, "school_door_left": school_door_left, "school_door_right": school_door_right, "school_door_open": 0.0}
+
+func _school_door(school: Node3D, side: float) -> MeshInstance3D:
+	var door := _box(school, Vector3(side * 0.38, 0.80, 0.015), Vector3(0.73, 1.46, 0.055), Color("cb963d"))
+	_box(door, Vector3(0, 0.15, 0.032), Vector3(0.61, 0.95, 0.02), Color("477580"))
+	_box(door, Vector3(0, -0.54, 0.033), Vector3(0.61, 0.23, 0.02), Color("77918b"))
+	_box(door, Vector3(-side * 0.265, -0.05, 0.064), Vector3(0.025, 0.25, 0.06), Color("fff2c0"))
+	return door
 
 func _build_parking_outline(parent: Node3D, target_x: float, reach: float) -> void:
 	for side in [-1.0, 1.0]:
@@ -393,6 +409,7 @@ func _build_overlay() -> void:
 	add_child(flash)
 
 func _process(delta: float) -> void:
+	if not finish_animation_active: motion.advance(delta)
 	flash_remaining = maxf(0.0, flash_remaining - delta)
 	if flash_remaining <= 0.0:
 		flash.color = Color.TRANSPARENT
@@ -416,6 +433,10 @@ func _process(delta: float) -> void:
 	_update_visuals()
 
 func _step_vehicle(delta: float, accelerate: bool, brake: bool, reverse: bool) -> void:
+	if brake and not brake_motion_active and absf(bus_speed) > 2.5:
+		var contact := Vector3(bus_x + signf(bus_speed) * 1.12, ROAD_SURFACE_Y + 0.05, BUS_LANE_Z - 0.62)
+		motion.mark(&"brake", contact, contact + Vector3(signf(bus_speed) * 0.44, 0, 0), 0.59)
+	brake_motion_active = brake
 	# Keep the doorway beside students until everybody has cleared it.
 	if not boarding_students.is_empty() or not dropped_students.is_empty():
 		bus_speed = 0.0
@@ -434,6 +455,10 @@ func _step_vehicle(delta: float, accelerate: bool, brake: bool, reverse: bool) -
 	if bus_x <= maxf(0.0, furthest_x - MAX_REVERSE_DISTANCE) and bus_speed < 0.0:
 		bus_speed = 0.0
 	route_distance += absf(bus_x - previous_x)
+	if absf(bus_speed) > 2.5:
+		motion.trail(&"roll", Vector3(bus_x - signf(bus_speed) * 1.15, ROAD_SURFACE_Y + 0.05, BUS_LANE_Z - 0.62), 0.68, 0.36)
+	else:
+		motion.last_trail = Vector3.INF
 
 func _activate_stop(stop: Dictionary) -> void:
 	if bool(stop["active"]) or bool(stop["retired"]):
@@ -554,6 +579,7 @@ func _attempt_pickup() -> void:
 		_notice("학생이 아직 정류장으로 뛰어오고 있어요. 잠시 기다리세요!")
 		return
 	passengers += boarding
+	motion.mark(&"board", boarding_students[-1]["start"], _door_position(), 0.93, mini(boarding, 5))
 	closest["waiting"] = maxi(0, int(closest["waiting"]) - boarding)
 	var late_remaining := 0
 	for state in (closest["states"] as Array):
@@ -589,6 +615,7 @@ func _unload_at_school(school_x: float) -> void:
 		last_trip_solo_energy = energy_per_person(1, route_distance)
 		var earned := score_for_trip(passengers, route_distance)
 		_spawn_dropoff_students(school_x, passengers)
+		motion.mark(&"arrive", _door_position(), Vector3(school_x + SCHOOL_ENTRANCE_OFFSET, PAVEMENT_Y, SCHOOL_ENTRY_Z), 1.35, mini(passengers, 5))
 		delivered_total += passengers
 		arcade_event.emit(earned, true, "학생 %d명 도착 · 같은 길을 혼자 타면 %.1f, 함께 타면 1인당 %.1f" % [passengers, last_trip_solo_energy, per_person], passengers >= 2)
 		_notice("학교 도착! 함께 탄 %d명의 1인당 에너지 %.1f" % [passengers, per_person])
@@ -599,6 +626,36 @@ func _unload_at_school(school_x: float) -> void:
 	passengers = 0
 	route_distance = 0.0
 	trip_index += 1
+
+func _draw_route_motion(ink: MotionLayer, kind: StringName, a: Vector2, b: Vector2, t: float, alpha: float, amount: float) -> void:
+	if kind == &"roll":
+		ink.stroke([a.lerp(b, t * 0.64), b], Color(Color("dff8f0"), alpha * 0.72), 2)
+		return
+	if kind == &"brake":
+		var forward := (b - a).normalized()
+		var normal := forward.orthogonal()
+		for i in range(2):
+			var point := a.lerp(b, t) + forward * i * (3.5 + 5 * (1-t))
+			ink.stroke([point - normal * 3 - forward * 2, point, point + normal * 3 - forward * 2], Color(Color("ffd171"), alpha), 2.2)
+		return
+	var hue := Color(Color("ffda79") if kind == &"arrive" else Color("84f2c2"), alpha)
+	var direction := (b - a).normalized()
+	var across := direction.orthogonal()
+	# Pairs of steps appear in walking order along the students' actual path.
+	var count := clampi(roundi(amount) + 2, 3, 7)
+	for i in range(count):
+		var u := (float(i) + 0.5) / count
+		var strength := smoothstep(u - 0.13, u + 0.09, t * 1.4)
+		if strength < 0.03: continue
+		var foot := a.lerp(b, u) + across * (2.4 if i % 2 else -2.4)
+		var tint := Color(hue, hue.a * strength)
+		ink.stroke([foot - direction * 1.5, foot + direction * 1.3], tint, 2.8)
+		ink.draw_circle(foot + direction * 3.9, 1.2, tint, true, -1, true)
+	if kind == &"arrive" and t > 0.34:
+		var peak := b + Vector2.UP * 6
+		for i in range(5):
+			var ray := Vector2.UP.rotated((i - 2) * 0.48)
+			ink.stroke([peak + ray * (5 + t * 5), peak + ray * (10 + t * 7)], hue, 2.3)
 
 func _spawn_dropoff_students(school_x: float, count: int) -> void:
 	# Three pupils leave at a time and clear the doorway before the next batch.
@@ -634,7 +691,7 @@ func _play_student_animation(animator: AnimationPlayer, animation: String, phase
 
 func _face_student(student: Node3D, direction: Vector3) -> void:
 	if direction.length_squared() > 0.00000001:
-		# Both Kenney pupils have their face and toes on local +Z.
+		# Both pupil rigs face local +Z.
 		student.rotation.y = atan2(direction.x, direction.z)
 
 static func boarding_path_position(start: Vector3, target: Vector3, progress: float) -> Vector3:

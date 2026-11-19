@@ -1,7 +1,8 @@
 extends CanvasLayer
 class_name StandaloneMiniGames
 
-## 웹 링크에서 보드 없이 미니게임을 체험합니다. 결과는 세션 밖에 저장하지 않습니다.
+## 로비와 웹 바로가기에서 같은 아케이드에 입장합니다.
+signal lobby_requested
 
 const UI = preload("res://scripts/ui/CommercialUI.gd")
 const MINI_GAME_MODAL = preload("res://scenes/MiniGameModal.tscn")
@@ -26,7 +27,13 @@ const KEY_PREVIEWS := {
 
 var menu: PanelContainer
 var modal: MiniGameUI
+@onready var hall := preload("res://scripts/ui/ArcadeHallOfFame.gd").new()
+@onready var hall_button := Button.new()
+@onready var lobby_button := Button.new()
+var hall_from_result := false
+@onready var heading_row := BoxContainer.new()
 var current_game_id := ""
+var player_configs: Array[Dictionary] = []
 var cards_grid: GridContainer
 var cards_scroll: ScrollContainer
 var card_buttons: Array[Button] = []
@@ -34,6 +41,10 @@ var card_buttons: Array[Button] = []
 func _ready() -> void:
 	layer = 20
 	_build_menu()
+	add_child(hall)
+	hall.hide()
+	hall.back_requested.connect(_close_hall)
+	hall.challenge_requested.connect(_start_game)
 	get_viewport().size_changed.connect(_update_menu_layout)
 	_update_menu_layout()
 	modal = MINI_GAME_MODAL.instantiate() as MiniGameUI
@@ -41,6 +52,7 @@ func _ready() -> void:
 	add_child(modal)
 	modal.standalone_replay_requested.connect(_replay)
 	modal.standalone_menu_requested.connect(_show_menu)
+	modal.standalone_records_requested.connect(_open_hall.bind(true))
 	GameManager.minigame_finished.connect(_on_minigame_finished)
 	DisplayServer.window_set_title("에코 히어로즈 · 에너지 미니게임")
 
@@ -66,18 +78,33 @@ func _build_menu() -> void:
 	var content := VBoxContainer.new()
 	content.add_theme_constant_override("separation", 10)
 	menu.add_child(content)
-	var eyebrow := Label.new()
-	eyebrow.text = "에코 히어로즈 · 4인 동시 도전"
-	eyebrow.add_theme_font_size_override("font_size", 17)
-	eyebrow.add_theme_color_override("font_color", Color("8fffe0"))
-	content.add_child(eyebrow)
+	heading_row.add_theme_constant_override("separation", 10)
+	content.add_child(heading_row)
 	var heading := Label.new()
-	heading.text = "에너지 미니게임"
+	heading.text = "미니게임 모드"
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_theme_font_size_override("font_size", 31)
 	heading.add_theme_color_override("font_color", Color("fff0a6"))
-	content.add_child(heading)
+	heading_row.add_child(heading)
+	var nav := HBoxContainer.new()
+	nav.add_theme_constant_override("separation", 10)
+	heading_row.add_child(nav)
+	hall_button.text = "명예의 전당"
+	hall_button.custom_minimum_size = Vector2(138, 52)
+	hall_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hall_button.add_theme_font_size_override("font_size", 20)
+	UI.apply_primary_button(hall_button)
+	hall_button.pressed.connect(_open_hall.bind(false))
+	nav.add_child(hall_button)
+	lobby_button.text = "메인 화면"
+	lobby_button.custom_minimum_size = Vector2(118, 52)
+	lobby_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lobby_button.add_theme_font_size_override("font_size", 20)
+	UI.apply_secondary_button(lobby_button)
+	lobby_button.pressed.connect(func(): lobby_requested.emit())
+	nav.add_child(lobby_button)
 	var intro := Label.new()
-	intro.text = "미션을 골라 나와 AI 3명이 도전해요. 시작 전 직접 조작을 연습할 수 있어요."
+	intro.text = "종목을 골라 AI 친구 3명과 도전해요. 직접 플레이한 기록으로 종목별 순위에 올라요."
 	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	intro.add_theme_font_size_override("font_size", 18)
 	intro.add_theme_color_override("font_color", Color("c9e5e1"))
@@ -165,15 +192,29 @@ func _update_menu_layout() -> void:
 		return
 	# canvas_items may keep a 1280-unit logical canvas on a 1024px laptop.
 	# Choose the readable card count from the actual window, not that canvas.
-	cards_grid.columns = 1 if get_window().size.y > get_window().size.x else (2 if get_window().size.x < 1150 else 3)
+	var portrait := get_window().size.y > get_window().size.x
+	heading_row.vertical = portrait
+	hall_button.custom_minimum_size.y = 60 if portrait else 52
+	lobby_button.custom_minimum_size.y = hall_button.custom_minimum_size.y
+	cards_grid.columns = 1 if portrait else (2 if get_window().size.x < 1150 else 3)
 	for index in range(card_buttons.size()):
 		var button := card_buttons[index]
+		button.custom_minimum_size.y = 274 if portrait else 226
+		var box := button.get_child(0)
+		box.get_node("ScenePreview").custom_minimum_size.y = 146 if portrait else 116
+		box.get_node("MissionTitle").add_theme_font_size_override("font_size", 24 if portrait else 20)
+		box.get_node("MissionAction").add_theme_font_size_override("font_size", 20 if portrait else 17)
+		box.get_node("MissionKeys").add_theme_font_size_override("font_size", 19 if portrait else 16)
 		button.focus_neighbor_left = card_buttons[maxi(0, index - 1)].get_path()
 		button.focus_neighbor_right = card_buttons[mini(card_buttons.size() - 1, index + 1)].get_path()
-		button.focus_neighbor_top = card_buttons[maxi(0, index - cards_grid.columns)].get_path()
+		button.focus_neighbor_top = hall_button.get_path() if index < cards_grid.columns else card_buttons[index - cards_grid.columns].get_path()
 		button.focus_neighbor_bottom = card_buttons[mini(card_buttons.size() - 1, index + cards_grid.columns)].get_path()
-		button.focus_next = card_buttons[(index + 1) % card_buttons.size()].get_path()
-		button.focus_previous = card_buttons[posmod(index - 1, card_buttons.size())].get_path()
+		button.focus_next = hall_button.get_path() if index == card_buttons.size() - 1 else card_buttons[index + 1].get_path()
+		button.focus_previous = lobby_button.get_path() if index == 0 else card_buttons[index - 1].get_path()
+	hall_button.focus_next = lobby_button.get_path()
+	hall_button.focus_previous = card_buttons.back().get_path()
+	lobby_button.focus_previous = hall_button.get_path()
+	lobby_button.focus_next = card_buttons.front().get_path()
 	_ensure_menu_focus_visible.call_deferred()
 
 func _ensure_menu_focus_visible() -> void:
@@ -203,15 +244,16 @@ func _start_game(game_id: String) -> void:
 	GameManager.stop_game()
 	modal.cancel_minigame()
 	current_game_id = game_id
+	hall.hide()
 	menu.visible = false
 	get_viewport().gui_release_focus()
 	var players: Array[Dictionary] = [
-		{"name": "캡틴 에코 · 나", "is_ai": false, "char_icon": "res://assets/characters/eco_roster/captain_eco.webp"},
+		{"name": "캡틴 에코", "is_ai": false, "char_icon": "res://assets/characters/eco_roster/captain_eco.webp"},
 		{"name": "태양 여우 솔", "is_ai": true, "char_icon": "res://assets/characters/eco_roster/solar_fox_sol.webp"},
 		{"name": "물방울 포포", "is_ai": true, "char_icon": "res://assets/characters/eco_roster/water_popo.webp"},
 		{"name": "바람 토끼 보리", "is_ai": true, "char_icon": "res://assets/characters/eco_roster/wind_rabbit_bori.webp"},
 	]
-	GameManager.setup_game(players, 600)
+	GameManager.setup_game(players if player_configs.is_empty() else player_configs, 600)
 	GameManager._start_minigame(0, game_id, false)
 
 func _on_minigame_finished(_results: Array) -> void:
@@ -226,5 +268,25 @@ func _show_menu() -> void:
 	GameManager.stop_game()
 	if is_instance_valid(modal):
 		modal.cancel_minigame()
+	hall.hide()
 	menu.visible = true
 	_focus_menu_card.call_deferred()
+
+func _open_hall(from_result: bool) -> void:
+	hall_from_result = from_result
+	var id := current_game_id
+	var focused := get_viewport().gui_get_focus_owner()
+	if not from_result and focused in card_buttons:
+		id = str(focused.get_meta("minigame_id"))
+	menu.hide()
+	modal.hide()
+	hall.open(AVAILABLE_IDS, id, from_result)
+
+func _close_hall() -> void:
+	hall.hide()
+	if hall_from_result:
+		modal.show()
+		modal.standalone_records_button.grab_focus()
+	else:
+		menu.show()
+		hall_button.grab_focus()

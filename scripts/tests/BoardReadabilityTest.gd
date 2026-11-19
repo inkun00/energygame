@@ -67,8 +67,15 @@ func _run() -> void:
 	_check(board.world_environment.environment.tonemap_mode == Environment.TONE_MAPPER_LINEAR, "Board shares matte linear lighting")
 	var arcade_pawn := PlayerPawn.new()
 	root.add_child(arcade_pawn)
-	arcade_pawn.setup_player(gm.players[0])
-	_check(arcade_pawn.board_model == null and arcade_pawn.avatar_sprite.visible and arcade_pawn.avatar_sprite.scale == Vector3.ONE, "Arcade pawn keeps its original sprite and contact size")
+	arcade_pawn.setup_arcade_player(gm.players[0], PlayerPawn.ArcadePose.SIDE)
+	_check(arcade_pawn.board_model != null and not arcade_pawn.avatar_sprite.visible and arcade_pawn.board_model.scale == Vector3.ONE, "Arcade uses the rig without board enlargement or player labels")
+	arcade_pawn._set_avatar_animation_state(true)
+	arcade_pawn._process(0.01)
+	arcade_pawn.position.x -= 0.18
+	arcade_pawn._process(0.05)
+	_check(arcade_pawn.board_animator.current_animation == &"run" and arcade_pawn.board_pose_time > 0 and arcade_pawn.board_target_yaw < 0, "Side runner turns and advances with real travel")
+	arcade_pawn.set_arcade_lift(0.5)
+	_check(arcade_pawn.board_animator.current_animation == &"jump", "Arcade jump uses the baked pose")
 	arcade_pawn.queue_free()
 	await create_timer(0.55).timeout
 	_check(hud.center_dice_button.focus_mode == Control.FOCUS_ALL, "Dice is keyboard focusable")

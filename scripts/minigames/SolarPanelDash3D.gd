@@ -9,10 +9,10 @@ signal arcade_event(points: int, success: bool, message: String, count_correct: 
 const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
-const SOLAR_PANEL_MODEL: PackedScene = preload("res://assets/third_party/kenney/solar_dash/solar-panel-landscape.glb")
-const SOLAR_FARM_MODEL: PackedScene = preload("res://assets/third_party/kenney/solar_dash/solar-panel-landscape-group.glb")
-const SOLAR_BUILDING_MODEL: PackedScene = preload("res://assets/third_party/kenney/solar_dash/building-a.glb")
-const TREE_MODEL: PackedScene = preload("res://assets/third_party/kenney/solar_dash/tree_pineSmallA.glb")
+const SOLAR_PANEL_MODEL: PackedScene = preload("res://assets/models/arcade/panel.glb")
+const SOLAR_FARM_MODEL: PackedScene = preload("res://assets/models/village/solar_array.glb")
+const SOLAR_BUILDING_MODEL: PackedScene = preload("res://assets/models/village/cottage.glb")
+const TREE_MODEL: PackedScene = preload("res://assets/models/village/broadleaf.glb")
 const BUSH_MODEL: PackedScene = preload("res://assets/third_party/kenney/solar_dash/plant_bushLarge.glb")
 const TERRAIN_MODEL_SPECS: Array[Dictionary] = [
 	{"scene": preload("res://assets/third_party/kenney/solar_dash/rock_largeA.glb"), "name": "큰 바위", "scale": 1.55, "size": Vector3(1.45, 1.00, 1.15), "clearance": 0.68, "penalty": 24},
@@ -43,6 +43,7 @@ const SUN_POSITIONS: Array[Vector3] = [
 	Vector3(0.0, 8.0, -18.0),
 ]
 
+var action_fx := preload("res://scripts/minigames/ArcadeMotionLayer.gd").new()
 var viewport: SubViewport
 var world: Node3D
 var camera: Camera3D
@@ -72,8 +73,12 @@ var overlay_label: Label
 var score_rule_label: Label
 var sun_timer_label: Label
 var panel_gate_index := 0
+var struck_panel := Vector3.ZERO
 var score_popup: Label
 var score_popup_tween: Tween
+
+func _init() -> void:
+	add_child(action_fx)
 
 func _ready() -> void:
 	stretch = true
@@ -83,10 +88,12 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_build_viewport()
 	_build_world()
+	action_fx.attach(self, world, _draw_action_cue)
 	_build_overlay()
 	set_process(true)
 
 func setup(player_data: Dictionary, game_seed: int) -> void:
+	action_fx.clear()
 	lane_choice_made = false
 	rng.seed = game_seed
 	visual_rng.seed = game_seed ^ 0x5A71
@@ -192,11 +199,11 @@ func _build_sun() -> void:
 func _build_horizon() -> void:
 	for x in [-7.2, 7.2]:
 		for z_index in range(5):
-			_spawn_static_asset(TREE_MODEL, Vector3(x + visual_rng.randf_range(-1.0, 1.0), 0.0, -3.0 - z_index * 7.0), Vector3.ONE * visual_rng.randf_range(1.45, 1.85), float(z_index * 31))
+			_spawn_static_asset(TREE_MODEL, Vector3(x + visual_rng.randf_range(-1.0, 1.0), 0.0, -3.0 - z_index * 7.0), Vector3.ONE * visual_rng.randf_range(0.76, 0.98), float(z_index * 31))
 			if z_index % 2 == 0:
 				_spawn_static_asset(BUSH_MODEL, Vector3(x * 0.82, 0.0, -5.0 - z_index * 7.0), Vector3.ONE * 1.2, float(z_index * 47))
 	for side in [-1, 1]:
-		_spawn_static_asset(SOLAR_FARM_MODEL, Vector3(float(side) * 6.0, 0.0, -8.0), Vector3.ONE * 2.0, 180.0)
+		_spawn_static_asset(SOLAR_FARM_MODEL, Vector3(float(side) * 6.0, 0.0, -8.0), Vector3.ONE * 1.45, float(side * 22))
 	_spawn_static_asset(SOLAR_BUILDING_MODEL, Vector3(-6.4, 0.0, -20.0), Vector3.ONE, 18.0)
 
 func _spawn_static_asset(scene: PackedScene, position_value: Vector3, scale_value: Vector3, yaw_degrees: float) -> Node3D:
@@ -276,8 +283,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	hero_body.add_child(hero)
 	var hero_data := player_data.duplicate(true)
 	hero_data["index"] = 0
-	hero.call("setup_player", hero_data)
-	hero.call("set_back_run_enabled", true)
+	hero.call("setup_arcade_player", hero_data, PLAYER_PAWN.ArcadePose.RUNNER, RUN_SPEED)
 	hero.position = Vector3.ZERO
 	hero.scale = Vector3.ONE * 2.15
 	hero.call("_set_avatar_animation_state", true)
@@ -297,14 +303,26 @@ func _spawn_panel_gate(start_z: float = -30.0) -> void:
 		var station := Node3D.new()
 		station.position.x = LANES[lane_index]
 		gate.add_child(station)
-		var panel := SOLAR_PANEL_MODEL.instantiate() as Node3D
-		panel.name = "KenneySolarPanel%d" % lane_index
+		var panel := Node3D.new()
+		panel.name = "TrackingPanel%d" % lane_index
 		panel.scale = Vector3.ONE * 1.65
 		panel.rotation_degrees.y = 180.0
-		# Kenney 모델의 지면 기준점보다 높여 지지 기둥과 받침이 모두 보이게 합니다.
-		panel.position.y = 0.68
+		panel.position.y = 0.82
 		station.add_child(panel)
-		VISUAL_STYLE.prepare_imported(panel)
+		var panel_face := VISUAL_STYLE.place_prop(panel, SOLAR_PANEL_MODEL, Vector3.ZERO, Vector3(1.02, 0.65, 0.07))
+		panel_face.rotation.x = deg_to_rad(-120.0)
+		# The center of the glass stays on the tracking pivot as the sun moves.
+		panel_face.position = -(panel_face.basis * Vector3(0, 0.5, 0))
+		var support := MeshInstance3D.new()
+		var post := CylinderMesh.new()
+		post.top_radius = 0.075
+		post.bottom_radius = 0.14
+		post.height = panel.position.y
+		post.radial_segments = 12
+		support.mesh = post
+		support.position.y = panel.position.y * 0.5
+		support.material_override = front_direction_material
+		station.add_child(support)
 		panels.append(panel)
 		var beam := MeshInstance3D.new()
 		var ray := CylinderMesh.new()
@@ -387,6 +405,7 @@ func _spawn_terrain_obstacle(start_z: float = -32.0, forced_spec_index: int = -1
 func _physics_process(delta: float) -> void:
 	if not running or not is_instance_valid(hero_body):
 		return
+	action_fx.advance(delta)
 	hit_cooldown = maxf(0.0, hit_cooldown - delta)
 	_update_hero_physics(delta)
 	_update_sun(delta)
@@ -450,7 +469,8 @@ func _resolve_hazard_collision(obstacle: Node3D) -> void:
 		hero_body.velocity.y = maxf(hero_body.velocity.y, KNOCKBACK_LIFT)
 		var penalty := int(record.get("penalty", 22))
 		var obstacle_name := str(record.get("name", "장애물"))
-		_show_collision_flash()
+		struck_panel = hero_body.position + Vector3.UP * 0.50
+		action_fx.play_cue(&"impact", 0.52)
 		_show_score_popup(penalty, false, "%s 충돌 · 뒤로 밀림" % obstacle_name)
 		arcade_event.emit(penalty, false, "%s에 부딪혀 뒤로 밀렸어요." % obstacle_name, false)
 		return
@@ -513,16 +533,18 @@ func _resolve_panel_gate(record: Dictionary) -> void:
 	var panels: Array = record.get("meshes", [])
 	var capture := panel_capture_efficiency(panels[selected_lane] as Node3D) if selected_lane < panels.size() else 0.0
 	if selected_lane >= 0 and selected_lane < panels.size():
+		struck_panel = (panels[selected_lane] as Node3D).global_position + Vector3.UP * 0.75
 		_tint_model(panels[selected_lane] as Node3D, correct_material if selected_lane == correct_lane else wrong_material)
 	if capture >= 0.95:
 		if not lane_choice_made:
 			arcade_event.emit(0, true, MINIGAME_INPUT.hint("solar_align", "A/D로 햇빛을 받는 패널을 골라야 점수를 얻어요."), false)
 			return
 		# Show the electricity leaving the selected panel before reaching the runner.
-		_spawn_energy_burst((panels[selected_lane] as Node3D).global_position + Vector3.UP * 0.75)
+		action_fx.play_cue(&"capture", 0.94)
 		_show_score_popup(100, true, "햇빛 정면 → 전기 생산!")
 		arcade_event.emit(100, true, "패널이 빛을 정면으로 받아 전기를 만들었어요!", true)
 	else:
+		action_fx.play_cue(&"glance", 0.7)
 		_show_score_popup(25, false, "햇빛이 부족해요")
 		arcade_event.emit(25, false, "빛이 비스듬히 닿는 패널은 발전량이 작아요.", false)
 func _update_sun(delta: float) -> void:
@@ -531,6 +553,8 @@ func _update_sun(delta: float) -> void:
 		sun_move_elapsed = maxf(0.0, sun_move_elapsed - SUN_MOVE_INTERVAL)
 		sun_position_index = (sun_position_index + 1) % SUN_POSITIONS.size()
 		sun_move_count += 1
+		if action_fx.marks.is_empty():
+			action_fx.play_cue(&"sun_shift", SUN_TRANSITION_SECONDS)
 	# The sunlight used for panel capture must follow the same fixed simulation
 	# clock as the course, rather than a separate render-time SceneTree tween.
 	if sun_move_count > 0:
@@ -575,8 +599,7 @@ func _update_panel_gate_for_sun(record: Dictionary) -> void:
 		if not is_instance_valid(panel):
 			continue
 		var ray_direction := (sun.global_position - panel.global_position).normalized()
-		# The Kenney surface is tilted 30 degrees: use its native normal and the
-		# complete light direction, so screen geometry and capture agree.
+		# The art's front face and scoring normal share the same tracking pivot.
 		var base := Basis(Vector3.UP, PI)
 		var facing := Basis(Quaternion((base * PANEL_SURFACE_NORMAL).normalized(), ray_direction)) * base
 		if lane_index != correct_lane:
@@ -616,16 +639,6 @@ func _tint_model(model_root: Node3D, material: StandardMaterial3D) -> void:
 	for child in model_root.find_children("*", "MeshInstance3D", true, false):
 		(child as MeshInstance3D).material_override = material
 
-func _show_collision_flash() -> void:
-	var flash := ColorRect.new()
-	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	flash.color = Color(1.0, 0.18, 0.08, VISUAL_STYLE.WARNING_FLASH_ALPHA)
-	flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(flash)
-	var tween := create_tween()
-	tween.tween_property(flash, "color:a", 0.0, 0.34).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_callback(flash.queue_free)
-
 func _show_score_popup(points: int, success: bool, message: String) -> void:
 	if is_instance_valid(score_popup_tween):
 		score_popup_tween.kill()
@@ -662,21 +675,54 @@ func _nearest_lane(x_position: float) -> int:
 			nearest = lane_index
 	return nearest
 
-func _spawn_energy_burst(burst_position: Vector3) -> void:
-	var burst := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.24
-	sphere.height = 0.48
-	burst.mesh = sphere
-	burst.position = burst_position
-	burst.material_override = energy_material
-	world.add_child(burst)
-	var tween := create_tween().set_parallel(true)
-	tween.tween_property(burst, "scale", Vector3.ONE * 3.2, 0.38).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	var destination := hero_body.position + Vector3.UP * 1.0 if is_instance_valid(hero_body) else burst.position + Vector3.UP
-	tween.tween_property(burst, "position", destination, 0.38)
-	tween.tween_property(burst, "transparency", 1.0, 0.38)
-	tween.chain().tween_callback(burst.queue_free)
-
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:
 	return VISUAL_STYLE.material(color, glowing)
+
+func _draw_action_cue(_layer: Control, kind: StringName, _from: Vector2, _to: Vector2, t: float, alpha: float, _amount: float) -> void:
+	var tint := Color(1.0, 1.0, 1.0, alpha)
+	if kind == &"sun_shift":
+		var previous := (sun_position_index - 1 + SUN_POSITIONS.size()) % SUN_POSITIONS.size()
+		var a := action_fx.project(SUN_POSITIONS[previous])
+		var b := action_fx.project(sun.global_position)
+		if a.distance_to(b) > 3:
+			var direction := a.direction_to(b)
+			var length := minf(52.0, a.distance_to(b))
+			action_fx.stroke([b - direction * length, b - direction * 3], Color("ffd172") * tint, 3.5)
+		return
+	var panel := action_fx.project(struck_panel)
+	if kind == &"impact":
+		var radius := (9.0 + 25.0 * t)
+		for i in range(5):
+			var axis := Vector2.from_angle(-PI + 0.24 + i * 0.64)
+			action_fx.stroke([panel + axis * radius, panel + axis * (radius + 9.0)], Color("ffab73") * tint, 3.8)
+		return
+	var ray := panel.direction_to(action_fx.project(sun.global_position))
+	var side := ray.orthogonal()
+	var gold := Color("ffd04f") * tint
+	# Parallel light rays converge on the judged panel. A glancing ray leaves
+	# sideways, while a successful capture carries charge back to the runner.
+	for i in range(-1, 2):
+		var offset := side * float(i) * 7.0
+		var head := maxf(0, 1.0 - t * 3.0)
+		var tail := maxf(0, 1.0 - t * 2.1)
+		if tail > 0.0:
+			action_fx.stroke([panel + offset + ray * (8.0 + 100.0 * tail), panel + offset + ray * (3.0 + 77.0 * head)], gold, 3.0)
+	if kind == &"glance":
+		var direction := Vector2(0.88 if ray.x < 0 else -0.88, -0.48)
+		var p := panel + direction * (12.0 + t * 68.0)
+		action_fx.stroke([p - direction * 22.0, p], Color("ff986d") * tint, 4.2)
+		return
+	var radius := (10.0 + 32.0 * ease(t, 0.4))
+	for i in range(8):
+		var v := Vector2.from_angle(TAU * i / 8.0)
+		action_fx.stroke([panel + v * radius, panel + v * (radius + (1.0 - t) * 14.0)], gold, 2.8)
+	var receiver := action_fx.project(hero_body.global_position + Vector3.UP * 0.95)
+	var peak := panel.lerp(receiver, 0.5) + Vector2(28, -72)
+	for i in range(3):
+		var u := clampf(t * 1.65 - 0.22 - 0.115 * i, 0, 1)
+		if u > 0 and u < 1:
+			var trail := maxf(0, u - 0.14)
+			var a := panel.lerp(peak, trail).lerp(peak.lerp(receiver, trail), trail)
+			var b := panel.lerp(peak, u).lerp(peak.lerp(receiver, u), u)
+			action_fx.stroke([a, b], Color("9affc7") * tint, 4.2)
+			action_fx.spark(b, 8.0, Color("fff6a0") * tint)

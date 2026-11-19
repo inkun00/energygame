@@ -1,6 +1,9 @@
 extends SubViewportContainer
 class_name SmartGridBalance3D
 
+const SUBSTATION = preload("res://assets/models/arcade/storage.glb")
+const CITY_HOME = preload("res://assets/models/village/cottage.glb")
+
 ## 변화하는 도시 수요에 공급을 맞추는 경량 3D 스마트그리드 아케이드입니다.
 
 signal arcade_event(points: int, success: bool, message: String, count_correct: bool)
@@ -25,6 +28,7 @@ const DEMAND_EVENTS: Array[Dictionary] = [
 	{"label": "도서관 전기 사용 증가", "delta": 14},
 ]
 
+var action_fx := preload("res://scripts/minigames/ArcadeMotionLayer.gd").new()
 var viewport: SubViewport
 var world: Node3D
 var camera: Camera3D
@@ -49,6 +53,8 @@ var phase_adjusted := false
 var balance_combo := 0
 var hero_adjusting := false
 var visual_time := 0.0
+var danger_band := 0
+var city_recovery_time := 2.0
 var current_event := "도시 전력망 가동"
 var gap_integral := 0.0
 var measurement_time := 0.0
@@ -78,6 +84,9 @@ var phase_bar: ProgressBar
 var phase_countdown: Label
 var danger_tint: ColorRect
 
+func _init() -> void:
+	add_child(action_fx)
+
 func _ready() -> void:
 	stretch = true
 	custom_minimum_size = Vector2(0, 286)
@@ -87,10 +96,14 @@ func _ready() -> void:
 	rng.seed = 431
 	_build_viewport()
 	_build_world()
+	action_fx.attach(self, world, _draw_action_cue)
 	_build_overlay()
 	set_process(true)
 
 func setup(player_data: Dictionary, game_seed: int) -> void:
+	action_fx.clear()
+	danger_band = 0
+	city_recovery_time = 2.0
 	rng.seed = game_seed
 	_spawn_hero(player_data)
 	demand = float(rng.randi_range(5, 8) * 10)
@@ -166,11 +179,12 @@ func _build_city() -> void:
 				var building := MeshInstance3D.new()
 				var box := BoxMesh.new()
 				var height := 1.05 + float((row + column) % 3) * 0.48
-				box.size = Vector3(1.15, height, 1.05)
+				box.size = Vector3(1.25, 0.12, 1.21)
 				building.mesh = box
-				building.position = Vector3(float(side) * (2.9 + float(column) * 1.55), height * 0.5, -1.3 - float(row) * 1.7)
+				building.position = Vector3(float(side) * (2.9 + float(column) * 1.55), 0.05, -1.3 - float(row) * 1.7)
 				building.material_override = normal_building_material
 				world.add_child(building)
+				VISUAL_STYLE.place_prop(building, CITY_HOME, Vector3(0, 0.06, 0), Vector3(0.50, height / 2.65, 0.46))
 				city_buildings.append(building)
 				_build_windows(building, height)
 
@@ -180,7 +194,7 @@ func _build_windows(building: MeshInstance3D, height: float) -> void:
 		var window_box := BoxMesh.new()
 		window_box.size = Vector3(0.72, 0.16, 0.035)
 		window.mesh = window_box
-		window.position = building.position + Vector3(0.0, minf(height - 0.18, 0.36 + float(floor_index) * 0.42), 0.545)
+		window.position = building.position + Vector3(0.0, height * (0.25 + float(floor_index) * 0.23), 0.54)
 		window.material_override = normal_window_material
 		world.add_child(window)
 		city_windows.append(window)
@@ -197,23 +211,14 @@ func _build_substation() -> void:
 	base.material_override = _material(Color("243f50"), false)
 	world.add_child(base)
 
-	for side in [-1, 1]:
-		var mast := MeshInstance3D.new()
-		var mast_mesh := CylinderMesh.new()
-		mast_mesh.top_radius = 0.08
-		mast_mesh.bottom_radius = 0.12
-		mast_mesh.height = 1.8
-		mast.mesh = mast_mesh
-		mast.position = Vector3(float(side) * 0.62, 0.95, 0.45)
-		mast.material_override = _material(Color("a9c8cf"), false)
-		world.add_child(mast)
+	VISUAL_STYLE.place_prop(world, SUBSTATION, Vector3(0, 0.18, 0.38), Vector3(1.67, 1.60, 1.15))
 
 	var core_mesh := SphereMesh.new()
-	core_mesh.radius = 0.42
-	core_mesh.height = 0.84
+	core_mesh.radius = 0.17
+	core_mesh.height = 0.34
 	substation_core = MeshInstance3D.new()
 	substation_core.mesh = core_mesh
-	substation_core.position = Vector3(0.0, 1.22, 0.45)
+	substation_core.position = Vector3(0.0, 1.10, 0.98)
 	substation_core.material_override = normal_line_material
 	world.add_child(substation_core)
 
@@ -369,8 +374,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	world.add_child(hero)
 	var hero_data := player_data.duplicate(true)
 	hero_data["index"] = 0
-	hero.call("setup_player", hero_data)
-	hero.call("set_back_run_enabled", true)
+	hero.call("setup_arcade_player", hero_data, PLAYER_PAWN.ArcadePose.CONTROL)
 	hero.position = Vector3(0.0, 0.14, 2.75)
 	hero.scale = Vector3.ONE * 1.65
 	hero.call("_set_avatar_animation_state", false)
@@ -379,6 +383,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 func _process(delta: float) -> void:
 	if not running:
 		return
+	action_fx.advance(delta)
 	visual_time += delta
 	phase_elapsed += delta
 	var input_direction := 0.0
@@ -400,6 +405,13 @@ func _process(delta: float) -> void:
 	var difference := supply - demand
 	var balanced := absf(difference) <= BALANCE_TOLERANCE
 	var gap := absf(difference)
+	if gap < DANGER_DIFFERENCE * 0.65:
+		danger_band = 0
+	elif gap >= DANGER_DIFFERENCE:
+		var new_band := int(signf(difference))
+		if new_band != danger_band:
+			danger_band = new_band
+			action_fx.play_cue(&"overload" if difference > 0 else &"shortage", 1.1)
 	gap_integral += gap * delta
 	measurement_time += delta
 	# One award per demand change: adjust supply, then hold a small gap for a second.
@@ -408,6 +420,8 @@ func _process(delta: float) -> void:
 		score_tick += delta
 		if score_tick >= 1.0:
 			phase_scored = true
+			city_recovery_time = 0.0
+			action_fx.play_cue(&"balanced", 1.4)
 			balance_combo += 1
 			arcade_event.emit(0, true, "수요와 공급의 작은 차이를 1초 지켰어요!", true)
 	else:
@@ -483,9 +497,16 @@ func _update_city_visuals(delta: float, difference: float, balanced: bool) -> vo
 	var brightness := 0.35 + served_ratio * 0.65
 	normal_window_material.albedo_color = Color("a2a66c").lerp(Color("f8dc70"), served_ratio)
 	normal_window_material.emission_energy_multiplier = brightness * 0.75
+	city_recovery_time = minf(2.0, city_recovery_time + delta)
 	for window_index in range(city_windows.size()):
 		var order := (window_index * 7) % maxi(1, city_windows.size())
-		city_windows[window_index].material_override = normal_window_material if order < lit_window_count else shortage_window_material
+		var window := city_windows[window_index]
+		window.material_override = normal_window_material if order < lit_window_count else shortage_window_material
+		# A single visible wave acknowledges the completed one-second hold.
+		# The next demand change can interrupt it without leaving a lit outage.
+		var arrival := 0.32 + floorf(window_index / 8.0) * 0.19
+		var wave := clampf((city_recovery_time - arrival) / 0.52, 0.0, 1.0)
+		window.scale.y = 1.0 + 0.85 * sin(PI * wave) if balanced else 1.0
 	for line in power_lines:
 		line.material_override = line_material
 	var flow_speed := lerpf(1.5, 5.5, clampf(supply / 120.0, 0.0, 1.0))
@@ -523,3 +544,45 @@ func _update_hud(difference: float, balanced: bool) -> void:
 
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:
 	return VISUAL_STYLE.material(color, glowing)
+
+func _draw_action_cue(_layer: Control, kind: StringName, _from: Vector2, _to: Vector2, t: float, alpha: float, _amount: float) -> void:
+	var tint := Color(1.0, 1.0, 1.0, alpha)
+	var core := action_fx.project(substation_core.global_position)
+	var healthy := kind == &"balanced"
+	var ink := Color("81f4cf") * tint if healthy else (Color("ffb87c") * tint if kind == &"overload" else Color("91cbff") * tint)
+	for side_index in range(2):
+		var side := -1.0 if side_index == 0 else 1.0
+		# Power travels along the two feeders before the three neighbourhoods
+		# receive it. In shortage the trace breaks before the homes.
+		var junction := action_fx.project(Vector3(side * 2.35, 0.17, -0.35))
+		var backbone := action_fx.project(Vector3(side * 2.35, 0.17, -5.25))
+		var advance := smoothstep(0.0, 0.76, t)
+		if not healthy:
+			advance = minf(advance, 0.35 if kind == &"shortage" else 0.7)
+		var bend := core.lerp(junction, 0.45) + Vector2(0, 13)
+		var trunk := [core, bend, junction, backbone]
+		var segments := advance * 3.0
+		for i in range(3):
+			var f := clampf(segments - i, 0, 1)
+			if f > 0.0:
+				var a: Vector2 = trunk[i]
+				var b: Vector2 = trunk[i + 1]
+				action_fx.stroke([a, a.lerp(b, f)], ink, 2.8)
+		for block in range(3):
+			var local_time := clampf((t - 0.23 - block * 0.105) * 2.8, 0, 1)
+			if local_time <= 0: continue
+			var feed := junction.lerp(backbone, block / 2.0)
+			if healthy:
+				var bldg := city_buildings[block * 4 + side_index * 2]
+				var window := action_fx.project(bldg.position + Vector3(0, 0, 0.55))
+				var tip := feed.lerp(window, local_time)
+				action_fx.stroke([feed, tip], ink, 2.8)
+				if local_time >= 0.96:
+					action_fx.spark(window, 9.0, Color("fff2ab") * tint)
+			elif block == 0:
+				var at := core.lerp(junction, advance)
+				var slip := (1.0 - smoothstep(0.12, 0.56, t)) * 6
+				if kind == &"shortage":
+					action_fx.stroke([at + Vector2(side * (6 + slip), -6), at + Vector2(side * (1 + slip), 6)], ink, 3.6)
+				else:
+					action_fx.stroke([at + Vector2(-9, -9), at, at + Vector2(-2, -6), at + Vector2(9, 6)], ink, 4.0)

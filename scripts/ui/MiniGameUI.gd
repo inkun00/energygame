@@ -5,6 +5,7 @@ class_name MiniGameUI
 
 signal standalone_replay_requested
 signal standalone_menu_requested
+signal standalone_records_requested
 
 const UI = preload("res://scripts/ui/CommercialUI.gd")
 const SOLAR_PANEL_DASH = preload("res://scripts/minigames/SolarPanelDash3D.gd")
@@ -40,6 +41,9 @@ var dimmer: ColorRect
 var card: PanelContainer
 var standalone_mode := false
 var standalone_actions: HBoxContainer
+var standalone_records_button: Button
+@onready var round_fx := preload("res://scripts/ui/ArcadeRoundFX.gd").new()
+var best_to_beat := -1
 var touch_controls: HBoxContainer
 var title_label: Label
 var mode_label: Label
@@ -120,6 +124,10 @@ var heat_arcade: SubViewportContainer
 
 func _ready() -> void:
 	_build_ui()
+	round_fx.arena = arena_panel
+	add_child(round_fx)
+	if standalone_mode:
+		MiniGameRecords.records_changed.connect(_show_arcade_record)
 	resized.connect(_fit_arcade_layout)
 	_fit_arcade_layout()
 	visible = false
@@ -261,11 +269,15 @@ func _build_ui() -> void:
 		standalone_actions.visible = false
 		content.add_child(standalone_actions)
 		var replay_button := _make_button("↻ 다시 플레이", Color("2a9b70"))
-		replay_button.custom_minimum_size = Vector2(220, 48)
+		replay_button.custom_minimum_size = Vector2(164, 52)
 		replay_button.pressed.connect(func(): standalone_replay_requested.emit())
 		standalone_actions.add_child(replay_button)
+		standalone_records_button = _make_button("명예의 전당", UI.GOLD_DARK)
+		standalone_records_button.custom_minimum_size = Vector2(160, 52)
+		standalone_records_button.pressed.connect(func(): standalone_records_requested.emit())
+		standalone_actions.add_child(standalone_records_button)
 		var menu_button := _make_button("다른 미니게임", Color("287ca8"))
-		menu_button.custom_minimum_size = Vector2(220, 48)
+		menu_button.custom_minimum_size = Vector2(164, 52)
 		menu_button.pressed.connect(func(): standalone_menu_requested.emit())
 		standalone_actions.add_child(menu_button)
 	_build_guide_ui()
@@ -428,6 +440,7 @@ func _process(delta: float) -> void:
 	if not standalone_mode and NetworkManager.is_online and NetworkManager.is_host:
 		elapsed = maxf(elapsed, duration - clampf(GameManager.minigame_time_remaining - GameManager.MINIGAME_SUBMISSION_GRACE_SECONDS, 0.0, duration))
 	var remaining := maxf(0.0, duration - elapsed)
+	round_fx.clock_changed(ceili(remaining))
 	timer_label.text = "%02d초" % ceili(remaining)
 	timer_bar.value = remaining
 	if remaining <= 5.0:
@@ -480,6 +493,10 @@ func _on_minigame_started(data: Dictionary) -> void:
 	practice_actions.visible = false
 	game_data = data.duplicate(true)
 	game_id = str(game_data.get("id", "solar_align"))
+	round_fx.reset(Color(str(game_data.get("accent", "#91f6cc"))))
+	if standalone_mode:
+		var history := MiniGameRecords.get_board(game_id)
+		best_to_beat = int(history.personal_best) if history.has_personal_best else -1
 	_configure_touch_controls()
 	round_id = int(game_data.get("round_id", -1))
 	duration = float(game_data.get("duration", 30.0))
@@ -507,11 +524,14 @@ func _on_minigame_started(data: Dictionary) -> void:
 	visible = true
 	title_label.text = str(game_data.get("title", "에너지 미니게임"))
 	mode_label.text = "%d초 · 전원 동시 도전" % int(duration)
+	if standalone_mode and best_to_beat >= 0:
+		mode_label.text = "내 최고  %d점" % best_to_beat
 	objective_label.text = "목표  |  " + str(game_data.get("objective", "제한시간 안에 최고 점수에 도전하세요."))
 	lesson_label.text = "에너지 원리  |  " + str(game_data.get("lesson", ""))
 	timer_bar.max_value = duration
 	timer_bar.value = duration
 	timer_label.text = "%02d초" % ceili(duration)
+	timer_label.add_theme_color_override("font_color", Color("f5f7da"))
 	feedback_label.text = "게임 방법을 확인하고 시작 버튼을 누르세요."
 	submission_label.text = "모두 끝나면 점수와 순위를 확인해요."
 	_refresh_score()
@@ -541,6 +561,7 @@ func _on_submission_changed(state: Dictionary) -> void:
 		if practice_active:
 			_finish_practice()
 		var countdown := maxi(1, ceili(float(state.get("countdown_remaining", 0.0))))
+		round_fx.show_count(countdown)
 		if is_guide_open():
 			guide_badge_label.text = "다 함께 %d초 후 시작!" % countdown
 		else:
@@ -566,6 +587,7 @@ func _begin_local_round() -> void:
 	if practice_active:
 		_finish_practice(false)
 	round_started_locally = true
+	round_fx.start_round()
 	round_start_msec = Time.get_ticks_msec()
 	round_pause_msec = -1
 	objective_label.visible = false
@@ -587,6 +609,7 @@ func _on_minigame_finished(results: Array) -> void:
 		guide_preview.call("clear")
 	if not visible:
 		return
+	round_fx.reset()
 	# A reconnect can deliver results without the intervening playing state.
 	# Practice passengers and their entrance animation are never round results.
 	if practice_active:
@@ -645,9 +668,10 @@ func _on_minigame_finished(results: Array) -> void:
 	feedback_label.text = str(learning_report.get("next_action", ""))
 	feedback_label.add_theme_color_override("font_color", Color("83f2b6"))
 	if standalone_mode:
-		submission_label.text = ""
 		if is_instance_valid(standalone_actions):
 			standalone_actions.visible = true
+			standalone_actions.get_child(0).grab_focus.call_deferred()
+		_show_arcade_record(game_id, MiniGameRecords.get_board(game_id))
 		return
 	var team: Dictionary = GameManager.active_minigame.get("team_goal_result", {})
 	if not team.is_empty():
@@ -661,11 +685,24 @@ func _on_minigame_finished(results: Array) -> void:
 			visible = false
 	)
 
+func _show_arcade_record(id: String, state: Dictionary) -> void:
+	if id != game_id or not is_instance_valid(standalone_actions) or not standalone_actions.visible:
+		return
+	if not state.get("has_personal_best", false):
+		submission_label.text = "직접 조작해 한 판을 끝내면 명예의 전당에 기록돼요."
+		return
+	submission_label.text = "내 최고 기록  %d점" % int(state.personal_best)
+	if score == int(state.personal_best) and score > best_to_beat:
+		submission_label.text = ("첫 기록  %d점" if best_to_beat < 0 else "개인 최고 기록 경신!  %d점") % score
+	if state.get("scope", "") == "shared" and int(state.personal_rank) > 0:
+		submission_label.text += "  ·  전체 %d위 (%d점)" % [int(state.personal_rank), int(state.shared_best)]
+
 func _on_turn_changed(_player_idx: int) -> void:
 	if not active and not standalone_mode:
 		visible = false
 
 func cancel_minigame() -> void:
+	round_fx.reset()
 	if is_instance_valid(guide_preview):
 		guide_preview.call("clear")
 	_disconnect_practice()
@@ -759,6 +796,11 @@ func _build_guide_ui() -> void:
 	guide_badge_label.add_theme_font_size_override("font_size", 14)
 	guide_badge_label.add_theme_color_override("font_color", UI.TEXT_MUTED)
 	header.add_child(guide_badge_label)
+	if standalone_mode:
+		var back := _make_button("종목 선택", UI.TEAL_DARK)
+		back.custom_minimum_size = Vector2(112, 48)
+		back.pressed.connect(func(): standalone_menu_requested.emit())
+		header.add_child(back)
 	guide_objective_label = Label.new()
 	guide_objective_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	guide_objective_label.add_theme_font_size_override("font_size", 18)
@@ -1445,6 +1487,13 @@ func _learning_metrics_snapshot() -> Dictionary:
 func _refresh_score() -> void:
 	if score_label:
 		score_label.text = "점수  %04d" % score
+	if active and round_started_locally and not submitted and not practice_active:
+		round_fx.score_changed(score, streak)
+		if standalone_mode and best_to_beat >= 0:
+			if score > best_to_beat:
+				mode_label.text = "내 최고보다 +%d점" % (score - best_to_beat)
+			else:
+				mode_label.text = "새 기록까지 %d점" % (best_to_beat - score + 1)
 
 func _submit_score() -> void:
 	if submitted:
@@ -1457,6 +1506,7 @@ func _submit_score() -> void:
 	learning_snapshot = _learning_metrics_snapshot()
 	submitted = true
 	active = false
+	round_fx.reset()
 	_set_arcades_running(false)
 	timer_label.text = "종료"
 	timer_bar.value = 0
@@ -1498,13 +1548,17 @@ func _submission_stats() -> Dictionary:
 
 func _build_results(results: Array) -> void:
 	_clear_arena()
-	var heading := _arena_label("미니게임 순위 · 에너지 보너스", 24, Color("ffe06b"))
+	var heading := _arena_label("이번 판 순위  ·  AI 친구와 나" if standalone_mode else "미니게임 순위 · 에너지 보너스", 24, Color("ffe06b"))
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	for result_variant in results:
 		var result: Dictionary = result_variant
 		var row := PanelContainer.new()
+		var mine := int(result.get("player_idx", -1)) == _local_player_index()
 		var style := StyleBoxFlat.new()
-		style.bg_color = Color("173743") if int(result.get("player_idx", -1)) == _local_player_index() else Color("102a34")
+		style.bg_color = Color("1b454a") if mine else Color("102a34")
+		if mine and standalone_mode:
+			style.border_width_left = 4
+			style.border_color = UI.TEAL
 		style.set_corner_radius_all(10)
 		style.content_margin_left = 18
 		style.content_margin_right = 18
@@ -1512,6 +1566,11 @@ func _build_results(results: Array) -> void:
 		style.content_margin_bottom = 8
 		row.add_theme_stylebox_override("panel", style)
 		arena.add_child(row)
+		if standalone_mode and not round_fx.reduced_motion:
+			row.modulate.a = 0.48
+			var reveal := row.create_tween()
+			reveal.tween_interval(0.055 * (arena.get_child_count() - 2))
+			reveal.tween_property(row, "modulate:a", 1.0, 0.23)
 		var columns := HBoxContainer.new()
 		columns.add_theme_constant_override("separation", 12)
 		row.add_child(columns)
@@ -1519,15 +1578,18 @@ func _build_results(results: Array) -> void:
 		var rank_label := _result_column("%d위" % int(result["rank"]) if int(result["rank"]) > 0 else "연습", 66, rank_color)
 		columns.add_child(rank_label)
 		var name_label := _result_column(str(result["name"]), 0, rank_color)
+		if mine and standalone_mode:
+			name_label.text += "  ·  나"
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		name_label.clip_text = true
 		columns.add_child(name_label)
 		var score_column := _result_column("%d점" % int(result["score"]), 140, rank_color)
 		score_column.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		columns.add_child(score_column)
-		var reward_label := _result_column("에너지 +%d" % int(result["reward"]) if bool(result.get("goal_checked", false)) else "목표 미달 · +0", 180, rank_color)
-		reward_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		columns.add_child(reward_label)
+		if not standalone_mode:
+			var reward_label := _result_column("에너지 +%d" % int(result["reward"]) if bool(result.get("goal_checked", false)) else "목표 미달 · +0", 180, rank_color)
+			reward_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			columns.add_child(reward_label)
 
 func _result_column(value: String, min_width: float, color: Color) -> Label:
 	var label := Label.new()

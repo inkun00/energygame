@@ -26,11 +26,17 @@ func _run() -> void:
 	await process_frame
 	for id_variant in ARCADES.keys():
 		var game_id := str(id_variant)
+		var orphans_before := Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)
+		var detached: SubViewportContainer = ARCADES[game_id].new()
+		detached.free()
+		_check(Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT) == orphans_before, "%s: 트리 밖에서 해제한 게임의 효과 노드가 남았습니다." % game_id)
 		var arcade: SubViewportContainer = ARCADES[game_id].new()
 		root.add_child(arcade)
 		var viewport: SubViewport = arcade.get("viewport")
 		_check(is_instance_valid(viewport), "%s: 3D viewport가 필요합니다." % game_id)
 		if is_instance_valid(viewport):
+			var effect := arcade.get_node_or_null("WorldMotion")
+			_check(effect != null and effect.get_index() == viewport.get_index() + 1, "%s: 월드 바로 위, HUD 아래에 효과를 표시해야 합니다." % game_id)
 			arcade.call("set_running", false)
 			_check(viewport.render_target_update_mode == SubViewport.UPDATE_DISABLED, "%s: 안내·대기 중 렌더링을 멈춰야 합니다." % game_id)
 			arcade.call("set_running", true)

@@ -30,7 +30,7 @@ func _run() -> void:
 		_check(not light.shadow_enabled and not environment.environment.glow_enabled and not environment.environment.ssao_enabled, "%s has no expensive shadow/ambient/glow pass" % game_name)
 		if game_name != "SharedSchoolBus3D":
 			var hero: Node3D = arcade.get("hero")
-			_check(hero.avatar_sprite.modulate == STYLE.HERO_TINT, "%s keeps the same warm sprite colour temperature" % game_name)
+			_check(is_instance_valid(hero.board_model) and not hero.avatar_sprite.visible and hero.board_animator.has_animation("operate"), "%s uses the skinned playable hero and controls clip" % game_name)
 		if game_name == "WindTurbinePilot3D":
 			_check(arcade.storm_head_material.albedo_color == Color("ed5b53"), "Storm red must not be recoloured")
 		if game_name == "SolarPanelDash3D":
@@ -69,5 +69,5 @@ func _run() -> void:
 	_check(STYLE.material(Color("3f9bdfbd"), true).transparency == BaseMaterial3D.TRANSPARENCY_ALPHA, "Reservoir transparency must remain intact")
 	imported.free()
 	if failures.is_empty():
-		print("[VisualStyle] PASS · 9 coherent scenes, sprite tint, low-cost light, signal hue and immutable imported assets")
+		print("[VisualStyle] PASS · 9 coherent scenes, animated heroes, low-cost light, signal hue and immutable imported assets")
 	quit(0 if failures.is_empty() else 1)

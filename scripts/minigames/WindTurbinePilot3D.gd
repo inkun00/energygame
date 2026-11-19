@@ -9,6 +9,7 @@ const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 const TURBINE_BLADE = preload("res://assets/models/wind/turbine_blade.glb")
+const TURBINE_NACELLE = preload("res://assets/models/arcade/nacelle.glb")
 const WIND_PHASE_SECONDS := 4.0
 const YAW_LIMIT := 65.0
 const YAW_SPEED := 72.0
@@ -16,6 +17,7 @@ const ALIGNMENT_FULL_SCORE_DEGREES := 11.0
 const WIND_ANGLES: Array[float] = [-55.0, -28.0, 0.0, 28.0, 55.0]
 const NORMAL_WIND_SPEEDS: Array[int] = [7, 11, 15, 19, 22]
 
+var action_fx := preload("res://scripts/minigames/ArcadeMotionLayer.gd").new()
 var viewport: SubViewport
 var world: Node3D
 var camera: Camera3D
@@ -29,6 +31,8 @@ var main_blades: Array[Node3D] = []
 var background_rotors: Array[Node3D] = []
 var rotor_speed := 0.0
 var background_rotor_speed := 0.0
+var brake_pads: Array[MeshInstance3D] = []
+var pad_travel := 0.0
 
 var rng := RandomNumberGenerator.new()
 var visual_rng := RandomNumberGenerator.new()
@@ -76,6 +80,9 @@ var power_caption: Label
 var phase_caption: Label
 var power_fill_style: StyleBoxFlat
 
+func _init() -> void:
+	add_child(action_fx)
+
 func _ready() -> void:
 	stretch = true
 	custom_minimum_size = Vector2(0, 286)
@@ -84,10 +91,12 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_build_viewport()
 	_build_world()
+	action_fx.attach(self, world, _draw_action_cue)
 	_build_overlay()
 	set_process(true)
 
 func setup(player_data: Dictionary, game_seed: int) -> void:
+	action_fx.clear()
 	brake_was_down = false
 	yaw_choice_made = false
 	rng.seed = game_seed
@@ -188,11 +197,13 @@ func _build_main_turbine() -> void:
 
 	nacelle = MeshInstance3D.new()
 	var nacelle_box := BoxMesh.new()
-	nacelle_box.size = Vector3(0.82, 0.62, 1.35)
+	nacelle_box.size = Vector3(0.36, 0.10, 0.04)
 	nacelle.mesh = nacelle_box
-	nacelle.position.z = -0.20
+	nacelle.position = Vector3(0.0, 0.17, 0.47)
 	nacelle.material_override = normal_head_material
 	turbine_head.add_child(nacelle)
+	var housing := VISUAL_STYLE.place_prop(turbine_head, TURBINE_NACELLE, Vector3(0, -0.31, -0.20), Vector3(1.38, 0.70, 0.85))
+	housing.rotation.y = PI * 0.5
 
 	rotor = Node3D.new()
 	rotor.name = "Rotor"
@@ -205,6 +216,27 @@ func _build_main_turbine() -> void:
 	hub.mesh = hub_sphere
 	hub.material_override = _material(Color("3a7b8c"), true)
 	rotor.add_child(hub)
+	var brake_disc := MeshInstance3D.new()
+	var disc := CylinderMesh.new()
+	disc.top_radius = 0.41
+	disc.bottom_radius = 0.41
+	disc.height = 0.13
+	disc.radial_segments = 20
+	brake_disc.mesh = disc
+	brake_disc.rotation.x = PI * 0.5
+	brake_disc.position.z = 0.48
+	brake_disc.material_override = _material(Color("526a71"), false)
+	turbine_head.add_child(brake_disc)
+	var shoe := BoxMesh.new()
+	shoe.size = Vector3(0.16, 0.39, 0.25)
+	var enamel := _material(Color("ffbe69"), false)
+	for side in [-1.0, 1.0]:
+		var pad := MeshInstance3D.new()
+		pad.mesh = shoe
+		pad.position = Vector3(side * 0.63, 0, 0.50)
+		pad.material_override = enamel
+		turbine_head.add_child(pad)
+		brake_pads.append(pad)
 	_build_rotor_blades()
 
 func _build_rotor_blades() -> void:
@@ -231,6 +263,8 @@ func _build_background_turbine(base_position: Vector3, scale_value: float) -> vo
 	tower.position.y = 2.0
 	tower.material_override = _material(Color("c7d8d5"), false)
 	root_3d.add_child(tower)
+	var housing := VISUAL_STYLE.place_prop(root_3d, TURBINE_NACELLE, Vector3(0, 3.80, -0.17), Vector3(0.90, 0.48, 0.58))
+	housing.rotation.y = PI * 0.5
 	var rotor_root := Node3D.new()
 	rotor_root.position = Vector3(0.0, 4.0, 0.24)
 	rotor_root.rotation.z = base_position.x * 0.7
@@ -475,8 +509,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	world.add_child(hero)
 	var hero_data := player_data.duplicate(true)
 	hero_data["index"] = 0
-	hero.call("setup_player", hero_data)
-	hero.call("set_back_run_enabled", true)
+	hero.call("setup_arcade_player", hero_data, PLAYER_PAWN.ArcadePose.CONTROL)
 	hero.position = Vector3(0.0, 0.14, 3.2)
 	hero.scale = Vector3.ONE * 1.75
 	hero_adjusting = false
@@ -486,6 +519,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 func _process(delta: float) -> void:
 	if not running or not is_instance_valid(turbine_head):
 		return
+	action_fx.advance(delta)
 	visual_time += delta
 	phase_elapsed += delta
 	if rotor_broken:
@@ -551,6 +585,7 @@ func _score_aligned_generation(delta: float, alignment: float) -> void:
 		var first_capture := not phase_scored
 		phase_scored = true
 		if first_capture:
+			action_fx.play_cue(&"generate", 1.15)
 			_show_score_popup(points, true, "풍향 정렬 · 발전 시작")
 		arcade_event.emit(points, true, "풍향 정렬! %d m/s 바람으로 발전 중" % wind_speed, first_capture)
 
@@ -574,6 +609,7 @@ func _update_brake_input(down: bool) -> void:
 			instruction_label.text = "보통 바람에서는 브레이크를 놓아야 발전해요."
 
 func _engage_storm_brake(award: bool = true) -> void:
+	action_fx.play_cue(&"brake", 1.30)
 	phase_scored = true
 	brake_active = true
 	if is_instance_valid(nacelle):
@@ -602,6 +638,7 @@ func _start_next_wind_phase() -> void:
 	storm_phase = phase_index % 4 == 0
 	wind_angle = WIND_ANGLES[rng.randi_range(0, WIND_ANGLES.size() - 1)]
 	if storm_phase:
+		action_fx.play_cue(&"gust", 1.22)
 		wind_speed = rng.randi_range(27, 32)
 		_set_wind_visual_color(Color("ff5148"))
 		_set_storm_overlay(true, false)
@@ -626,6 +663,10 @@ func _update_rotor(delta: float, power_percent: float) -> void:
 	var wind_factor := clampf((float(wind_speed) - 7.0) / 25.0, 0.0, 1.0)
 	var capture_factor := 1.0 if storm_phase else 0.38 + clampf(power_percent / 100.0, 0.0, 1.0) * 0.62
 	var target_speed := 0.0 if brake_active or rotor_broken else lerpf(1.35, 7.2, wind_factor) * capture_factor
+	pad_travel = move_toward(pad_travel, 1.0 if brake_active else 0.0, delta * 5.5)
+	for i in range(brake_pads.size()):
+		var spacing := lerpf(0.63, 0.455, smoothstep(0.0, 1.0, pad_travel))
+		brake_pads[i].position.x = spacing * (-1.0 if i == 0 else 1.0)
 	var previous_speed := rotor_speed
 	rotor_speed = move_toward(rotor_speed, target_speed, delta * (24.0 if brake_active else 5.0))
 	rotor.rotation.z -= delta * (previous_speed + rotor_speed) * 0.5
@@ -731,8 +772,8 @@ func _update_hud(alignment: float, power_percent: float) -> void:
 			storm_tint.modulate.a = 0.45
 		else:
 			var remaining := maxf(0.0, WIND_PHASE_SECONDS - phase_elapsed)
-			storm_warning_label.text = "위험 돌풍  %d m/s\nSPACE 브레이크!  %.1f초" % [wind_speed, remaining]
-			var pulse := 0.72 + sin(phase_elapsed * 12.0) * 0.28
+			storm_warning_label.text = MINIGAME_INPUT.hint("wind_rhythm", "위험 돌풍  %d m/s\nSPACE 브레이크!  %.1f초") % [wind_speed, remaining]
+			var pulse := 0.80 + sin(phase_elapsed * 3.5) * 0.20
 			storm_border.modulate.a = pulse
 			storm_banner.modulate.a = 0.86 + pulse * 0.14
 			storm_tint.modulate.a = 0.48 + pulse * 0.32
@@ -818,3 +859,39 @@ func _clear_score_popup() -> void:
 
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:
 	return VISUAL_STYLE.material(color, glowing)
+
+func _draw_action_cue(_layer: Control, kind: StringName, _from: Vector2, _to: Vector2, t: float, alpha: float, _amount: float) -> void:
+	var tint := Color(1.0, 1.0, 1.0, alpha)
+	var hub := action_fx.project(rotor.global_position)
+	var wing_span := hub.distance_to(action_fx.project(rotor.global_position + camera.global_basis.x * 1.6))
+	if kind == &"generate":
+		var foot := action_fx.project(Vector3(0, 0.24, 0.0))
+		for i in range(3):
+			var u := clampf(t * 1.65 - 0.15 * i, 0, 1)
+			if u > 0 and u < 1:
+				var mid := hub.lerp(foot, u)
+				var half_width := 10.5
+				action_fx.stroke([mid + Vector2(-half_width, -4), mid + Vector2(0, 4), mid + Vector2(half_width, -4)], Color("b3ffcd") * tint, 3.8)
+		for i in range(3):
+			var start := TAU * i / 3.0 + t * 0.85
+			action_fx.arc(hub, wing_span * (0.53 + 0.16 * t), start, start + 0.85, Color("a1f7dd") * tint, 3.4)
+		return
+	if kind == &"gust":
+		# Three waves approach from the reported side; each front points
+		# into the hub and sweeps past it once rather than flashing the view.
+		var side := 1.0 if wind_angle >= 0 else -1.0
+		for i in range(3):
+			var y := (i - 1.0) * 17.0
+			var front := hub + Vector2(side * lerpf(wing_span * 1.7, wing_span * 0.34, t), y)
+			action_fx.stroke([front + Vector2(side * 26, -6), front, front + Vector2(side * 20, 6)], Color("ffaa6e") * tint, 3.2)
+		return
+	# Caliper jaws close from opposite sides and hold; two square brake bars
+	# identify a stop independently of colour or the wind direction.
+	var settle := smoothstep(0.0, 0.45, t)
+	var radius := lerpf(wing_span * 0.83, wing_span * 0.32, settle)
+	for side in [-1.0, 1.0]:
+		var angle := 0.0 if side > 0 else PI
+		action_fx.arc(hub, radius, angle - 0.64, angle + 0.64, Color("92f3c9") * tint, 5.6)
+		if t > 0.25:
+			var mid := hub + Vector2(side * 4.5, 0)
+			action_fx.stroke([mid + Vector2.UP * 8, mid + Vector2.DOWN * 8], Color("fff5c1") * tint, 3.8)

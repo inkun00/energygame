@@ -1,6 +1,10 @@
 extends SubViewportContainer
 class_name BatteryShuttle3D
 
+const STORAGE_CABINET = preload("res://assets/models/arcade/storage.glb")
+const PV_STATION = preload("res://assets/models/village/solar_array.glb")
+const CITY_HOME = preload("res://assets/models/village/cottage.glb")
+
 ## 햇빛이 많을 때 남는 전기를 배터리에 넣고, 흐릴 때 저장 전기를 도시로
 ## 옮기는 왕복 동작으로 '충전 후 방전'을 자연스럽게 익히는 30초 아케이드입니다.
 
@@ -9,6 +13,8 @@ signal arcade_event(points: int, success: bool, message: String, count_correct: 
 const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
+const MotionLayer = preload("res://scripts/minigames/ArcadeMotionLayer.gd")
+var motion := MotionLayer.new()
 const PHASE_SECONDS := 5.0
 const PHASE_PROFILES := [[4.0, 6.0, 5.0, 4.0, 6.0, 5.0], [5.0, 5.0, 5.0, 4.0, 7.0, 4.0], [6.0, 4.0, 4.0, 6.0, 4.0, 6.0]]
 const BATTERY_CAPACITY := 4
@@ -65,6 +71,9 @@ var running := false
 var notice := ""
 var notice_remaining := 0.0
 
+func _init() -> void:
+	add_child(motion)
+
 func _ready() -> void:
 	stretch = true
 	custom_minimum_size = Vector2(0, 286)
@@ -72,10 +81,12 @@ func _ready() -> void:
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_build_world()
+	motion.attach(self, world, _draw_relay_motion)
 	_build_overlay()
 	set_process(true)
 
 func setup(player_data: Dictionary, round_seed: int) -> void:
+	motion.clear()
 	game_seed = round_seed
 	elapsed = 0.0
 	hero_x = 0.0
@@ -161,11 +172,7 @@ func _build_world() -> void:
 			arrow.rotation.y = wing * PI * 0.25
 
 func _build_solar_station() -> void:
-	_box("SolarBase", world, Vector3(SOLAR_X, 0.35, -0.8), Vector3(2.45, 0.7, 1.9), Color("66a778"))
-	for panel_index in range(2):
-		_box("SolarPole%d" % panel_index, world, Vector3(SOLAR_X + (float(panel_index) - 0.5) * 0.9, 1.1, -0.8), Vector3(0.12, 1.1, 0.12), Color("697f8b"))
-		var panel := _box("SolarPanel%d" % panel_index, world, Vector3(SOLAR_X + (float(panel_index) - 0.5) * 0.9, 1.63, -0.8), Vector3(0.95, 0.60, 0.10), Color("337cbd"), true)
-		panel.rotation_degrees.x = -25.0
+	VISUAL_STYLE.place_prop(world, PV_STATION, Vector3(SOLAR_X, 0.06, -0.8), Vector3.ONE * 1.5)
 	solar_light = _sphere("SolarPower", world, Vector3(SOLAR_X, 2.35, -0.2), 0.20, Color("ffe477"), true)
 	_label3d("태양광\n남는 전기", Vector3(SOLAR_X, 2.88, 0.30), Color("fff0b8"))
 	sun = Node3D.new()
@@ -178,11 +185,9 @@ func _build_solar_station() -> void:
 		beam.rotation.z = angle
 
 func _build_battery_station() -> void:
-	_box("BatteryPedestal", world, Vector3(0, 0.30, -0.85), Vector3(2.35, 0.60, 1.75), Color("889baa"))
-	_box("BatteryBody", world, Vector3(0, 1.32, -0.9), Vector3(1.75, 1.70, 1.10), Color("374d62"))
-	_box("BatteryCap", world, Vector3(0, 2.23, -0.9), Vector3(0.55, 0.20, 0.55), Color("bed7db"))
+	VISUAL_STYLE.place_prop(world, STORAGE_CABINET, Vector3(0, 0.04, -0.83), Vector3(2.1, 2.27, 1.27))
 	for cell_index in range(BATTERY_CAPACITY):
-		var cell := _box("ChargeCell%d" % cell_index, world, Vector3((float(cell_index) - 1.5) * 0.37, 1.38, -0.29), Vector3(0.27, 0.93, 0.06), Color("75f8bd"), true)
+		var cell := _box("ChargeCell%d" % cell_index, world, Vector3(-0.08 + (float(cell_index) - 1.5) * 0.30, 1.19, -0.17), Vector3(0.21, 0.34, 0.045), Color("75f8bd"), true)
 		battery_cells.append(cell)
 	battery_light = _sphere("BatteryIndicator", world, Vector3(0, 2.56, -0.50), 0.16, Color("8ee8ff"), true)
 	_box("StoragePad", world, Vector3(0, 0.06, 1.65), Vector3(1.45, 0.12, 1.20), Color("c7e2bf"), true)
@@ -194,7 +199,7 @@ func _build_city_station() -> void:
 	_box("CityBase", world, Vector3(CITY_X, 0.32, -0.8), Vector3(2.55, 0.65, 1.9), Color("a4b4aa"))
 	for house_index in range(2):
 		var house_x := CITY_X + (float(house_index) - 0.5) * 0.95
-		_box("House%d" % house_index, world, Vector3(house_x, 1.37, -0.95), Vector3(0.85, 1.60, 0.85), Color("e5d5b4"))
+		VISUAL_STYLE.place_prop(world, CITY_HOME, Vector3(house_x, 0.63, -0.95), Vector3(0.38, 0.55, 0.38))
 		for window_index in range(2):
 			var pane := _box("Window%d_%d" % [house_index, window_index], world, Vector3(house_x + (float(window_index) - 0.5) * 0.30, 1.48, -0.49), Vector3(0.19, 0.31, 0.05), Color("61757b"))
 			city_windows.append(pane)
@@ -213,8 +218,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	world.add_child(hero)
 	var hero_data := player_data.duplicate(true)
 	hero_data["index"] = 0
-	hero.call("setup_player", hero_data)
-	hero.call("set_side_run_enabled", true)
+	hero.call("setup_arcade_player", hero_data, PLAYER_PAWN.ArcadePose.SIDE)
 	hero.scale = Vector3.ONE * 2.15
 	hero.position = Vector3(0, 0.13, 1.7)
 	if hero.shadow_mesh:
@@ -260,6 +264,7 @@ func _build_overlay() -> void:
 	add_child(flash)
 
 func _process(delta: float) -> void:
+	motion.advance(delta)
 	visual_time += delta
 	flash_remaining = maxf(0.0, flash_remaining - delta)
 	city_flash_remaining = maxf(0.0, city_flash_remaining - delta)
@@ -280,12 +285,18 @@ func _process(delta: float) -> void:
 	notice_remaining = maxf(0.0, notice_remaining - delta)
 	var new_phase := int(phase_info["index"])
 	if new_phase != previous_phase:
+		if previous_phase >= 0 and not bool(phase_info["sunny"]):
+			motion.mark(&"shortage", cloud.position, city_light.position, 1.05)
 		previous_phase = new_phase
 		notice = "햇빛이 많아요! 남는 전기를 배터리에 저장해요." if bool(phase_info["sunny"]) else "구름이 꼈어요! 도시 필요량 %d · 저장 전기를 보내요." % int(phase_info["demand"])
 		notice_remaining = 2.3
 	var axis := float(int(MINIGAME_INPUT.is_pressed(KEY_D) or MINIGAME_INPUT.is_pressed(KEY_RIGHT)) - int(MINIGAME_INPUT.is_pressed(KEY_A) or MINIGAME_INPUT.is_pressed(KEY_LEFT)))
 	var previous_x := hero_x
 	hero_x = clampf(hero_x + axis * RUN_SPEED * delta, SOLAR_X, CITY_X)
+	if cargo != 0:
+		motion.trail(&"wake", Vector3(hero_x, 2.37, 1.72), 0.34, 0.33, cargo)
+	else:
+		motion.last_trail = Vector3.INF
 	# A slow frame can cross the station without ending inside it.
 	if interaction_cooldown <= 0.0 and minf(previous_x, hero_x) <= BATTERY_X + STATION_REACH and maxf(previous_x, hero_x) >= BATTERY_X - STATION_REACH:
 		var destination := hero_x
@@ -305,12 +316,14 @@ func _process(delta: float) -> void:
 func _try_station_action() -> void:
 	if hero_x <= SOLAR_X + STATION_REACH and cargo == 0 and is_sunny_at(elapsed, game_seed) and battery_units < BATTERY_CAPACITY:
 		cargo = 1
+		motion.mark(&"packet", solar_light.position, Vector3(hero_x, 2.43, 1.72), 0.64, 1)
 		notice = "발전소의 남는 전기를 받았어요. 가운데 배터리로!"
 		notice_remaining = 1.5
 		interaction_cooldown = 0.23
 	elif absf(hero_x - BATTERY_X) <= STATION_REACH and cargo == 1:
 		cargo = 0
 		battery_units += 1
+		motion.mark(&"packet", Vector3(hero_x, 2.43, 1.72), battery_cells[battery_units - 1].position, 0.85, 1)
 		charging_remaining = 0.9
 		notice = "배터리에 전기 1칸 저장 · 흐릴 때 꺼내요"
 		notice_remaining = 1.5
@@ -319,6 +332,7 @@ func _try_station_action() -> void:
 		interaction_cooldown = 0.23
 	elif absf(hero_x - BATTERY_X) <= STATION_REACH and cargo == 0 and not is_sunny_at(elapsed, game_seed) and battery_units > 0:
 		cargo = 2
+		motion.mark(&"packet", battery_cells[battery_units - 1].position, Vector3(hero_x, 2.43, 1.72), 0.66, 2)
 		battery_units -= 1
 		notice = "배터리의 저장 전기를 꺼냈어요. 오른쪽 도시로!"
 		notice_remaining = 1.5
@@ -332,11 +346,39 @@ func _try_station_action() -> void:
 		city_energy_remaining = minf(3.0, city_energy_remaining + 1.0)
 		city_flash_remaining = 0.45
 		supply_remaining = 0.9
+		motion.mark(&"packet", Vector3(hero_x, 2.43, 1.72), city_windows[0].position, 0.78, 2)
+		motion.mark(&"windows", city_windows[0].position, city_windows[-1].position, 1.07)
 		notice = "저장 전기를 도시로 공급 · 불빛이 유지돼요"
 		notice_remaining = 1.5
 		arcade_event.emit(SUPPLY_POINTS, true, "저장 전기로 도시의 불을 켰어요", true)
 		_flash(Color("ffe77b45"))
 		interaction_cooldown = 0.23
+
+func _draw_relay_motion(ink: MotionLayer, kind: StringName, a: Vector2, b: Vector2, t: float, alpha: float, value: float) -> void:
+	var hue := Color(Color("ffdc55") if value < 1.5 else Color("70ddff"), alpha)
+	if kind == &"wake":
+		ink.stroke([a.lerp(b, t), b], Color(hue, alpha * 0.65), 3.6 - 2.0 * t)
+	elif kind == &"shortage":
+		for i in range(3):
+			var tip := a.lerp(b, 0.20 + 0.4 * t) + Vector2((i - 1) * 9, abs(i-1) * -3)
+			ink.stroke([tip - Vector2(3, 6), tip + Vector2(0, 2), tip + Vector2(3, -5)], Color(Color("ffc077"), alpha), 2)
+	elif kind == &"windows":
+		for i in range(4):
+			var wave := clampf((t - i * 0.12 - 0.29) / 0.41, 0.0, 1.0)
+			if wave <= 0 or wave >= 1: continue
+			var pos := a.lerp(b, float(i) / 3.0)
+			var radius := Vector2.ONE * (4 + 10 * wave)
+			ink.stroke([pos - Vector2(0, radius.y), pos + Vector2(radius.x, 0), pos + Vector2(0, radius.y), pos - Vector2(radius.x, 0), pos - Vector2(0, radius.y)], Color(Color("fff295"), sin(PI * wave) * alpha), 2)
+	else:
+		var progress := smoothstep(0, 0.82, t)
+		var curve := PackedVector2Array()
+		for i in range(6):
+			var s := maxf(0, progress - (5-i) * 0.065)
+			curve.append(a.lerp(b, s) + Vector2.UP * sin(s * PI) * 24)
+		ink.stroke(curve, hue, 3.2)
+		var head := curve[-1]
+		ink.badge(head, hue.darkened(0.56), 9)
+		ink.stroke([head + Vector2(2,-7), head + Vector2(-3,0), head + Vector2(3,0), head + Vector2(-2,7)], hue, 2.6)
 
 func _flash(color: Color) -> void:
 	color.a = minf(color.a, VISUAL_STYLE.SUCCESS_FLASH_ALPHA)

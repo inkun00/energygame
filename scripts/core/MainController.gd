@@ -9,6 +9,7 @@ class_name MainController
 var session_open := false
 var exit_confirmation: ConfirmationDialog
 var standalone_minigames: CanvasLayer
+@onready var screen_layout := preload("res://scripts/ui/GameScreenLayout.gd").new()
 var recovery_overlay: CanvasLayer
 var guided_tutorial: GuidedTutorial
 var tutorial_player_configs: Array[Dictionary] = []
@@ -68,6 +69,7 @@ func _ready() -> void:
 	if lobby_ui:
 		lobby_ui.start_game_requested.connect(_on_start_game_requested)
 		lobby_ui.tutorial_requested.connect(_on_tutorial_requested)
+		lobby_ui.minigames_requested.connect(_open_standalone_minigames.bind("hub"))
 	if NetworkManager:
 		if not NetworkManager.game_started_signal.is_connected(_on_network_game_started):
 			NetworkManager.game_started_signal.connect(_on_network_game_started)
@@ -78,7 +80,6 @@ func _ready() -> void:
 		switch_to_lobby()
 	else:
 		_open_standalone_minigames(standalone_request)
-	var screen_layout := preload("res://scripts/ui/GameScreenLayout.gd").new()
 	add_child(screen_layout)
 	screen_layout.setup(game_board, lobby_ui, standalone_minigames)
 	if OS.has_feature("web"):
@@ -91,13 +92,21 @@ func _web_minigame_request() -> String:
 	return str(requested) if requested != null else ""
 
 func _open_standalone_minigames(requested_id: String) -> void:
+	if is_instance_valid(standalone_minigames):
+		return
+	if NetworkManager.is_online:
+		NetworkManager.disconnect_network()
 	if lobby_ui:
 		lobby_ui.visible = false
 	if game_board:
 		# The inactive board must not build a second modal or consume arcade keys.
 		game_board.set_board_active(false)
 	standalone_minigames = preload("res://scripts/ui/StandaloneMiniGames.gd").new()
+	standalone_minigames.player_configs = lobby_ui._create_local_configs()
 	add_child(standalone_minigames)
+	standalone_minigames.lobby_requested.connect(switch_to_lobby)
+	if screen_layout.is_inside_tree():
+		screen_layout.bind_standalone(standalone_minigames)
 	standalone_minigames.call("open_request", requested_id)
 
 
@@ -118,6 +127,14 @@ func _finish_web_loading() -> void:
 	JavaScriptBridge.eval("if (window.energyGameReady) window.energyGameReady();")
 
 func switch_to_lobby() -> void:
+	var left_arcade := is_instance_valid(standalone_minigames)
+	if left_arcade:
+		standalone_minigames.modal.set_surface_enabled(false)
+		standalone_minigames.hide()
+		standalone_minigames.queue_free()
+		standalone_minigames = null
+		screen_layout.bind_standalone(null)
+		DisplayServer.window_set_title(ProjectSettings.get_setting("application/config/name"))
 	if is_instance_valid(guided_tutorial):
 		guided_tutorial.stop()
 	_set_session_open(false)
@@ -135,6 +152,8 @@ func switch_to_lobby() -> void:
 		lobby_ui.visible = true
 		if lobby_ui.has_method("reset_network_controls"):
 			lobby_ui.reset_network_controls()
+		if left_arcade:
+			lobby_ui.minigames_button.grab_focus.call_deferred()
 
 func _on_start_game_requested(player_configs: Array[Dictionary], duration_seconds: int = GameManager.DEFAULT_GAME_DURATION_SECONDS) -> void:
 	if is_instance_valid(guided_tutorial):

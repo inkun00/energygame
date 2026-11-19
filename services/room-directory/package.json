@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "dependencies": {
+    "@vercel/blob": "2.9.0"
+  },
   "scripts": {
     "test": "node --test",
     "dev": "npx wrangler dev",

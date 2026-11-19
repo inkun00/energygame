@@ -1,3 +1,5 @@
+import { scoresRoute } from "./scores.js";
+
 const ROOM_TTL_SECONDS = 90;
 const WEBRTC_ROOM_TTL_SECONDS = 120;
 const WEBRTC_MAX_PLAYERS = 4;
@@ -400,6 +402,7 @@ export default {
 
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
+    if (parts[0] === "scores") return scoresRoute(request, env.DB, parts, json);
     if (parts[0] === "webrtc") await ensureWebRtcSchema(env);
     if (parts[0] === "webrtc" && parts[1] === "rooms" && parts.length === 2 && request.method === "GET") return listWebRtcRooms(env);
     if (parts[0] === "webrtc" && parts[1] === "rooms" && parts.length === 4 && parts[3] === "leave" && request.method === "POST") return leaveWebRtcRoom(request, env, parts[2]);

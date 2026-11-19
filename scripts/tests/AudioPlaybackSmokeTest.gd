@@ -23,7 +23,7 @@ func check(value: bool, message: String) -> void:
 
 func _run() -> void:
 	var manager = root.get_node("AudioManager")
-	check(manager.CLIPS.size() == 17, "All original effects must be bundled")
+	check(manager.CLIPS.size() == 19 and manager.CLIPS.has("arcade_tick") and manager.CLIPS.has("arcade_start"), "All game and countdown effects must be bundled")
 	var data_bytes := 0
 	for id in manager.CLIPS:
 		var clip: AudioStreamWAV = manager.CLIPS[id]
@@ -52,7 +52,7 @@ func _run() -> void:
 		check(voice.playing and voice.stream == manager.CLIPS["mycelium_harvest"], "Pool overflow must preserve active effects")
 	await create_timer(1.0).timeout
 	for voice in manager.voices: check(not voice.playing, "All voices should become reusable")
-	var message := "PASS: 17 local audio clips; %d compressed bytes; natural completion; bounded voice reuse" % data_bytes
+	var message := "PASS: %d local audio clips; %d compressed bytes; natural completion; bounded voice reuse" % [manager.CLIPS.size(), data_bytes]
 	if not failures.is_empty(): message = "FAIL: " + "; ".join(failures)
 	print(message)
 	if OS.has_feature("web"):

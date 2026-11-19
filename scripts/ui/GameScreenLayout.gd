@@ -14,16 +14,20 @@ var web_portrait_hint := false
 func setup(game_board: GameBoardController, lobby_view: LobbyUI, arcade_hub: CanvasLayer) -> void:
 	lobby = lobby_view
 	board = game_board
-	standalone = arcade_hub
 	get_window().size_changed.connect(refresh)
 	board.layout_state_changed.connect(refresh)
 	lobby.visibility_changed.connect(refresh)
 	lobby.portrait_layout_changed.connect(refresh)
 	for overlay in [board.hud.lap_reward_panel, board.hud.special_skill_target_panel]:
 		overlay.visibility_changed.connect(refresh)
-	if is_instance_valid(standalone):
+	bind_standalone(arcade_hub)
+
+func bind_standalone(arcade_hub: CanvasLayer) -> void:
+	standalone = arcade_hub
+	if is_instance_valid(arcade_hub):
 		standalone.modal.visibility_changed.connect(refresh)
 		standalone.menu.visibility_changed.connect(refresh)
+		standalone.hall.visibility_changed.connect(refresh)
 	refresh()
 
 func refresh() -> void:
@@ -35,7 +39,7 @@ func refresh() -> void:
 	var board_game := board.board_surface_active and board.visible
 	var arcade: bool = (board_game and board.minigame_modal.visible) or (is_instance_valid(standalone) and standalone.modal.visible)
 	var board_play: bool = board_game and not GameManager.guided_tutorial_active and not board.hud.special_skill_target_panel.visible and not board.hud.lap_reward_panel.visible and (not board._board_overlay_is_visible() or GameManager.adventure_waiting_for_start)
-	var arcade_menu: bool = is_instance_valid(standalone) and standalone.menu.visible
+	var arcade_menu: bool = is_instance_valid(standalone) and (standalone.menu.visible or standalone.hall.visible)
 	var lobby_open: bool = lobby.supports_portrait_layout()
 	var layout_adapts := arcade or arcade_menu or board_play or lobby_open
 	var show_hint := portrait and not layout_adapts
@@ -45,6 +49,8 @@ func refresh() -> void:
 	var target := DESKTOP_SIZE
 	if portrait and layout_adapts:
 		var base_width := 600 if lobby_open else PORTRAIT_WIDTH
+		if arcade_menu and not arcade:
+			base_width = 520
 		target = Vector2i(base_width, roundi(float(base_width) * native_size.y / native_size.x))
 	elif arcade and MiniGameInput.uses_touch() and native_size.x > native_size.y * 1.8:
 		target = Vector2i(roundi(720.0 * native_size.x / native_size.y), 720)

@@ -8,7 +8,10 @@ signal arcade_event(points: int, success: bool, message: String, count_correct: 
 const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
+const MotionLayer = preload("res://scripts/minigames/ArcadeMotionLayer.gd")
+var motion := MotionLayer.new()
 const WINDOW_MODEL = preload("res://assets/third_party/kenney/standby_house/wallWindow.glb")
+const COOLER_MODEL = preload("res://assets/models/arcade/cooler.glb")
 const FLOOR_MODEL = preload("res://assets/third_party/kenney/standby_house/floorFull.glb")
 const WINDOW_X := [-6.0, -3.6, -1.2, 1.2, 3.6, 6.0]
 const RUN_SPEED := 6.3
@@ -54,6 +57,9 @@ var notice := "A/D 이동 · 열린 창문 앞에서 Space로 닫기"
 var notice_remaining := 3.0
 var flash_remaining := 0.0
 
+func _init() -> void:
+	add_child(motion)
+
 func _ready() -> void:
 	stretch = true
 	custom_minimum_size = Vector2(0, 286)
@@ -61,10 +67,12 @@ func _ready() -> void:
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_build_world()
+	motion.attach(self, world, _draw_window_motion)
 	_build_overlay()
 	set_process(true)
 
 func setup(player_data: Dictionary, round_seed: int) -> void:
+	motion.clear()
 	game_seed = round_seed
 	hero_x = 0.0
 	elapsed = 0.0
@@ -146,8 +154,7 @@ func _build_world() -> void:
 	for index in range(WINDOW_X.size()):
 		_build_window(index)
 	# 에어컨은 열린 창문 수에 따라 커지는 냉방 에너지 사용량을 보여 줍니다.
-	_box(world, Vector3(-7.45, 2.60, -0.88), Vector3(1.00, 0.58, 0.40), Color("e8f8fb"))
-	_box(world, Vector3(-7.45, 2.39, -0.65), Vector3(0.72, 0.08, 0.08), Color("6cb7c9"), true)
+	VISUAL_STYLE.place_prop(world, COOLER_MODEL, Vector3(-7.40, 2.24, -0.92), Vector3(1.30, 0.73, 0.55))
 	_label3d(world, "에어컨", Vector3(-7.40, 3.16, -0.65), Color("eaffff"))
 	power_active_material = VISUAL_STYLE.material(Color("ffa067"), true)
 	power_efficient_material = VISUAL_STYLE.material(Color("72e6d2"), true)
@@ -175,6 +182,7 @@ func _build_window(index: int) -> void:
 	var window_pane := model.find_child("window", true, false) as MeshInstance3D
 	var bounds := window_pane.get_aabb()
 	model.position.x += x - window_pane.to_global(bounds.get_center()).x
+	var closed_bounds: AABB = (world.global_transform.affine_inverse() * window_pane.global_transform) * bounds
 	# Place the hinge on the left stile, midway through the sash thickness.
 	var hinge := Node3D.new()
 	hinge.name = "SashHinge"
@@ -197,7 +205,7 @@ func _build_window(index: int) -> void:
 	prompt.pixel_size = 0.008
 	prompt.outline_size = 5
 	prompt.visible = false
-	windows.append({"x": x, "model": model, "pane": window_pane, "hinge": hinge, "status": status, "particles": particles, "reach_marker": reach_marker, "prompt": prompt, "open": false, "closed": true, "since": 0.0, "open_amount": 0.0})
+	windows.append({"x": x, "model": model, "pane": window_pane, "hinge": hinge, "closed_bounds": closed_bounds, "status": status, "particles": particles, "reach_marker": reach_marker, "prompt": prompt, "open": false, "closed": true, "since": 0.0, "open_amount": 0.0})
 
 func _spawn_hero(player_data: Dictionary) -> void:
 	if is_instance_valid(hero):
@@ -206,8 +214,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	world.add_child(hero)
 	var hero_data := player_data.duplicate(true)
 	hero_data["index"] = 0
-	hero.call("setup_player", hero_data)
-	hero.call("set_side_run_enabled", true)
+	hero.call("setup_arcade_player", hero_data, PLAYER_PAWN.ArcadePose.SIDE)
 	hero.position = Vector3(0.0, 0.07, 1.25)
 	hero.scale = Vector3.ONE * 2.45
 	if hero.shadow_mesh:
@@ -246,6 +253,7 @@ func _build_overlay() -> void:
 	add_child(flash)
 
 func _process(delta: float) -> void:
+	motion.advance(delta)
 	flash_remaining = maxf(0.0, flash_remaining - delta)
 	comparison_remaining = maxf(0.0, comparison_remaining - delta)
 	if flash_remaining <= 0.0:
@@ -263,6 +271,7 @@ func _process(delta: float) -> void:
 	room_temperature = clampf(room_temperature + (-0.15 + 0.22 * float(active_count)) * delta, 22.0, 30.0)
 	var axis := float(int(MINIGAME_INPUT.is_pressed(KEY_D) or MINIGAME_INPUT.is_pressed(KEY_RIGHT)) - int(MINIGAME_INPUT.is_pressed(KEY_A) or MINIGAME_INPUT.is_pressed(KEY_LEFT)))
 	hero_x = clampf(hero_x + axis * RUN_SPEED * delta, -7.0, 7.0)
+	if axis != 0.0: motion.trail(&"step", Vector3(hero_x, 0.12, 1.3), 0.58, 0.26)
 	if is_instance_valid(hero):
 		hero.position.x = hero_x
 		if hero.is_moving != (axis != 0.0):
@@ -285,6 +294,8 @@ func _spawn_wave(wave: int) -> void:
 		window["closed"] = false
 		window["since"] = elapsed
 		_update_window_visual(window)
+		var x := float(window["x"])
+		motion.mark(&"gust", Vector3(x, 2.05, -1.02), Vector3(x, 1.05, 1.1), 1.12)
 		newly_opened += 1
 		if newly_opened >= OPEN_PER_WAVE:
 			break
@@ -312,6 +323,8 @@ func _try_close() -> void:
 		_notice(MINIGAME_INPUT.hint("heat_leak", "열린 창문 가까이 이동해 Space를 누르세요."))
 		return
 	if not bool(closest["open"]):
+		var handle := Vector3(float(closest["x"]) + 0.65, 1.63, -0.95)
+		motion.mark(&"knock", handle, handle, 0.48)
 		arcade_event.emit(15, false, "이미 닫힌 창문이에요. 열린 창문을 찾으세요!", false)
 		_notice("이미 닫힌 창문이에요. 열린 창문을 찾으세요!")
 		return
@@ -324,11 +337,51 @@ func _try_close() -> void:
 	usage_after_close = BASE_COOLING_USE + OPEN_WINDOW_USE * float(_open_window_count())
 	comparison_remaining = 2.4
 	_update_window_visual(closest)
+	for i in range(motion.marks.size() - 1, -1, -1):
+		var mark := motion.marks[i]
+		if mark.kind == &"gust" and is_equal_approx(mark.a.x, float(closest["x"])):
+			motion.marks.remove_at(i)
+	var pane: AABB = closest["closed_bounds"]
+	motion.mark(&"seal", Vector3(pane.position.x, pane.end.y, pane.end.z), Vector3(pane.end.x, pane.position.y, pane.end.z), 0.96)
 	arcade_event.emit(points, true, "창문을 닫아 더운 공기를 막았어요. 에어컨이 쓰는 전기가 줄어요.", true)
 	_notice("창문 닫기 +%d점 · 전기 사용 %.1f → %.1f/초" % [points, usage_before_close, usage_after_close])
 	flash.color = Color(Color("8af2ae"), VISUAL_STYLE.SUCCESS_FLASH_ALPHA)
 	flash_remaining = 0.20
 	_update_overlay()
+
+func _draw_window_motion(ink: MotionLayer, kind: StringName, a: Vector2, b: Vector2, t: float, alpha: float, _amount: float) -> void:
+	if kind == &"step":
+		ink.stroke([a.lerp(b, t * 0.65), b], Color(Color("ecf7d8"), alpha * 0.52), 1.8)
+	elif kind == &"gust":
+		var hot := Color(Color("ff9a67"), alpha)
+		for lane in range(-1, 2):
+			var path := PackedVector2Array()
+			for i in range(9):
+				var u := maxf(0, t - 0.34) + float(i) / 8 * minf(0.34, t + 0.08)
+				path.append(a.lerp(b, u) + Vector2(lane * 8 + sin(u * TAU + lane * 0.55) * 5, 0))
+			ink.stroke(path, hot, 2.1)
+			var tip := path[-1]
+			var back := (path[-2] - tip).normalized()
+			ink.stroke([tip + back.rotated(-0.62)*4, tip, tip + back.rotated(0.62)*4], hot, 1.7)
+	elif kind == &"seal":
+		var cool := Color(Color("96efff"), alpha)
+		var shut := clampf(t * 2.4, 0.0, 1.0)
+		for side in [0, 1]:
+			var edge_x := a.x if side == 0 else b.x
+			var pane_x := lerpf(edge_x, (a.x+b.x)*0.5, shut)
+			ink.stroke([Vector2(edge_x, a.y), Vector2(pane_x, a.y), Vector2(pane_x, b.y), Vector2(edge_x, b.y)], cool, 2.1)
+		if t > 0.35:
+			var center := a.lerp(b, 0.5)
+			var radius := 5.0 + smoothstep(0.35, 0.61, t) * 4
+			for ray in range(6):
+				var dir := Vector2.UP.rotated(ray * TAU / 6)
+				ink.stroke([center, center + dir * radius], cool, 1.8)
+				for side in [-1.0,1.0]:
+					ink.draw_line(center + dir * radius * 0.62, center + dir * radius * 0.62 + dir.rotated(side * 0.83) * 3, cool, 1.5, true)
+	else:
+		for side in [-1.0, 1.0]:
+			var start := a + Vector2(side * (4 + t * 6), -3)
+			ink.stroke([start, start + Vector2(side*3, -3)], Color(Color("ffd49d"), alpha), 2)
 
 func _open_window_count() -> int:
 	var count := 0

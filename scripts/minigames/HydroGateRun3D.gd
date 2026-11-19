@@ -12,6 +12,9 @@ const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 const RUNNER_MODEL = preload("res://assets/models/hydro/crossflow_runner.glb")
+const SLUICE_MECHANISM = preload("res://assets/models/arcade/sluice.glb")
+const GENERATOR_HOUSING = preload("res://assets/models/arcade/storage.glb")
+const CITY_HOME = preload("res://assets/models/village/cottage.glb")
 const GATE_NAMES: Array[String] = ["하단", "중단", "상단"]
 const GATE_LEVELS: Array[float] = [20.0, 48.0, 72.0]
 const GATE_Y: Array[float] = [1.40, 2.90, 4.20]
@@ -42,6 +45,7 @@ const RESERVOIR_BOTTOM := 0.30
 const RESERVOIR_HEIGHT := 5.40
 const TAILWATER_Y := 1.05
 
+var action_fx := preload("res://scripts/minigames/ArcadeMotionLayer.gd").new()
 var viewport: SubViewport
 var world: Node3D
 var camera: Camera3D
@@ -53,6 +57,7 @@ var head_marker: MeshInstance3D
 var gate_doors: Array[MeshInstance3D] = []
 var gate_labels: Array[Label3D] = []
 var lever_lights: Array[MeshInstance3D] = []
+var gate_lever_pivots: Array[Node3D] = []
 var active_channels: Array[MeshInstance3D] = []
 var channel_pulses: Array = []
 var turbine: Node3D
@@ -89,6 +94,8 @@ var awarded_points := 0
 var score_elapsed := 0.0
 var visual_time := 0.0
 var running := false
+var cue_gate := 0
+var flood_warned := false
 var practice_mode := false
 var practice_reached_lever := false
 var practice_opened_gate := false
@@ -119,6 +126,9 @@ var gate_closed_material: StandardMaterial3D
 var charge_normal_style: StyleBoxFlat
 var charge_danger_style: StyleBoxFlat
 
+func _init() -> void:
+	add_child(action_fx)
+
 func _ready() -> void:
 	stretch = true
 	custom_minimum_size = Vector2(0, 286)
@@ -127,12 +137,15 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_build_viewport()
 	_build_world()
+	action_fx.attach(self, world, _draw_action_cue)
 	_build_overlay()
 	resized.connect(_fit_camera_to_chain)
 	_fit_camera_to_chain()
 	set_process(true)
 
 func setup(player_data: Dictionary, game_seed: int) -> void:
+	action_fx.clear()
+	flood_warned = false
 	practice_mode = false
 	practice_reached_lever = false
 	practice_opened_gate = false
@@ -326,8 +339,9 @@ func _build_dam() -> void:
 		var right_x := PLATFORM_RIGHT[gate_index]
 		_box("ServicePlatform%d" % gate_index, Vector3((left_x + right_x) * 0.5, gate_y - 0.25, 1.45), Vector3(right_x - left_x, 0.12, 0.85), Color("dfc48a"))
 		_box("PlatformRim%d" % gate_index, Vector3((left_x + right_x) * 0.5, gate_y - 0.19, 1.04), Vector3(right_x - left_x, 0.04, 0.08), Color("fff0bd"), true)
-		_box("GateLever%d" % gate_index, Vector3(LEVER_X[gate_index], gate_y + 0.25, 1.15), Vector3(0.12, 0.78, 0.15), Color("435b6c"))
-		lever_lights.append(_sphere("LeverBeacon%d" % gate_index, Vector3(LEVER_X[gate_index], gate_y + 0.75, 1.15), 0.18, Color("ffe173"), true))
+		var valve := VISUAL_STYLE.place_prop(world, SLUICE_MECHANISM, Vector3(LEVER_X[gate_index], gate_y - 0.15, 1.15), Vector3(0.62, 0.81, 0.45))
+		gate_lever_pivots.append(valve.find_child("Handwheel", true, false) as Node3D)
+		lever_lights.append(_sphere("LeverBeacon%d" % gate_index, Vector3(LEVER_X[gate_index], gate_y + 0.73, 1.15), 0.11, Color("ffe173"), true))
 		if gate_index < 2:
 			var jump_hint := Label3D.new()
 			jump_hint.position = Vector3(2.4, gate_y + 0.20, 1.75)
@@ -345,7 +359,7 @@ func _build_dam() -> void:
 	turbine = RUNNER_MODEL.instantiate()
 	turbine.name = "WaterTurbine"
 	axle_mount.add_child(turbine)
-	_box("Generator", Vector3(6.45, 1.0, 0.24), Vector3(1.15, 1.2, 1.1), Color("566d79"))
+	VISUAL_STYLE.place_prop(world, GENERATOR_HOUSING, Vector3(6.45, 0.39, 0.24), Vector3(1.24, 1.23, 1.10))
 	generator_light = _sphere("GeneratorPower", Vector3(6.45, 1.8, 0.55), 0.28, Color("ffe872"), true)
 	# Keep the entire turbine → generator → city chain inside laptop viewports.
 	power_line = _box("PowerToCity", Vector3(7.6, 2.0, 0.4), Vector3(2.4, 0.10, 0.12), Color("ffe872"), true)
@@ -354,7 +368,7 @@ func _build_dam() -> void:
 	city_window_material = _material(Color("ffe58b"), true)
 	city_window_dark_material = _material(Color("516171"), false)
 	for house_x in [7.6, 8.8]:
-		_box("CityHouse", Vector3(house_x, 0.8, -0.3), Vector3(1.1, 1.6, 1.0), Color("e7dbbb"))
+		VISUAL_STYLE.place_prop(world, CITY_HOME, Vector3(house_x, 0, -0.3), Vector3(0.44, 0.60, 0.44))
 		for floor_index in range(2):
 			var window := _box("CityWindow", Vector3(house_x, 0.45 + floor_index * 0.58, 0.23), Vector3(0.64, 0.24, 0.04), Color("516171"))
 			city_windows.append(window)
@@ -385,8 +399,7 @@ func _spawn_hero(player_data: Dictionary) -> void:
 	world.add_child(hero)
 	var hero_data := player_data.duplicate(true)
 	hero_data["index"] = 0
-	hero.call("setup_player", hero_data)
-	hero.call("set_side_run_enabled", true)
+	hero.call("setup_arcade_player", hero_data, PLAYER_PAWN.ArcadePose.SIDE)
 	hero.position = Vector3(hero_x, hero_y, 1.8)
 	hero.scale = Vector3.ONE * 2.1
 	if hero.shadow_mesh:
@@ -532,6 +545,9 @@ func _open_selected_gate() -> void:
 	last_open_generation = generated_kwh
 	charge = 0.0
 	var power := power_for_gate(water_level, open_gate)
+	cue_gate = open_gate
+	if power > 0.0:
+		action_fx.play_cue(&"release", 1.22)
 	notice = "%s 수문 개방! 낙차 %dm의 물이 터빈을 돌려 %.1f MW 발전" % [GATE_NAMES[open_gate], roundi(head_for_level(water_level)), power]
 	notice_remaining = 1.6
 	# Opening when water is high enough records a useful water-management choice.
@@ -545,6 +561,8 @@ func _close_open_gate(manual: bool) -> void:
 			notice_remaining = 1.2
 		return
 	var closed_gate := open_gate
+	cue_gate = closed_gate
+	action_fx.play_cue(&"close", 0.95)
 	if practice_mode and manual and practice_generated_power:
 		practice_closed_gate = true
 	if manual and generated_kwh > last_open_generation + 0.05 and water_level < highest_open_level - 3.0:
@@ -571,6 +589,11 @@ func _advance_simulation(delta: float) -> void:
 	if practice_mode and gained_kwh > 0.0:
 		practice_generated_power = true
 	water_level += (inflow - flow * DRAIN_PER_FLOW) * delta
+	if water_level < 78.0:
+		flood_warned = false
+	elif water_level >= 86.0 and not flood_warned and open_gate < 0 and not practice_mode:
+		flood_warned = true
+		action_fx.play_cue(&"high_water", 1.25)
 	elapsed += delta
 	if open_gate >= 0 and water_level <= GATE_LEVELS[open_gate] + 1.0:
 		_close_open_gate(false)
@@ -609,6 +632,12 @@ func _flush_generation_score() -> void:
 	arcade_event.emit(points, true, "터빈 발전 · 누적 %.1f kWh" % generated_kwh, false)
 
 func _animate_world(delta: float) -> void:
+	action_fx.advance(delta)
+	for i in range(gate_doors.size()):
+		var raised := i == open_gate
+		gate_doors[i].position.y = move_toward(gate_doors[i].position.y, GATE_Y[i] + (0.66 if raised else 0.0), delta * 2.9)
+		var lever_angle := -0.68 if raised else (0.20 + 0.46 * charge if selected_gate == i else 0.20)
+		gate_lever_pivots[i].rotation.y = lerp_angle(gate_lever_pivots[i].rotation.y, lever_angle * 3.0, 1.0 - exp(-delta * 14.0))
 	var rain_rate := inflow_for_time(elapsed, rain_seed)
 	var visible_drops := roundi(24.0 * clampf((rain_rate - 3.0) / 13.0, 0.18, 1.0))
 	for drop_index in range(rain_streaks.size()):
@@ -669,13 +698,12 @@ func _update_visuals() -> void:
 		var submerged := water_level > GATE_LEVELS[gate_index] + 1.0
 		var opened := open_gate == gate_index
 		gate_doors[gate_index].material_override = gate_open_material if opened else (gate_selected_material if gate_index == selected_gate else gate_closed_material)
-		gate_doors[gate_index].position.x = -0.68 if opened else -0.92
 		gate_labels[gate_index].text = "%s · %s · %s" % [GATE_NAMES[gate_index], ["작은 수로", "중간 수로", "큰 수로"][gate_index], "열림" if opened else ("물 닿음" if submerged else "마름")]
 		gate_labels[gate_index].modulate = Color("85ffcf") if opened else (Color("ffe696") if gate_index == selected_gate else Color("d6e6e9"))
 		lever_lights[gate_index].material_override = gate_open_material if opened else (gate_selected_material if gate_index == selected_gate else gate_closed_material)
-		active_channels[gate_index].visible = opened
+		active_channels[gate_index].visible = opened and current_power > 0.0
 		for pulse in channel_pulses[gate_index]:
-			(pulse as MeshInstance3D).visible = opened
+			(pulse as MeshInstance3D).visible = opened and current_power > 0.0
 	# Blue water reaches the turbine, its shaft drives the generator, and yellow
 	# electricity travels to real windows. The same hydraulic power drives every
 	# downstream cue; an open but dry gate must never light the city.
@@ -782,7 +810,7 @@ func _sloped_channel(node_name: String, start: Vector3, finish: Vector3, thickne
 	channel.rotation.z = atan2(direction.y, direction.x)
 	return channel
 
-func _sphere(node_name: String, where: Vector3, radius: float, color: Color, glowing: bool = false) -> MeshInstance3D:
+func _sphere(node_name: String, where: Vector3, radius: float, color: Color, glowing: bool = false, parent: Node3D = null) -> MeshInstance3D:
 	var mesh := SphereMesh.new()
 	mesh.radius = radius
 	mesh.height = radius * 2.0
@@ -792,7 +820,7 @@ func _sphere(node_name: String, where: Vector3, radius: float, color: Color, glo
 	instance.mesh = mesh
 	instance.position = where
 	instance.material_override = _material(color, glowing)
-	world.add_child(instance)
+	(parent if parent != null else world).add_child(instance)
 	return instance
 
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:
@@ -818,3 +846,48 @@ func _bar_style(color: Color) -> StyleBoxFlat:
 	style.bg_color = color
 	style.set_corner_radius_all(7)
 	return style
+
+func _draw_action_cue(_layer: Control, kind: StringName, _from: Vector2, _to: Vector2, t: float, alpha: float, _amount: float) -> void:
+	var tint := Color(1.0, 1.0, 1.0, alpha)
+	var gate := action_fx.project(Vector3(-0.65, GATE_Y[cue_gate], 0.86))
+	var runner := action_fx.project(turbine.global_position)
+	var aqua := Color("66e6fa") * tint
+	var foam := Color("e1fff3") * tint
+	if kind != &"release":
+		var y := RESERVOIR_BOTTOM + RESERVOIR_HEIGHT * clampf(water_level / 100.0, 0, 1)
+		var bank := action_fx.project(Vector3(-1.8, y, 1.1))
+		var far_bank := action_fx.project(Vector3(-10.4, y, 1.1))
+		var end := bank.lerp(far_bank, smoothstep(0, 0.9, t))
+		var front := bank.lerp(end, 0.45)
+		var points := PackedVector2Array()
+		for i in range(22):
+			var f := i / 21.0
+			var rise := sin(f * PI) * sin(f * TAU * 2.0 - t * 3.5) * 6.0
+			points.append(front.lerp(end, f) + Vector2(0, rise))
+		action_fx.stroke(points, Color("ffca7b") * tint if kind == &"high_water" else foam, 3.8)
+		if kind == &"close":
+			for i in [-1.0, 1.0]:
+				var jaw := gate + Vector2(i * lerpf(20.0, 3.0, smoothstep(0.0, 0.5, t)), 0)
+				action_fx.stroke([jaw + Vector2.UP * 7, jaw + Vector2.DOWN * 7], foam, 4.5)
+		return
+	# Follow the actual penstock. The head reaches the runner first, then
+	# separates into individual drops. No water appears in a dry channel.
+	var head := clampf(t * 1.85, 0.0, 1.0)
+	var tail := clampf((t - 0.23) * 1.8, 0.0, 1.0)
+	var normal := gate.direction_to(runner).orthogonal()
+	if tail < head:
+		var crest := PackedVector2Array()
+		for i in range(13):
+			var f := i / 12.0
+			var u := lerpf(tail, head, f)
+			crest.append(gate.lerp(runner, u) + normal * sin(PI * f) * sin(f * TAU + t * 7.0) * 3)
+		action_fx.stroke(crest, aqua, 7.2)
+		action_fx.stroke([crest[9], crest[12]], foam, 3.7)
+	if t > 0.38:
+		var splash := clampf((t - 0.38) / 0.62, 0, 1)
+		for i in range(7):
+			var angle := lerpf(-2.7, -0.43, i / 6.0)
+			var velocity := Vector2.from_angle(angle) * (40.0 + 9.0 * (i % 3))
+			var drop := runner + velocity * splash + Vector2.DOWN * 38 * splash * splash
+			var tangent := (velocity + Vector2.DOWN * 76 * splash).normalized()
+			action_fx.stroke([drop - tangent * 4, drop + tangent * 3], foam if i % 2 == 0 else aqua, 2.7)

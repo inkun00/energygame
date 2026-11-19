@@ -9,6 +9,7 @@ const TileMarker3D = preload("res://scripts/board/TileMarker3D.gd")
 const BoardItemPickup3D = preload("res://scripts/board/BoardItemPickup3D.gd")
 const SpecialSkillEffect3D = preload("res://scripts/effects/SpecialSkillEffect3D.gd")
 const EnergyFairyVillage3D = preload("res://scripts/board/EnergyFairyVillage3D.gd")
+const VillageModel = preload("res://scripts/board/VillageSceneryModel.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
 const RENDER_QUALITY = preload("res://scripts/performance/RenderQuality.gd")
 
@@ -870,6 +871,8 @@ func _reset_kingdom_visuals() -> void:
 	built_landmark_count = 0
 	if renewable_landmarks:
 		for landmark in renewable_landmarks.get_children():
+			if is_instance_valid(energy_fairy_village):
+				energy_fairy_village.scenery_groups.erase(landmark)
 			landmark.queue_free()
 	if board_base_material:
 		board_base_material.albedo_color = Color("365a4c")
@@ -894,31 +897,21 @@ func _on_kingdom_progress_changed(projects_built: int, total_projects: int, heal
 func _add_renewable_landmark(stage_index: int) -> void:
 	if renewable_landmarks == null or stage_index < 0:
 		return
-	var positions := [
-		Vector3(-9.5, 0.35, -4.7), Vector3(9.5, 0.35, -4.7),
-		Vector3(-9.5, 0.35, 4.7), Vector3(9.5, 0.35, 4.7),
-		Vector3(-9.5, 0.35, 0), Vector3(9.5, 0.35, 0),
-		Vector3(-4.7, 0.35, -9.5), Vector3(4.7, 0.35, -9.5),
-		Vector3(-4.7, 0.35, 9.5), Vector3(4.7, 0.35, 9.5)
+	# Place each selected project beyond the grid so it cannot cover a playable tile.
+	var pads := [
+		Vector2(-12.5, -6.5), Vector2(12.5, -6.5), Vector2(-12.5, 6.5), Vector2(12.5, 6.5),
+		Vector2(-12.6, 0), Vector2(12.6, 0), Vector2(-4.7, -12.1), Vector2(4.7, -12.1),
+		Vector2(-4.7, 12.1), Vector2(4.7, 12.1)
 	]
-	var pad: Vector3 = positions[stage_index % positions.size()]
-	var landmark := MeshInstance3D.new()
-	var material := StandardMaterial3D.new()
-	var landmark_colors: Array[Color] = [Color("ffd84e"), Color("78d9f4"), Color("9ce77c"), Color("8ce8bf")]
-	material.albedo_color = landmark_colors[stage_index % landmark_colors.size()]
-	material.emission_enabled = true
-	material.emission = material.albedo_color * 0.35
-	if stage_index == 1:
-		var turbine := CylinderMesh.new()
-		turbine.top_radius = 0.10
-		turbine.bottom_radius = 0.16
-		turbine.height = 2.2
-		landmark.mesh = turbine
-		landmark.position = pad + Vector3(0, 1.1, 0)
-	else:
-		var building := BoxMesh.new()
-		building.size = Vector3(1.4, 1.2 + (stage_index % 4) * 0.25, 1.4)
-		landmark.mesh = building
-		landmark.position = pad + Vector3(0, building.size.y * 0.5, 0)
-	landmark.material_override = material
+	var project_id := stage_index
+	if stage_index < GameManager.built_project_ids.size():
+		project_id = GameManager.built_project_ids[stage_index]
+	var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[project_id]
+	var model_id := str(project.image).get_file().get_basename()
+	var landmark := VillageModel.make(model_id)
+	var pad: Vector2 = pads[stage_index % pads.size()]
+	landmark.position = Vector3(pad.x, -0.22, pad.y)
+	landmark.material_override = landmark.mesh.surface_get_material(0)
 	renewable_landmarks.add_child(landmark)
+	if is_instance_valid(energy_fairy_village):
+		energy_fairy_village._register_scenery(landmark, 1.0, 0.75)

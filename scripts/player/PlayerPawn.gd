@@ -43,7 +43,14 @@ var board_animator: AnimationPlayer
 var board_target_yaw := 0.0
 var board_shortcut_jump := false
 var board_stride_length := LEGACY_BOARD_STRIDE_LENGTH
+var arcade_stride_length := LEGACY_BOARD_STRIDE_LENGTH
 var board_pose_time := 0.0
+enum ArcadePose { NONE, SIDE, RUNNER, CONTROL }
+var arcade_pose := ArcadePose.NONE
+var course_speed := 0.0
+var arcade_lift := 0.0
+var peak_lift := 0.0
+var descending := false
 
 const BOARD_AVATAR_SCALE := 1.35
 const BOARD_ACTIVE_AVATAR_SCALE := 1.60
@@ -129,6 +136,9 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_update_shield_visual(delta)
 	if board_model:
+		if arcade_pose != ArcadePose.NONE:
+			_advance_arcade_pose(delta)
+			return
 		board_model.rotation.y = rotate_toward(board_model.rotation.y, board_target_yaw, delta * 12.0)
 		if board_animator.current_animation == &"idle":
 			board_animator.advance(delta)
@@ -176,6 +186,13 @@ func _init_components() -> void:
 	# 3. 방패를 보유한 동안 캐릭터를 감싸는 반투명 에너지 보호막입니다.
 	_create_shield_visual()
 
+func setup_arcade_player(p_data: Dictionary, view: ArcadePose, forward_speed: float = 0.0) -> void:
+	arcade_pose = view
+	course_speed = forward_speed
+	board_target_yaw = 1.25 if view == ArcadePose.SIDE else PI
+	setup_player(p_data)
+	animation_position_ready = false
+
 func setup_player(p_data: Dictionary) -> void:
 	_init_components()
 	player_index = p_data.get("index", 0)
@@ -194,7 +211,7 @@ func _configure_avatar() -> void:
 		return
 	var model_path := ""
 	var roster_icon := player_icon_path.replace("res://assets/images/char_", "res://assets/characters/eco_roster/")
-	if board_presentation_enabled and roster_icon in IDLE_SPRITE_BY_ICON:
+	if (board_presentation_enabled or arcade_pose != ArcadePose.NONE) and roster_icon in IDLE_SPRITE_BY_ICON:
 		var slug := roster_icon.get_file().get_basename()
 		if slug == "fairy_sparky":
 			slug = "captain_eco"
@@ -212,10 +229,14 @@ func _configure_avatar() -> void:
 		board_model.rotation.y = board_target_yaw
 		board_animator = board_model.find_child("AnimationPlayer", true, false) as AnimationPlayer
 		if board_animator and board_animator.has_animation(&"idle") and board_animator.has_animation(&"walk"):
-			board_stride_length = _read_board_stride(board_model)
+			board_stride_length = _read_stride(board_model, &"board_stride_length", LEGACY_BOARD_STRIDE_LENGTH)
+			arcade_stride_length = _read_stride(board_model, &"arcade_stride_length", board_stride_length)
 			board_animator.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
 			for clip_name in [&"idle", &"walk"]:
 				board_animator.get_animation(clip_name).loop_mode = Animation.LOOP_LINEAR
+			for clip_name in [&"run", &"operate"]:
+				if board_animator.has_animation(clip_name):
+					board_animator.get_animation(clip_name).loop_mode = Animation.LOOP_LINEAR
 			if board_animator.has_animation(&"jump"):
 				board_animator.get_animation(&"jump").loop_mode = Animation.LOOP_NONE
 			avatar_sprite.hide()
@@ -229,14 +250,14 @@ func _configure_avatar() -> void:
 	_load_sprite_textures(player_icon_path)
 	_set_avatar_animation_state(is_moving)
 
-func _read_board_stride(model: Node3D) -> float:
+func _read_stride(model: Node3D, key: StringName, fallback: float) -> float:
 	# Imported glTF node extras carry the authored travel for one complete loop.
 	for node: Node in [model] + model.find_children("*", "", true, false):
 		var extras: Dictionary = node.get_meta(&"extras", {})
-		var length := float(extras.get("board_stride_length", 0.0))
+		var length := float(extras.get(key, 0.0))
 		if is_finite(length) and length > 0.0:
 			return length
-	return LEGACY_BOARD_STRIDE_LENGTH
+	return fallback
 
 func _load_sprite_textures(icon_path: String) -> void:
 	idle_sprite_texture = null
@@ -417,8 +438,12 @@ func _set_avatar_animation_state(should_move: bool) -> void:
 	if board_animator:
 		is_moving = should_move
 		var clip_name := &"walk" if should_move else &"idle"
-		if should_move and board_shortcut_jump and board_animator.has_animation(&"jump"):
+		if (arcade_lift > 0.07 or (should_move and board_shortcut_jump)) and board_animator.has_animation(&"jump"):
 			clip_name = &"jump"
+		elif should_move and arcade_pose == ArcadePose.CONTROL and board_animator.has_animation(&"operate"):
+			clip_name = &"operate"
+		elif should_move and arcade_pose != ArcadePose.NONE and board_animator.has_animation(&"run"):
+			clip_name = &"run"
 		if board_animator.current_animation != clip_name:
 			var initial_pose := board_animator.assigned_animation.is_empty()
 			board_pose_time = 0.0
@@ -444,6 +469,42 @@ func _set_avatar_animation_state(should_move: bool) -> void:
 		avatar_sprite.hframes = MOVE_SPRITE_FRAMES if is_moving or use_back_run_sprite or use_side_run_sprite else IDLE_SPRITE_FRAMES
 		avatar_sprite.vframes = 1
 		avatar_sprite.frame = 0
+
+func set_arcade_lift(lift: float) -> void:
+	var was_airborne := arcade_lift > 0.07
+	if lift > 0.07:
+		peak_lift = maxf(peak_lift, lift)
+		if lift < arcade_lift - 0.001:
+			descending = true
+	else:
+		peak_lift = 0.0
+		descending = false
+	arcade_lift = lift
+	if was_airborne != (lift > 0.07):
+		_set_avatar_animation_state(is_moving)
+
+func _advance_arcade_pose(delta: float) -> void:
+	var distance_x := position.x - last_animation_position.x if animation_position_ready else 0.0
+	last_animation_position = position
+	animation_position_ready = true
+	if arcade_pose == ArcadePose.SIDE and absf(distance_x) > 0.0001:
+		board_target_yaw = signf(distance_x) * 1.25
+	board_model.rotation.y = rotate_toward(board_model.rotation.y, board_target_yaw, 14.0 * delta)
+	match board_animator.current_animation:
+		&"walk", &"run":
+			# The auto-runner's road moves under the hero. Side-view games move
+			# the pawn directly, including a blocked step or a return to centre.
+			var travel := course_speed * delta if arcade_pose == ArcadePose.RUNNER else absf(distance_x)
+			var stride := arcade_stride_length * absf(scale.x)
+			var length := board_animator.current_animation_length
+			_set_board_motion_time(fposmod(board_pose_time + travel * length / maxf(0.01, stride), length))
+		&"jump":
+			var fraction := 0.16 + 0.34 * clampf(arcade_lift / maxf(0.1, scale.y * 0.48), 0, 1)
+			if descending:
+				fraction = 0.88 - 0.38 * clampf(arcade_lift / maxf(peak_lift, 0.1), 0, 1)
+			_set_board_motion_time(board_animator.current_animation_length * fraction)
+		_:
+			board_animator.advance(delta)
 
 func set_back_run_enabled(enabled: bool) -> void:
 	use_back_run_sprite = enabled

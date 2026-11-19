@@ -121,6 +121,7 @@ func apply(canvas: Vector2, use_portrait: bool) -> void:
 			_style(lobby.reading_time_toggle, 24, 64)
 			_style(lobby.local_start_button, 27, 78)
 			_style(content.get_node("PlayModeButtons/OnlinePlayButton"), 27, 78)
+			_style(lobby.minigames_button, 26, 76)
 			_style(lobby.status_label, 22)
 			_style(lobby.help_button, 22, 62)
 			_style(lobby.sound_button, 23, 62)

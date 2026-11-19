@@ -1,0 +1,10 @@
+{
+  "framework": null,
+  "outputDirectory": "public",
+  "functions": {
+    "api/records.mjs": {"includeFiles": "schema.sql", "maxDuration": 30}
+  },
+  "rewrites": [
+    {"source": "/api/scores/:route*", "destination": "/api/records?gamePath=:route*"}
+  ]
+}

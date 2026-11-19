@@ -52,3 +52,17 @@ CREATE TABLE IF NOT EXISTS webrtc_room_settings (
 CREATE TABLE IF NOT EXISTS webrtc_started_rooms (
   code TEXT PRIMARY KEY REFERENCES webrtc_rooms(code) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS score_attempts (
+  id TEXT PRIMARY KEY, owner TEXT NOT NULL, game TEXT NOT NULL,
+  round_key TEXT NOT NULL, started INTEGER NOT NULL, network TEXT NOT NULL,
+  score INTEGER, UNIQUE (owner, round_key)
+);
+CREATE INDEX IF NOT EXISTS idx_score_starts ON score_attempts(started);
+CREATE INDEX IF NOT EXISTS idx_score_owner_starts ON score_attempts(owner, started);
+CREATE INDEX IF NOT EXISTS idx_score_network_starts ON score_attempts(network, started);
+CREATE TABLE IF NOT EXISTS arcade_bests (
+  game TEXT NOT NULL, owner TEXT NOT NULL, score INTEGER NOT NULL CHECK(score BETWEEN 0 AND 5000),
+  PRIMARY KEY(game, owner)
+);
+CREATE INDEX IF NOT EXISTS idx_arcade_board ON arcade_bests(game, score DESC, owner);

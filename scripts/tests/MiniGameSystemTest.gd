@@ -355,7 +355,11 @@ func _run() -> void:
 			_check(commute.bus.get_child(0).scene_file_path == commute.BUS_MODEL.resource_path and commute.bus_door_left != null and commute.bus_door_right != null and commute.wheels.size() == 4, "게임에 적용된 GLB 버스에는 출입문 두 짝과 바퀴 네 개가 있어야 합니다.")
 			_check(str(game_manager.MINIGAME_DEFINITIONS["eco_commute"]["input_hint"]).contains("D 길게 전진 · A 길게 후진 · S 정차"), "버스 조작 안내는 D 전진 가속, A 후진 가속, S 정차를 표시해야 합니다.")
 			var first_stop: Dictionary = (commute.segments[0] as Dictionary)["stops"][0]
-			_check((first_stop["students"] as Array)[0].scene_file_path.ends_with("character-a.glb"), "학생도 코드 형상이 아닌 오픈소스 GLB 에셋이어야 합니다.")
+			for pupil_idx in range(2):
+				var pupil: Node3D = first_stop["states"][pupil_idx]["node"]
+				var expected: PackedScene = commute.STUDENT_A if int(first_stop["states"][pupil_idx]["variant"]) == 0 else commute.STUDENT_B
+				var gait := pupil.find_child("AnimationPlayer", true, false) as AnimationPlayer
+				_check(pupil.scene_file_path == expected.resource_path and gait and gait.has_animation("idle") and gait.has_animation("walk") and gait.has_animation("sprint"), "학생은 새 모델의 대기·걷기·달리기 동작을 사용해야 합니다.")
 			_check((first_stop["states"] as Array).size() == 17 and int(first_stop["waiting"]) == 10, "첫 정류장에는 먼저 기다리는 10명과 뛰어올 7명이 있어야 합니다.")
 			var first_student: Dictionary = (first_stop["states"] as Array)[0]
 			_check(first_student["animator"] != null and (first_student["animator"] as AnimationPlayer).has_animation("walk"), "대기 학생은 실제 걷기 애니메이션을 사용해야 합니다.")

@@ -29,6 +29,7 @@ GameManager="*res://scripts/core/GameManager.gd"
 NetworkManager="*res://scripts/network/NetworkManager.gd"
 QuizDatabase="*res://scripts/quiz/QuizDatabase.gd"
 AudioManager="*res://scripts/core/AudioManager.gd"
+MiniGameRecords="*res://scripts/core/MiniGameRecords.gd"
 
 [display]
 
@@ -43,6 +44,7 @@ theme/custom_font="res://assets/fonts/Pretendard-Medium.otf"
 [network]
 
 room_directory_url="https://energygame-room-directory.energygame-room-directory.workers.dev"
+leaderboard_url="https://energygame-minigames-demo.vercel.app/api"
 
 [rendering]
 

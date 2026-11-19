@@ -20,6 +20,8 @@ const CLIPS := {
 	"skill_default": preload("res://assets/audio/sfx/skill_default.wav"),
 	"dice": preload("res://assets/audio/sfx/dice.wav"),
 	"move": preload("res://assets/audio/sfx/move.wav"),
+	"arcade_tick": preload("res://assets/audio/sfx/arcade_tick.wav"),
+	"arcade_start": preload("res://assets/audio/sfx/arcade_start.wav"),
 	"correct": preload("res://assets/audio/sfx/correct.wav"),
 	"wrong": preload("res://assets/audio/sfx/wrong.wav"),
 	"ladder": preload("res://assets/audio/sfx/ladder.wav"),
@@ -57,6 +59,10 @@ func play_dice_sfx() -> void:
 
 func play_move_sfx() -> void:
 	_play_clip("move")
+
+func play_arcade_cue(effect_id: String) -> void:
+	if DisplayServer.get_name() != "headless":
+		_play_clip(effect_id)
 
 func play_correct_sfx() -> void:
 	_play_clip("correct")

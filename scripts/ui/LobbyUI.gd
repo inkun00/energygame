@@ -5,6 +5,9 @@ class_name LobbyUI
 
 signal start_game_requested(player_configs, duration_seconds)
 signal tutorial_requested(player_configs)
+signal minigames_requested
+
+var minigames_button: Button
 signal portrait_layout_changed
 
 const UI = preload("res://scripts/ui/CommercialUI.gd")
@@ -396,6 +399,15 @@ func _setup_mode_selector() -> void:
 		_on_mode_selected(1)
 	)
 	actions.add_child(online_button)
+	minigames_button = Button.new()
+	minigames_button.name = "MiniGameModeButton"
+	minigames_button.text = "미니게임 모드  ·  명예의 전당"
+	minigames_button.custom_minimum_size.y = 46
+	minigames_button.add_theme_font_size_override("font_size", 21)
+	UI.apply_secondary_button(minigames_button, UI.GOLD)
+	minigames_button.pressed.connect(func(): minigames_requested.emit())
+	content.add_child(minigames_button)
+	content.move_child(minigames_button, actions.get_index() + 1)
 
 func _setup_game_time_selector() -> void:
 	game_time_option_button.clear()
