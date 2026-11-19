@@ -296,7 +296,7 @@ func _build_overlay() -> void:
 
 	instruction_label = Label.new()
 	instruction_label.position = Vector2(14, 10)
-	instruction_label.text = "A / D  터빈 회전       풍향 화살표와 터빈을 맞추세요"
+	instruction_label.text = MINIGAME_INPUT.hint("wind_rhythm", "A / D  터빈 회전       풍향 화살표와 터빈을 맞추세요")
 	instruction_label.add_theme_font_size_override("font_size", 16)
 	instruction_label.add_theme_color_override("font_color", Color("f2fff8"))
 	instruction_label.add_theme_color_override("font_outline_color", Color("12313b"))
@@ -608,7 +608,7 @@ func _start_next_wind_phase() -> void:
 		if is_instance_valid(nacelle):
 			nacelle.material_override = storm_head_material
 		if is_instance_valid(instruction_label):
-			instruction_label.text = "위험 돌풍!  SPACE를 눌러 터빈 브레이크"
+			instruction_label.text = MINIGAME_INPUT.hint("wind_rhythm", "위험 돌풍!  SPACE를 눌러 터빈 브레이크")
 	else:
 		wind_speed = NORMAL_WIND_SPEEDS[rng.randi_range(0, NORMAL_WIND_SPEEDS.size() - 1)]
 		_set_wind_visual_color(Color("a9f1ff"))
@@ -616,7 +616,7 @@ func _start_next_wind_phase() -> void:
 		if is_instance_valid(nacelle):
 			nacelle.material_override = normal_head_material
 		if is_instance_valid(instruction_label):
-			instruction_label.text = "A / D  터빈 회전       풍향 화살표와 터빈을 맞추세요"
+			instruction_label.text = MINIGAME_INPUT.hint("wind_rhythm", "A / D  터빈 회전       풍향 화살표와 터빈을 맞추세요")
 
 func _update_rotor(delta: float, power_percent: float) -> void:
 	if not is_instance_valid(rotor):
@@ -714,15 +714,15 @@ func _update_hud(alignment: float, power_percent: float) -> void:
 		instruction_label.text = "멈추면 돌풍에서 날개를 지킬 수 있어요"
 	elif is_instance_valid(instruction_label):
 		if rotor_broken:
-			instruction_label.text = "터빈 수리 중 · 잠깐 뒤 A/D로 풍향을 맞춰요"
+			instruction_label.text = MINIGAME_INPUT.hint("wind_rhythm", "터빈 수리 중 · 잠깐 뒤 A/D로 풍향을 맞춰요")
 		elif brake_active:
-			instruction_label.text = "보통 바람에는 SPACE를 놓아 발전을 이어가요"
+			instruction_label.text = MINIGAME_INPUT.hint("wind_rhythm", "보통 바람에는 SPACE를 놓아 발전을 이어가요")
 		elif not yaw_choice_made:
-			instruction_label.text = "A/D로 한 번 조절해 시작 · 풍향에 맞추면 점수가 쌓여요"
+			instruction_label.text = MINIGAME_INPUT.hint("wind_rhythm", "A/D로 한 번 조절해 시작 · 풍향에 맞추면 점수가 쌓여요")
 		else:
-			instruction_label.text = "A/D 방향 조절 · SPACE 브레이크"
+			instruction_label.text = MINIGAME_INPUT.hint("wind_rhythm", "A/D 방향 조절 · SPACE 브레이크")
 		if phase_index % 4 == 3 and phase_elapsed >= WIND_PHASE_SECONDS - 1.0:
-			instruction_label.text = "돌풍 접근! 다음 바람에서는 SPACE로 터빈을 멈춰요"
+			instruction_label.text = MINIGAME_INPUT.hint("wind_rhythm", "돌풍 접근! 다음 바람에서는 SPACE로 터빈을 멈춰요")
 	if storm_phase and is_instance_valid(storm_warning_label):
 		if brake_active:
 			storm_warning_label.text = "안전 정지 완료!\n돌풍에서 날개를 지켰어요"
@@ -753,11 +753,11 @@ func _update_direction_feedback(alignment: float, _power_percent: float) -> void
 	direction_gauge_style.border_color = Color("70f1b2") if safe_stop or alignment >= 0.8 else Color("82c6d4")
 	if storm_phase:
 		direction_gauge_style.border_color = Color("70f1b2") if safe_stop else Color("ff8071")
-		direction_caption.text = "브레이크 → 안전 정지" if safe_stop else "SPACE → 회전을 멈춰요"
+		direction_caption.text = "브레이크 → 안전 정지" if safe_stop else MINIGAME_INPUT.hint("wind_rhythm", "SPACE → 회전을 멈춰요")
 	elif rotor_broken:
 		direction_caption.text = "날개 수리 중 · 발전 멈춤"
 	elif brake_active:
-		direction_caption.text = "SPACE 놓기 → 다시 발전"
+		direction_caption.text = MINIGAME_INPUT.hint("wind_rhythm", "SPACE 놓기 → 다시 발전")
 	elif not yaw_choice_made:
 		direction_caption.text = "바람과 터빈 방향 비교"
 	else:

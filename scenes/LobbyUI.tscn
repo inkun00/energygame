@@ -1,6 +1,7 @@
-[gd_scene load_steps=27 format=3 uid="uid://blobbyui001"]
+[gd_scene load_steps=28 format=3 uid="uid://blobbyui001"]
 
 [ext_resource type="Script" path="res://scripts/ui/LobbyUI.gd" id="1_lobby"]
+[ext_resource type="Script" path="res://scripts/ui/SchoolWindow.gd" id="19_school"]
 [ext_resource type="Script" path="res://scripts/ui/LobbyBackgroundFX.gd" id="2_fx"]
 [ext_resource type="Texture2D" path="res://assets/open_source/forest/forest_emerald.webp" id="3_bg"]
 [ext_resource type="Texture2D" path="res://assets/images/char_captain_eco.webp" id="4_captain"]
@@ -212,13 +213,13 @@ theme_override_styles/hover = SubResource("StyleMiniButton")
 text = "?"
 
 [node name="SoundButton" type="Button" parent="TopBar/TopActions"]
-custom_minimum_size = Vector2(56, 40)
+custom_minimum_size = Vector2(103, 44)
 layout_mode = 2
 theme_override_colors/font_color = Color(0.96, 0.88, 0.55, 1)
 theme_override_font_sizes/font_size = 18
 theme_override_styles/normal = SubResource("StyleMiniButton")
 theme_override_styles/hover = SubResource("StyleMiniButton")
-text = "SFX"
+text = "소리 켬"
 
 [node name="LogoContainer" type="Control" parent="."]
 layout_mode = 0
@@ -641,8 +642,21 @@ offset_bottom = 634.0
 theme_override_styles/panel = SubResource("StyleHeroTag")
 mouse_filter = 2
 
-[node name="Caption" type="Label" parent="OpeningStoryOverlay/CaptionPanel"]
+[node name="StoryLine" type="HBoxContainer" parent="OpeningStoryOverlay/CaptionPanel"]
 layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 14
+
+[node name="School" type="Control" parent="OpeningStoryOverlay/CaptionPanel/StoryLine"]
+visible = false
+custom_minimum_size = Vector2(124, 88)
+layout_mode = 2
+mouse_filter = 2
+script = ExtResource("19_school")
+
+[node name="Caption" type="Label" parent="OpeningStoryOverlay/CaptionPanel/StoryLine"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.93, 1, 0.89, 1)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 5
@@ -657,7 +671,7 @@ z_index = 3
 layout_mode = 0
 offset_left = 160.0
 offset_top = 654.0
-offset_right = 1120.0
+offset_right = 944.0
 offset_bottom = 690.0
 theme_override_colors/font_color = Color(1, 0.92, 0.62, 1)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.9)
@@ -676,3 +690,25 @@ offset_right = 1180.0
 offset_bottom = 158.0
 theme_override_font_sizes/font_size = 17
 text = "게임 바로 시작  ▶"
+focus_next = NodePath("../NextStoryButton")
+focus_previous = NodePath("../NextStoryButton")
+focus_neighbor_bottom = NodePath("../NextStoryButton")
+focus_neighbor_top = NodePath("../NextStoryButton")
+focus_neighbor_left = NodePath("../NextStoryButton")
+focus_neighbor_right = NodePath("../NextStoryButton")
+
+[node name="NextStoryButton" type="Button" parent="OpeningStoryOverlay"]
+z_index = 3
+layout_mode = 0
+offset_left = 895.0
+offset_top = 642.0
+offset_right = 1142.0
+offset_bottom = 696.0
+theme_override_font_sizes/font_size = 21
+text = "다음 이야기  →"
+focus_next = NodePath("../SkipButton")
+focus_previous = NodePath("../SkipButton")
+focus_neighbor_bottom = NodePath("../SkipButton")
+focus_neighbor_top = NodePath("../SkipButton")
+focus_neighbor_left = NodePath("../SkipButton")
+focus_neighbor_right = NodePath("../SkipButton")

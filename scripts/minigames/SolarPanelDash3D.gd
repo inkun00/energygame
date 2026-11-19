@@ -226,7 +226,7 @@ func _create_materials() -> void:
 func _build_overlay() -> void:
 	overlay_label = Label.new()
 	overlay_label.position = Vector2(14, 12)
-	overlay_label.text = "A/D 이동 · SPACE 점프 · 태양을 향한 패널 앞면을 찾아요"
+	overlay_label.text = MINIGAME_INPUT.hint("solar_align", "A/D 이동 · SPACE 점프 · 태양을 향한 패널 앞면을 찾아요")
 	overlay_label.add_theme_font_size_override("font_size", 16)
 	overlay_label.add_theme_color_override("font_color", Color("fff7c2"))
 	overlay_label.add_theme_color_override("font_outline_color", Color("12313b"))
@@ -516,7 +516,7 @@ func _resolve_panel_gate(record: Dictionary) -> void:
 		_tint_model(panels[selected_lane] as Node3D, correct_material if selected_lane == correct_lane else wrong_material)
 	if capture >= 0.95:
 		if not lane_choice_made:
-			arcade_event.emit(0, true, "A/D로 햇빛을 받는 패널을 골라야 점수를 얻어요.", false)
+			arcade_event.emit(0, true, MINIGAME_INPUT.hint("solar_align", "A/D로 햇빛을 받는 패널을 골라야 점수를 얻어요."), false)
 			return
 		# Show the electricity leaving the selected panel before reaching the runner.
 		_spawn_energy_burst((panels[selected_lane] as Node3D).global_position + Vector3.UP * 0.75)

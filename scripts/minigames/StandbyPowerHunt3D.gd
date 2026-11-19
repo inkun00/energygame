@@ -265,7 +265,7 @@ func _build_jump_barriers() -> void:
 		var clearance := bounds.end.y + 0.10
 		var half_width := bounds.size.x * 0.5 + 0.13
 		var sign := Label3D.new()
-		sign.text = "W / ↑ 점프"
+		sign.text = MINIGAME_INPUT.hint("standby_hunt", "W / ↑ 점프")
 		sign.position = Vector3(float(spec["x"]), clearance + 0.75, 1.25)
 		sign.font_size = 48
 		sign.pixel_size = 0.006
@@ -312,7 +312,7 @@ func _build_device(device_index: int, spec: Dictionary) -> void:
 	var status := Label3D.new()
 	status.name = "StatusLabel"
 	status.position = Vector3(0, 1.55, 0.15)
-	status.text = "%s\n%s · %d W" % [str(spec["name"]), "대기 중" if is_waste else "사용 중", watts]
+	status.text = MINIGAME_INPUT.hint("standby_hunt", "%s\n%s · %d W") % [str(spec["name"]), "대기 중" if is_waste else "사용 중", watts]
 	status.font_size = 46
 	status.pixel_size = 0.006
 	status.outline_size = 10
@@ -455,7 +455,7 @@ func _update_device_passes() -> void:
 		elif deadline < 0.0 and run_velocity > 0.1 and hero.position.x > float(record["x"]) + PASS_DISTANCE:
 			if bool(record["waste"]):
 				record["miss_deadline"] = play_elapsed + RECOVERY_SECONDS
-				(record["label"] as Label3D).text = "%s\n대기 · %d W" % [str(record["name"]), int(record["watt"])]
+				(record["label"] as Label3D).text = MINIGAME_INPUT.hint("standby_hunt", "%s\n대기 · %d W") % [str(record["name"]), int(record["watt"])]
 			else:
 				_resolve_device(record, false)
 
@@ -504,9 +504,9 @@ func _resolve_device(record: Dictionary, disconnect: bool) -> void:
 		if is_waste:
 			var points := score_for_saved_watts(watts)
 			saved_watts += watts
-			status.text = "%s\n차단 완료 · 0 W" % device_name
+			status.text = MINIGAME_INPUT.hint("standby_hunt", "%s\n차단 완료 · 0 W") % device_name
 			status.modulate = Color("79efaa")
-			arcade_event.emit(points, true, "%s의 대기전력 %d W를 차단했어요. 누적 %d W" % [device_name, watts, saved_watts], true)
+			arcade_event.emit(points, true, MINIGAME_INPUT.hint("standby_hunt", "%s의 대기전력 %d W를 차단했어요. 누적 %d W") % [device_name, watts, saved_watts], true)
 			_flash(Color(0.33, 0.90, 0.61, VISUAL_STYLE.SUCCESS_FLASH_ALPHA))
 		else:
 			status.text = "%s\n사용 중 전원 차단!" % device_name
@@ -515,9 +515,9 @@ func _resolve_device(record: Dictionary, disconnect: bool) -> void:
 			_flash(Color("ff493f50"))
 	else:
 		if is_waste:
-			status.text = "%s\n대기전력 놓침 · %d W" % [device_name, watts]
+			status.text = MINIGAME_INPUT.hint("standby_hunt", "%s\n대기전력 놓침 · %d W") % [device_name, watts]
 			status.modulate = Color("ff8167")
-			arcade_event.emit(24, false, "%s은 꺼져 보여도 %d W를 쓰고 있어요." % [device_name, watts], false)
+			arcade_event.emit(24, false, MINIGAME_INPUT.hint("standby_hunt", "%s은 꺼져 보여도 %d W를 쓰고 있어요.") % [device_name, watts], false)
 		else:
 			status.text = "%s\n사용 유지 · 안전" % device_name
 			status.modulate = Color("84eab7")
@@ -537,7 +537,7 @@ func _update_hud() -> void:
 	var room_index := clampi(int(hero.position.x / 12.0), 0, 3)
 	room_label.text = "현재 위치  %s" % ["거실", "주방", "침실", "세탁실"][room_index]
 	progress_label.text = "집 %d  ·  %d%%" % [lap_index, int(hero.position.x / COURSE_END * 100.0)]
-	saved_label.text = "차단한 대기전력  %d W" % saved_watts
+	saved_label.text = MINIGAME_INPUT.hint("standby_hunt", "차단한 대기전력  %d W") % saved_watts
 	action_label.modulate.a = 1.0
 	var nearest := _nearest_unresolved_device()
 	_update_device_focus(nearest)
@@ -545,20 +545,20 @@ func _update_hud() -> void:
 	# table must not hide its prompt while the player is standing at the TV.
 	if not nearest.is_empty():
 		if bool(nearest["waste"]):
-			action_label.text = "[SPACE] %s 전원 차단" % str(nearest["name"])
+			action_label.text = MINIGAME_INPUT.hint("standby_hunt", "[SPACE] %s 전원 차단") % str(nearest["name"])
 		else:
 			action_label.text = "사용 중인 %s · 전원을 유지하고 지나가세요" % str(nearest["name"])
 		return
 	for barrier in barrier_records:
 		if hero.position.x < float(barrier["x"]) and float(barrier["x"]) - hero.position.x <= 2.0 and hero.position.y < float(barrier["clearance"]):
-			action_label.text = "[W/↑] %s 넘기" % str(barrier["name"])
+			action_label.text = MINIGAME_INPUT.hint("standby_hunt", "[W/↑] %s 넘기") % str(barrier["name"])
 			return
 	for record in device_records:
 		var deadline := float(record.get("miss_deadline", -1.0))
 		if not bool(record["resolved"]) and deadline > play_elapsed:
 			action_label.text = "← %s 돌아가서 차단 · %.1f초" % [str(record["name"]), deadline - play_elapsed]
 			return
-	action_label.text = "A/D로 집 안을 이동하세요"
+	action_label.text = MINIGAME_INPUT.hint("standby_hunt", "A/D로 집 안을 이동하세요")
 
 func _update_device_focus(nearest: Dictionary) -> void:
 	focused_device = nearest
@@ -581,7 +581,7 @@ func _update_device_focus(nearest: Dictionary) -> void:
 func _build_overlay() -> void:
 	var help := Label.new()
 	help.position = Vector2(14, 9)
-	help.text = "A/D 이동 · W/↑ 점프 · SPACE 전원 차단 · 사용 중 기기는 유지"
+	help.text = MINIGAME_INPUT.hint("standby_hunt", "A/D 이동 · W/↑ 점프 · SPACE 전원 차단 · 사용 중 기기는 유지")
 	help.add_theme_font_size_override("font_size", 16)
 	help.add_theme_color_override("font_color", Color("fff0b3"))
 	help.add_theme_color_override("font_outline_color", Color("18343d"))
@@ -596,13 +596,13 @@ func _build_overlay() -> void:
 	progress_label.offset_top = 9.0
 	progress_label.offset_right = -14.0
 	progress_label.offset_bottom = 40.0
-	saved_label = _overlay_label(Vector2(14, 210), Vector2(380, 242), "차단한 대기전력  0 W", HORIZONTAL_ALIGNMENT_LEFT, Color("8bf2d1"))
+	saved_label = _overlay_label(Vector2(14, 210), Vector2(380, 242), MINIGAME_INPUT.hint("standby_hunt", "차단한 대기전력  0 W"), HORIZONTAL_ALIGNMENT_LEFT, Color("8bf2d1"))
 	saved_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	saved_label.offset_left = 14.0
 	saved_label.offset_top = -75.0
 	saved_label.offset_right = 380.0
 	saved_label.offset_bottom = -43.0
-	action_label = _overlay_label(Vector2(320, 246), Vector2(640, 278), "A/D로 집 안을 이동하세요", HORIZONTAL_ALIGNMENT_CENTER, Color("ffd367"))
+	action_label = _overlay_label(Vector2(320, 246), Vector2(640, 278), MINIGAME_INPUT.hint("standby_hunt", "A/D로 집 안을 이동하세요"), HORIZONTAL_ALIGNMENT_CENTER, Color("ffd367"))
 	action_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	action_label.offset_left = -340.0
 	action_label.offset_top = -40.0

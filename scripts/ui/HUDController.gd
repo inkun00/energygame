@@ -56,6 +56,9 @@ var player_panel_nodes: Array[Control] = []
 var event_banner_tween: Tween
 var dice_tween: Tween
 var sound_muted: bool = false
+var skill_discovered := false
+var skill_intro_pending := false
+var portrait_board := false
 var special_skill_target_panel: PanelContainer
 var special_skill_title_label: Label
 var special_skill_description_label: Label
@@ -137,6 +140,7 @@ func _ready() -> void:
 		help_button.pressed.connect(_on_help_pressed)
 	if sound_button:
 		sound_button.pressed.connect(_on_sound_pressed)
+		_sync_sound_button()
 	if info_button:
 		info_button.pressed.connect(_on_info_pressed)
 	if zoom_in_button:
@@ -220,6 +224,9 @@ func _create_construction_scroll() -> void:
 	construction_list.custom_minimum_size.x = 300
 
 func initialize_hud() -> void:
+	skill_discovered = false
+	skill_intro_pending = false
+	_sync_sound_button()
 	_clear_transient_feedback()
 	_inventory_snapshot_ready = false
 	_inventory_snapshot.clear()
@@ -237,7 +244,7 @@ func initialize_hud() -> void:
 	_hide_open_market_panel()
 	_on_game_time_changed(ceili(GameManager.game_time_remaining), GameManager.game_duration_seconds)
 	dice_face.value = 1
-	dice_value_label.text = "클릭해서 굴리기"
+	dice_value_label.text = "눌러서 굴리기"
 	_set_center_dice_visible(false, false)
 	_update_kingdom_mission(GameManager.projects_built, GameManager.CONSTRUCTION_PROJECTS.size(), GameManager.kingdom_health)
 	var local_idx := _local_player_index()
@@ -297,11 +304,11 @@ func _create_player_panel(p_data: Dictionary) -> Control:
 	avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	var icon_path = p_data.get("char_icon", "res://assets/images/char_captain_eco.webp")
-	if ResourceLoader.exists(icon_path):
-		avatar.texture = load(icon_path)
+	avatar.texture = preload("res://scripts/ui/HeroFace.gd").for_portrait(icon_path)
 	h_box.add_child(avatar)
 	
 	var v_info = VBoxContainer.new()
+	v_info.name = "PlayerDetails"
 	v_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v_info.alignment = BoxContainer.ALIGNMENT_CENTER
 	v_info.add_theme_constant_override("separation", 1)
@@ -1194,10 +1201,14 @@ func _refresh_special_skill_button() -> void:
 	var skill := GameManager.get_player_special_skill(local_idx)
 	var skill_energy := int(local_player.get("skill_energy", 0))
 	var cost := int(skill.get("cost", 0))
+	if not skill_discovered and skill_energy >= cost and cost > 0:
+		skill_discovered = true
+		skill_intro_pending = true
+	special_skill_button.visible = skill_discovered and not GameManager.guided_tutorial_active and GameManager.is_game_active and not GameManager.village_construction_active
 	if GameManager.current_turn_idx == local_idx and GameManager.special_skill_used_this_turn:
 		special_skill_button.text = "%s\n이번 턴 사용 완료" % skill["name"]
 	else:
-		special_skill_button.text = "%s\nSP %d / %d" % [skill["name"], skill_energy, cost]
+		special_skill_button.text = "%s\n퀴즈 힘 %d/%d SP" % [skill["name"], skill_energy, cost]
 	var target_label := "자신" if skill.get("target_type") == "self" else ("플레이어" if skill.get("target_type") == "player" else "게임판 타일")
 	special_skill_button.tooltip_text = "%s\n대상: %s · 퀴즈 특수 에너지 %d / %d" % [skill["description"], target_label, skill_energy, cost]
 	var local_is_human := not bool(local_player.get("is_ai", false))
@@ -1297,6 +1308,10 @@ func _refresh_primary_action_controls() -> void:
 		_set_center_dice_visible(true, false)
 	else:
 		_set_center_dice_visible(action_ready, action_ready)
+	if skill_intro_pending and action_ready and not special_skill_button.disabled and _board_feedback_allowed():
+		skill_intro_pending = false
+		var skill := GameManager.get_player_special_skill(_local_player_index())
+		_show_event_banner("퀴즈 정답으로 모은 힘을 써 봐요! 주사위 전에 %d SP로 ‘%s’을 쓸 수 있어요." % [int(skill["cost"]), skill["name"]])
 
 
 func _on_special_skill_completed(player_idx: int) -> void:
@@ -1499,7 +1514,12 @@ func update_all_player_panels() -> void:
 			var p_data = GameManager.players[i]
 			var panel = player_panel_nodes[i]
 			var is_current := i == GameManager.current_turn_idx
-			panel.custom_minimum_size = Vector2(310, 82) if is_current else Vector2(232, 64)
+			var details := panel.find_child("PlayerDetails", true, false) as Control
+			details.visible = is_current or not portrait_board
+			if portrait_board:
+				panel.custom_minimum_size = Vector2(235, 76) if is_current else Vector2(80, 76)
+			else:
+				panel.custom_minimum_size = Vector2(310, 82) if is_current else Vector2(232, 64)
 			var avatar := panel.find_child("Avatar", true, false) as TextureRect
 			if avatar:
 				avatar.custom_minimum_size = Vector2(58, 58) if is_current else Vector2(44, 44)
@@ -1509,8 +1529,10 @@ func update_all_player_panels() -> void:
 				for other in GameManager.players:
 					if int(other.get("energy", 0)) > int(p_data.get("energy", 0)): energy_rank += 1
 				stat_lbl.text = "에너지 %d · %d위" % [p_data.get("energy", 0), energy_rank]
-				if is_current:
-					stat_lbl.text += "\nSP %d · %d번 칸" % [p_data.get("skill_energy", 0), p_data["position"]]
+				if GameManager.total_turns == 0:
+					stat_lbl.text = "내 차례" if is_current and i == _local_player_index() else ("현재 차례" if is_current else "함께 탐험")
+				elif is_current and not portrait_board:
+					stat_lbl.text += ("\n퀴즈 힘 %d SP · " % p_data.get("skill_energy", 0) if skill_discovered else "\n") + "%d번 칸" % p_data["position"]
 				stat_lbl.add_theme_font_size_override("font_size", 20)
 				panel.tooltip_text = "%s · 현재 에너지 순위\n종료 시 이동 보상이 합산됩니다.\n%s클릭하면 상세 상태를 볼 수 있어요." % [str(p_data.get("name", "")), "방패 보유 · " if p_data.get("shield", false) else ""]
 			var name_label := panel.find_child("NameLabel", true, false) as Label
@@ -1544,8 +1566,6 @@ func _on_turn_changed(turn_idx: int) -> void:
 	update_all_player_panels()
 	if turn_prompt_label:
 		turn_prompt_label.visible = true
-	if special_skill_button:
-		special_skill_button.visible = true
 	var cur_p = GameManager.players[turn_idx]
 	var local_idx := _local_player_index()
 	if local_idx >= 0 and local_idx < GameManager.players.size():
@@ -1611,7 +1631,7 @@ func _on_dice_rolled(_p_idx: int, val: int) -> void:
 func _on_dice_input_time_changed(player_idx: int, remaining_seconds: int) -> void:
 	if player_idx != _local_player_index() or not dice_value_label or not GameManager or GameManager.current_state != GameManager.TurnState.WAIT_ACTION:
 		return
-	dice_value_label.text = "연습용 주사위" if GameManager.guided_tutorial_active else "클릭 · %d초 남음" % maxi(remaining_seconds, 0)
+	dice_value_label.text = "연습용 주사위" if GameManager.guided_tutorial_active else "%d초 남음" % maxi(remaining_seconds, 0)
 	dice_value_label.add_theme_color_override("font_color", UI.DANGER if remaining_seconds <= 3 else UI.GOLD)
 
 func _set_dice_roll_frame(rolling_value: int) -> void:
@@ -1631,11 +1651,15 @@ func _set_center_dice_visible(should_show: bool, clickable: bool) -> void:
 	if center_dice_button:
 		center_dice_button.visible = should_show
 		center_dice_button.disabled = not clickable
+		if should_show and clickable and center_dice_button.is_visible_in_tree() and not GameManager.adventure_waiting_for_start:
+			var focus_owner := get_viewport().gui_get_focus_owner()
+			if focus_owner == null or (adventure_planner and focus_owner == adventure_planner.tutorial_button):
+				center_dice_button.grab_focus()
 	if should_show and clickable:
 		dice_face.rotation = 0.0
 		dice_face.scale = Vector2.ONE
 		var remaining_seconds := ceili(GameManager.dice_input_time_remaining) if GameManager else 20
-		dice_value_label.text = "연습용 주사위" if GameManager.guided_tutorial_active else "클릭 · %d초 남음" % maxi(remaining_seconds, 0)
+		dice_value_label.text = "연습용 주사위" if GameManager.guided_tutorial_active else "%d초 남음" % maxi(remaining_seconds, 0)
 		dice_value_label.add_theme_color_override("font_color", UI.DANGER if remaining_seconds <= 3 else UI.GOLD)
 
 func _on_status_message_posted(msg: String) -> void:
@@ -1890,6 +1914,13 @@ func _refresh_construction_choices() -> void:
 		construction_list.add_child(build_button)
 	if build_instruction_label:
 		build_instruction_label.text = "시설 선택 → 빛나는 칸 클릭 · 재료: 팀 보유 / 필요"
+		if not GameManager.village_finished_players.is_empty():
+			var pending_names: PackedStringArray = []
+			for idx in range(GameManager.players.size()):
+				var player: Dictionary = GameManager.players[idx]
+				if not player.get("is_ai", false) and not GameManager.village_finished_players.has(idx):
+					pending_names.append(str(player["name"]))
+			build_instruction_label.text = "건설 중 · " + ", ".join(pending_names) if not pending_names.is_empty() else "모두 마쳤어요. 전기를 보낼 준비를 해요."
 		build_instruction_label.add_theme_font_size_override("font_size", 19)
 		build_instruction_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		build_instruction_label.offset_bottom = 626
@@ -1947,7 +1978,8 @@ func _refresh_ranking_cards(rankings: Array) -> void:
 		var player: Dictionary = rankings[rank_index]
 		var panel := PanelContainer.new()
 		panel.custom_minimum_size = Vector2(322, 112)
-		var rank_color: Color = rank_colors[min(rank_index, rank_colors.size() - 1)]
+		var rank := int(player.get("rank", rank_index + 1))
+		var rank_color: Color = rank_colors[clampi(rank - 1, 0, rank_colors.size() - 1)]
 		var panel_style := UI.padded_panel(Color("112c36"), rank_color, 6.0, 12)
 		panel_style.shadow_size = 5
 		panel.add_theme_stylebox_override("panel", panel_style)
@@ -1963,7 +1995,7 @@ func _refresh_ranking_cards(rankings: Array) -> void:
 		row.add_child(portrait)
 		var rank_badge := Label.new()
 		rank_badge.custom_minimum_size = Vector2(30, 0)
-		rank_badge.text = "%d위" % (rank_index + 1)
+		rank_badge.text = ("공동 %d위" if bool(player.get("shared_rank", false)) else "%d위") % rank
 		rank_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		rank_badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		rank_badge.add_theme_font_size_override("font_size", 17)
@@ -2092,7 +2124,7 @@ func _apply_commercial_ui() -> void:
 		clock_title.add_theme_font_size_override("font_size", 18)
 	var dice_prompt := get_node_or_null("CenterDicePanel/VBox/PromptLabel") as Label
 	if dice_prompt:
-		dice_prompt.text = "주사위 선택 · Enter"
+		dice_prompt.text = "주사위 굴리기" if MiniGameInput.uses_touch() else "주사위 굴리기 · Enter"
 		dice_prompt.add_theme_font_size_override("font_size", 18)
 	if dice_value_label:
 		dice_value_label.add_theme_font_size_override("font_size", 18)
@@ -2137,6 +2169,27 @@ func _apply_commercial_ui() -> void:
 	for utility_button in [help_button, sound_button, info_button, zoom_in_button, zoom_out_button]:
 		if utility_button:
 			UI.apply_secondary_button(utility_button, Color("72cfe0"))
+
+func apply_board_layout(canvas: Vector2, portrait: bool) -> void:
+	portrait_board = portrait
+	size = canvas
+	var top := get_node("TopHUD") as Control
+	top.size.x = canvas.x - 28
+	var rail := get_node("RightRail") as Control
+	rail.position = Vector2(canvas.x - 92, 116) if portrait else Vector2(1216, 110)
+	for button in rail.get_children():
+		button.custom_minimum_size = Vector2(80, 78) if portrait else (Vector2(52, 42) if button.name == "OverviewButton" else Vector2(54, 50))
+	game_time_panel.position = Vector2(14, 113) if portrait else Vector2(1010, 108)
+	game_time_panel.size.x = 180 if portrait else 196
+	var dice_position := Vector2(canvas.x - 202, canvas.y - 314) if portrait else Vector2(1018, 184)
+	center_dice_panel.position = dice_position
+	center_dice_button.position = dice_position
+	special_skill_button.position = Vector2(14, canvas.y - 183) if portrait else Vector2(1010, 402)
+	event_banner.custom_minimum_size.x = canvas.x - 36 if portrait else 620
+	event_banner.size.x = event_banner.custom_minimum_size.x
+	event_banner.position = Vector2(18, 203) if portrait else Vector2(335, 106)
+	adventure_planner.set_board_layout(canvas, portrait)
+	update_all_player_panels()
 
 func _apply_secondary_button_style(button: Button) -> void:
 	UI.apply_secondary_button(button, UI.GOLD)
@@ -2202,10 +2255,15 @@ func _on_help_pressed() -> void:
 	_show_event_banner("말 이동 중: 자동 추적·확대  •  왼쪽 드래그: 카메라 이동  •  오른쪽 드래그: 회전  •  휠: 확대/축소")
 
 func _on_sound_pressed() -> void:
-	sound_muted = not sound_muted
-	AudioServer.set_bus_mute(AudioServer.get_bus_index("Master"), sound_muted)
-	sound_button.text = "×" if sound_muted else "♪"
+	var master := AudioServer.get_bus_index("Master")
+	AudioServer.set_bus_mute(master, not AudioServer.is_bus_mute(master))
+	_sync_sound_button()
 	_show_event_banner("효과음을 껐습니다." if sound_muted else "효과음을 켰습니다.")
+
+func _sync_sound_button() -> void:
+	sound_muted = AudioServer.is_bus_mute(AudioServer.get_bus_index("Master"))
+	sound_button.text = "×" if sound_muted else "♪"
+	sound_button.tooltip_text = "소리 켜기" if sound_muted else "소리 끄기"
 
 func _on_info_pressed() -> void:
 	_show_event_banner("공동 건설 %d / %d · %d라운드" % [GameManager.projects_built, GameManager.CONSTRUCTION_PROJECTS.size(), GameManager.total_turns / 4 + 1])

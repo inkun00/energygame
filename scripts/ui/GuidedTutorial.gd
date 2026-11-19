@@ -95,6 +95,8 @@ func begin(game_board: Node) -> void:
 		board.hud.adventure_planner.goal_selected.connect(_on_goal_selected)
 	if not board.quiz_modal.review_completed.is_connected(_on_quiz_reviewed):
 		board.quiz_modal.review_completed.connect(_on_quiz_reviewed)
+	if not board.hud.learning_village_ui.practice_adventure_requested.is_connected(_complete_trial_practice):
+		board.hud.learning_village_ui.practice_adventure_requested.connect(_complete_trial_practice)
 	show()
 	_set_stage("dice", "1 / 7  주사위와 이동", "주사위를 눌러 재료 칸으로 이동하세요.")
 	focused_control = board.hud.center_dice_button
@@ -239,16 +241,10 @@ func _on_construction_started(_inventories: Array) -> void:
 func _on_energy_trial_changed(state: Dictionary) -> void:
 	if not active or stage not in ["trial", "complete"]: return
 	if str(state.get("phase", "")) == "complete":
-		_set_stage("complete", "7 / 7  연습 완료", "낮에 저장한 전기는 밤에도 쓸 수 있어요.", "새 모험 시작")
-		# The normal result owns the screen. In practice its confirmation starts
-		# a fresh adventure, rather than saving or ranking the practice session.
-		var learning: Control = board.hud.learning_village_ui
-		learning.trial_retry_button.hide()
-		learning.trial_confirm_button.text = "새 모험 시작"
-		if not learning.trial_confirm_button.pressed.is_connected(_complete_trial_practice):
-			for connection in learning.trial_confirm_button.pressed.get_connections():
-				learning.trial_confirm_button.pressed.disconnect(connection["callable"])
-			learning.trial_confirm_button.pressed.connect(_complete_trial_practice)
+		var solved := bool(state.get("practice_result", {}).get("success", false))
+		_set_stage("complete", "7 / 7  연습 완료" if solved else "7 / 7  내 구역을 다시 밝혀 봐요", "", "새 모험 시작")
+	elif stage == "complete" and str(state.get("phase", "")) == "day":
+		_set_stage("trial", "7 / 7  낮과 밤 다시 해 보기", "낮에는 남는 전기를 저장하고 밤에는 배터리 전기를 보내요.")
 
 func _complete_trial_practice() -> void:
 	adventure_requested.emit()

@@ -5,8 +5,11 @@ class_name LobbyUI
 
 signal start_game_requested(player_configs, duration_seconds)
 signal tutorial_requested(player_configs)
+signal portrait_layout_changed
 
 const UI = preload("res://scripts/ui/CommercialUI.gd")
+const PortraitLayout = preload("res://scripts/ui/LobbyPortraitLayout.gd")
+var _portrait_layout: RefCounted
 
 @onready var nickname_edit: LineEdit = $MenuPanel/Content/NicknameEdit
 @onready var char_option_button: OptionButton = $MenuPanel/Content/CharOptionButton
@@ -32,7 +35,9 @@ const UI = preload("res://scripts/ui/CommercialUI.gd")
 @onready var sound_button: Button = $TopBar/TopActions/SoundButton
 @onready var opening_story: Control = $OpeningStoryOverlay
 @onready var opening_image: TextureRect = $OpeningStoryOverlay/StoryImage
-@onready var opening_caption: Label = $OpeningStoryOverlay/CaptionPanel/Caption
+@onready var opening_caption: Label = $OpeningStoryOverlay/CaptionPanel/StoryLine/Caption
+@onready var story_school: Control = $OpeningStoryOverlay/CaptionPanel/StoryLine/School
+@onready var opening_next_button: Button = $OpeningStoryOverlay/NextStoryButton
 @onready var opening_step_label: Label = $OpeningStoryOverlay/StepLabel
 @onready var opening_skip_button: Button = $OpeningStoryOverlay/SkipButton
 
@@ -51,8 +56,9 @@ var characters: Array[Dictionary] = [
 var _character_buttons: Array[Button] = []
 var character_gallery: Control
 var character_choose_button: Button
-var opening_next_button: Button
 var learning_grade_option: OptionButton
+var quiz_challenge_option: OptionButton
+var reading_time_toggle: CheckBox
 var _room_popup: Control
 var _room_cards: HBoxContainer
 var _room_code_label: Label
@@ -66,7 +72,6 @@ var _hero_base_y := 178.0
 var _intro_finished := false
 var _sound_enabled := true
 var _opening_step := 0
-var _opening_sequence := 0
 var _pending_player_configs: Array[Dictionary] = []
 var _pending_game_duration_seconds := GameManager.DEFAULT_GAME_DURATION_SECONDS
 var _is_finishing_opening := false
@@ -82,7 +87,7 @@ const OPENING_STORY := [
 	{"caption": "요정마을은 쓰지 않는 불과 기기를 켜 둔 채 전기를 낭비했어요."},
 	{"caption": "전기가 부족해지자 석탄과 석유를 더 많이 태웠어요."},
 	{"caption": "연료를 태울수록 공기가 오염되고, 지구를 덥게 하는 기체도 늘어났어요."},
-	{"caption": "에너지 퀴즈를 풀고 필요한 부품을 골라요. 함께 시설을 지어 마을에 전기를 보내요!"}
+	{"caption": "%s의 약속\n“낮에 부품을 모으고 함께 시설을 짓자. 밤에도 학교 불을 켤 수 있을까?”"}
 ]
 
 func _ready() -> void:
@@ -104,7 +109,12 @@ func _ready() -> void:
 	char_option_button.visible = false
 	character_strip.get_parent().visible = false
 	_build_character_gallery()
-	_build_opening_next_button()
+	_portrait_layout = PortraitLayout.new()
+	_portrait_layout.setup(self)
+	for dialog in [character_gallery, _room_browser, _room_popup]:
+		dialog.visibility_changed.connect(func(): portrait_layout_changed.emit())
+	UI.apply_primary_button(opening_next_button)
+	opening_next_button.pressed.connect(_advance_opening_story)
 	help_button.text = "튜토리얼"
 	help_button.custom_minimum_size.x = 120
 	$TopBar/TopActions.offset_left = -228
@@ -129,6 +139,12 @@ func _ready() -> void:
 		if not NetworkManager.external_room_failed.is_connected(_on_external_room_failed):
 			NetworkManager.external_room_failed.connect(_on_external_room_failed)
 	_play_intro_animation()
+	_focus_start_if_available.call_deferred()
+
+func _focus_start_if_available() -> void:
+	if is_visible_in_tree() and not opening_story.visible and not character_gallery.visible and not _room_browser.visible and not _room_popup.visible:
+		if get_viewport().gui_get_focus_owner() == null:
+			local_start_button.grab_focus()
 
 
 func _apply_commercial_ui() -> void:
@@ -342,26 +358,12 @@ func _build_character_gallery() -> void:
 	)
 	character_gallery.hide()
 
-func _build_opening_next_button() -> void:
-	opening_next_button = Button.new()
-	opening_next_button.name = "NextStoryButton"
-	opening_next_button.position = Vector2(966, 644)
-	opening_next_button.size = Vector2(246, 48)
-	opening_next_button.add_theme_font_size_override("font_size", 21)
-	UI.apply_primary_button(opening_next_button)
-	opening_next_button.pressed.connect(_advance_opening_story)
-	opening_story.add_child(opening_next_button)
-	opening_step_label.offset_right = 944
-
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not visible:
 		return
 	if character_gallery and character_gallery.visible and event.is_action_pressed("ui_cancel"):
 		character_gallery.hide()
 		character_choose_button.grab_focus()
-		get_viewport().set_input_as_handled()
-	elif opening_story.visible and event.is_action_pressed("ui_accept"):
-		_advance_opening_story()
 		get_viewport().set_input_as_handled()
 
 func _setup_mode_selector() -> void:
@@ -387,7 +389,6 @@ func _setup_mode_selector() -> void:
 	online_button.custom_minimum_size.y = 68
 	online_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	online_button.add_theme_font_size_override("font_size", 23)
-	online_button.focus_mode = Control.FOCUS_NONE
 	UI.apply_secondary_button(online_button, UI.TEAL)
 	online_button.pressed.connect(func():
 		_commit_line_edit_ime(nickname_edit)
@@ -399,7 +400,7 @@ func _setup_mode_selector() -> void:
 func _setup_game_time_selector() -> void:
 	game_time_option_button.clear()
 	for minutes in [5, 10, 15, 20]:
-		game_time_option_button.add_item("%d분" % minutes)
+		game_time_option_button.add_item("%d분 + 미니게임·건설·전력 실험" % minutes)
 		game_time_option_button.set_item_metadata(game_time_option_button.item_count - 1, minutes * 60)
 	game_time_option_button.select(1)
 	var time_label := get_node_or_null("MenuPanel/Content/GameTimeRow/Label") as Label
@@ -415,25 +416,42 @@ func _setup_learning_grade_selector() -> void:
 	content.add_child(row)
 	content.move_child(row, game_time_option_button.get_parent().get_index() + 1)
 	var label := Label.new()
-	label.text = "퀴즈 난이도"
+	label.text = "퀴즈"
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.add_theme_font_size_override("font_size", 17)
 	label.add_theme_color_override("font_color", UI.GOLD)
 	row.add_child(label)
 	learning_grade_option = OptionButton.new()
 	learning_grade_option.name = "LearningGradeOption"
-	learning_grade_option.custom_minimum_size = Vector2(185, 40)
+	learning_grade_option.custom_minimum_size = Vector2(124, 40)
 	for grade in [4, 5, 6]:
-		learning_grade_option.add_item("%d학년 수준" % grade)
+		learning_grade_option.add_item("%d학년" % grade)
 		learning_grade_option.set_item_metadata(learning_grade_option.item_count - 1, grade)
 	learning_grade_option.select(1)
 	learning_grade_option.tooltip_text = "방장이 고른 수준의 퀴즈를 함께 풀어요."
 	UI.apply_input(learning_grade_option)
 	row.add_child(learning_grade_option)
+	quiz_challenge_option = OptionButton.new()
+	quiz_challenge_option.name = "QuizChallengeOption"
+	quiz_challenge_option.custom_minimum_size = Vector2(150, 40)
+	quiz_challenge_option.add_item("기본 문제")
+	quiz_challenge_option.add_item("생각 도전")
+	quiz_challenge_option.tooltip_text = "같은 학년에서 그림과 자료를 살펴보는 문제에 도전해요."
+	UI.apply_input(quiz_challenge_option)
+	row.add_child(quiz_challenge_option)
+	reading_time_toggle = CheckBox.new()
+	reading_time_toggle.text = "문제와 해설 읽는 시간 2배"
+	reading_time_toggle.tooltip_text = "천천히 읽는 동안 탐험 시계도 잠시 쉬어요."
+	reading_time_toggle.add_theme_font_size_override("font_size", 17)
+	reading_time_toggle.add_theme_color_override("font_color", UI.TEXT)
+	content.add_child(reading_time_toggle)
+	content.move_child(reading_time_toggle, row.get_index() + 1)
 
 func _apply_learning_grade() -> void:
 	if is_instance_valid(learning_grade_option):
 		GameManager.set_learning_grade(int(learning_grade_option.get_selected_metadata()))
+		QuizDatabase.configure_challenge(quiz_challenge_option.selected == 1)
+		QuizDatabase.extra_reading_time = reading_time_toggle.button_pressed
 
 func _fit_hero_badge() -> void:
 	# Wait for wrapped text width before replacing the provisional first-frame height.
@@ -448,15 +466,13 @@ func _connect_actions() -> void:
 	join_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	help_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	sound_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	# 버튼을 클릭해도 LineEdit의 한글 IME 조합 중 문자를 먼저 확정할 수 있게 포커스를 유지합니다.
-	for action_button in [local_start_button, host_button, join_button]:
-		action_button.focus_mode = Control.FOCUS_NONE
-
 	local_start_button.pressed.connect(_on_local_start_pressed)
 	host_button.pressed.connect(_on_host_pressed)
 	join_button.pressed.connect(_on_join_pressed)
 	help_button.pressed.connect(_on_help_pressed)
 	sound_button.pressed.connect(_on_sound_pressed)
+	visibility_changed.connect(_sync_sound_button)
+	_sync_sound_button()
 	nickname_edit.focus_exited.connect(_commit_line_edit_ime.bind(nickname_edit))
 	ip_edit.focus_exited.connect(_commit_line_edit_ime.bind(ip_edit))
 
@@ -499,6 +515,7 @@ func _on_character_selected(idx: int) -> void:
 	hero_portrait.texture = load(character["icon"])
 	character_name_label.text = character["name"]
 	character_role_label.text = character["role"]
+	if _portrait_layout != null: _portrait_layout.update_hero()
 	var skill: Dictionary = GameManager.SPECIAL_SKILLS_BY_ICON.get(str(character["icon"]), GameManager.DEFAULT_SPECIAL_SKILL)
 	var target_type := str(skill.get("target_type", "tile"))
 	var target_label := "자신에게 즉시 적용" if target_type == "self" else ("플레이어 지정" if target_type == "player" else "타일 지정")
@@ -646,7 +663,7 @@ func _on_room_state_changed(players_data: Dictionary) -> void:
 		return
 	_show_room_popup(players_data)
 	if NetworkManager.is_host:
-		status_label.text = "모두 모이면 게임 시작을 누르세요. 선택한 플레이 시간은 %d분입니다." % (int(game_time_option_button.get_selected_metadata()) / 60)
+		status_label.text = "탐험 %d분 뒤에는 함께 마을을 짓고 전기를 보내요." % (int(game_time_option_button.get_selected_metadata()) / 60)
 		host_button.disabled = false
 	else:
 		status_label.text = "게임방에 참가했습니다. 방장이 모험을 시작할 때까지 기다려 주세요."
@@ -671,6 +688,7 @@ func reset_network_controls(message: String = "") -> void:
 		status_label.text = message
 	elif mode_option_button.selected == 1:
 		status_label.text = _online_mode_hint()
+	_focus_start_if_available.call_deferred()
 
 
 func _on_room_code_lookup_failed(message: String) -> void:
@@ -899,15 +917,25 @@ func _on_help_pressed() -> void:
 	_commit_line_edit_ime(nickname_edit)
 	tutorial_requested.emit(_create_local_configs())
 
+func supports_portrait_layout() -> bool:
+	return visible and not character_gallery.visible and not _room_browser.visible and not _room_popup.visible
+
+func apply_lobby_layout(canvas: Vector2, portrait: bool) -> void:
+	_portrait_layout.apply(canvas, portrait)
+
+func _sync_sound_button() -> void:
+	_sound_enabled = not AudioServer.is_bus_mute(AudioServer.get_bus_index("Master"))
+	sound_button.text = "소리 켬" if _sound_enabled else "소리 끔"
+	sound_button.tooltip_text = "소리 끄기" if _sound_enabled else "소리 켜기"
+
 func _on_sound_pressed() -> void:
-	_sound_enabled = not _sound_enabled
-	AudioServer.set_bus_mute(0, not _sound_enabled)
-	sound_button.text = "SFX" if _sound_enabled else "MUTE"
+	var master := AudioServer.get_bus_index("Master")
+	AudioServer.set_bus_mute(master, not AudioServer.is_bus_mute(master))
+	_sync_sound_button()
 	status_label.text = "사운드가 켜졌습니다." if _sound_enabled else "사운드가 꺼졌습니다."
 
 func _begin_opening_story(configs: Array[Dictionary]) -> void:
 	_pending_player_configs = configs
-	_opening_sequence += 1
 	_opening_step = 0
 	_is_finishing_opening = false
 	if opening_story == null:
@@ -928,18 +956,20 @@ func _show_opening_step() -> void:
 		_finish_opening_story()
 		return
 	opening_image.texture = OPENING_IMAGES[_opening_step]
+	_portrait_layout.story_changed()
 	opening_image.visible = true
 	opening_image.modulate = Color.WHITE
-	opening_caption.text = step["caption"]
+	var final_page := _opening_step == OPENING_STORY.size() - 1
+	story_school.visible = final_page
+	opening_caption.text = str(step["caption"]) % characters[char_option_button.selected]["name"] if final_page else str(step["caption"])
 	opening_step_label.text = "이야기  %d / %d" % [_opening_step + 1, OPENING_STORY.size()]
 	opening_next_button.text = "모험 준비로" if _opening_step == OPENING_STORY.size() - 1 else "다음 이야기  →"
 	opening_next_button.grab_focus()
 
 func _on_opening_story_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed:
-		_advance_opening_story()
-		opening_story.accept_event()
-	elif event.is_action_pressed("ui_accept"):
+	# Keyboard activation belongs to the focused button. Handling it here as
+	# well advances once on key-down and again when that button is released.
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		_advance_opening_story()
 		opening_story.accept_event()
 
@@ -952,8 +982,6 @@ func _advance_opening_story() -> void:
 func _skip_opening_story() -> void:
 	if opening_story == null or not opening_story.visible:
 		return
-	# 기존 자동 넘김 타이머를 무효화하고 즉시 게임 화면으로 전환합니다.
-	_opening_sequence += 1
 	_finish_opening_story()
 
 func _finish_opening_story() -> void:

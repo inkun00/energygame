@@ -23,11 +23,13 @@ func _run() -> void:
 	var main: Node = load("res://scenes/Main.tscn").instantiate()
 	root.add_child(main)
 	await process_frame
+	_check(root.gui_get_focus_owner() == main.lobby_ui.local_start_button, "A fresh lobby starts with a keyboard target")
 	var configs: Array[Dictionary] = [{"name": "탐험대장", "is_ai": false}, {"name": "친구", "is_ai": false}, {"name": "AI1", "is_ai": true}, {"name": "AI2", "is_ai": true}]
 	main._on_start_game_requested(configs, 600)
 	await create_timer(0.15).timeout
 	gm.set_process(false)
 	var planner: Node = main.game_board.hud.adventure_planner
+	_check(root.gui_get_focus_owner() == planner.tutorial_button, "The ready screen receives keyboard focus after the story closes")
 	var time_before: float = gm.game_time_remaining
 	gm._process(25.0)
 	_check(gm.game_time_remaining == time_before and gm.dice_input_time_remaining == 0.0, "Guide reading must not spend exploration time or auto-roll")

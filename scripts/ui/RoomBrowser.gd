@@ -8,6 +8,8 @@ var _loaded_once := false
 var _rows: VBoxContainer
 var _status: Label
 var _refresh: Button
+var _back: Button
+var _return_focus: Control
 var _create: Button
 var _title: LineEdit
 var _capacity: OptionButton
@@ -40,9 +42,9 @@ func _ready() -> void:
 	var heading := _label("온라인 모험 · 방 목록", 30)
 	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(heading)
-	var back := _button("돌아가기", false)
-	back.pressed.connect(hide)
-	header.add_child(back)
+	_back = _button("돌아가기", false)
+	_back.pressed.connect(_close_browser)
+	header.add_child(_back)
 	content.add_child(_label("처음 입장할 때 목록을 불러옵니다. 최신 목록은 새로고침을 눌러 확인하세요.", 17))
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 24)
@@ -108,6 +110,8 @@ func _ready() -> void:
 	_create.custom_minimum_size.y = 52
 	_create.pressed.connect(_create_room)
 	form.add_child(_create)
+	_back.focus_previous = _back.get_path_to(_create)
+	_create.focus_next = _create.get_path_to(_back)
 	_password_dialog = ConfirmationDialog.new()
 	_password_dialog.title = "비밀번호가 있는 방"
 	_password_dialog.ok_button_text = "참가"
@@ -142,10 +146,17 @@ func _button(value: String, primary: bool) -> Button:
 	return button
 
 func open_browser() -> void:
+	_return_focus = get_viewport().gui_get_focus_owner()
 	show()
+	_back.grab_focus()
 	if not _loaded_once:
 		_loaded_once = true
 		_request_refresh()
+
+func _close_browser() -> void:
+	hide()
+	if is_instance_valid(_return_focus) and _return_focus.is_visible_in_tree():
+		_return_focus.grab_focus()
 
 func _request_refresh() -> void:
 	if _busy:

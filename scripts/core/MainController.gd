@@ -78,6 +78,9 @@ func _ready() -> void:
 		switch_to_lobby()
 	else:
 		_open_standalone_minigames(standalone_request)
+	var screen_layout := preload("res://scripts/ui/GameScreenLayout.gd").new()
+	add_child(screen_layout)
+	screen_layout.setup(game_board, lobby_ui, standalone_minigames)
 	if OS.has_feature("web"):
 		_finish_web_loading.call_deferred()
 

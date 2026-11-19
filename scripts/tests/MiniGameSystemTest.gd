@@ -523,9 +523,32 @@ func _run() -> void:
 	_check(heat_ai_score > 0 and heat_ai_score <= game_manager.MINIGAME_SCORE_LIMIT, "AI도 열린 창문을 찾아 닫아 점수를 얻어야 합니다.")
 
 	game_manager.stop_game()
+	_test_team_parts(game_manager)
+	game_manager.stop_game()
 	if failures.is_empty():
 		print("[MiniGameTest] PASS · 9 games, tiles, simultaneous ranking rewards, UI")
 		quit(0)
 	else:
 		print("[MiniGameTest] FAIL · %d issue(s)" % failures.size())
 		quit(1)
+
+func _test_team_parts(gm: Node) -> void:
+	var seats: Array[Dictionary] = []
+	for idx in range(4): seats.append({"name": "모둠원 %d" % idx, "is_ai": false})
+	gm.setup_game(seats)
+	for participants in [2, 3]:
+		gm._start_minigame(0, "solar_align")
+		gm.active_minigame["phase"] = "playing"
+		for idx in range(4):
+			gm.minigame_scores[idx] = {"score": 30, "stats": {"correct": 3, "attempts": 3}} if idx < participants else {"score": 0, "stats": {}}
+		gm._finalize_minigame()
+		gm._finalize_minigame()
+		var expected := 1 if participants == 3 else 0
+		_check(int(gm.get_team_inventory()["solar_panel"]) == expected, "4명 중 3명이 목표를 채우면 공동 부품을 정확히 한 번 받아야 합니다.")
+	for player in gm.players: _check(player["inventory"]["solar_panel"] == 0, "공동 부품은 개인 소유로 기록하지 않습니다.")
+	gm.players[0]["inventory"]["solar_panel"] = 1
+	gm.players[0]["inventory"]["smart_grid"] = 1
+	var before := int(gm.players[0]["energy"])
+	gm._start_village_construction_phase()
+	_check(gm.build_village_project(0, 0), "개인 부품과 공동 미니게임 부품을 합쳐 시설을 지을 수 있어야 합니다.")
+	_check(gm.get_team_inventory()["solar_panel"] == 0 and gm.players[0]["energy"] - before == gm.CONSTRUCTION_COMPLETION_REWARD + 2 * gm.TEAM_MATERIAL_REWARD, "공동 부품의 제공 점수를 개인이 받으면 안 됩니다.")

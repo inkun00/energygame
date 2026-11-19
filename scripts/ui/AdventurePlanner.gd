@@ -11,6 +11,10 @@ var goal_buttons: Array[Button] = []
 var inventory: Dictionary = {}
 var selected_goal := -1
 var local_index := 0
+var board_canvas := Vector2(1280, 720)
+var portrait_board := false
+var heading_label: Label
+var first_roll_made := false
 var summary: PanelContainer
 var goal_name: Label
 var goal_materials: Label
@@ -97,7 +101,8 @@ func _build_summary() -> void:
 	heading.custom_minimum_size.x = 280
 	heading.add_theme_constant_override("separation", 12)
 	row.add_child(heading)
-	heading.add_child(_label("내 재료", 18, UI.TEAL))
+	heading_label = _label("내 재료", 18, UI.TEAL)
+	heading.add_child(heading_label)
 	goal_name = _label("재료 0개", 20)
 	goal_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	goal_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -144,6 +149,20 @@ func _apply_summary_layout() -> void:
 	summary_toggle.text = "재료 접기" if summary_expanded else "재료 펼치기"
 	# Keep the bag button on the right when the detail column is collapsed.
 	summary_spacer.visible = not summary_expanded
+
+func set_board_layout(canvas: Vector2, portrait: bool) -> void:
+	board_canvas = canvas
+	portrait_board = portrait
+	summary_toggle.custom_minimum_size.x = 120 if portrait else 138
+	catalog_open_button.custom_minimum_size = Vector2(175, 60) if portrait else Vector2(220, 36)
+	summary.offset_top = -84 if portrait else (-140 if summary_expanded else -64)
+	if portrait:
+		summary_expanded = false
+		summary_details.hide()
+		summary_spacer.show()
+	if exploration_active:
+		refresh(inventory)
+		_refresh_tutorial()
 
 func _build_catalog() -> void:
 	catalog = Control.new()
@@ -265,6 +284,7 @@ func _build_catalog() -> void:
 func begin_exploration(index: int) -> void:
 	local_index = index
 	selected_goal = -1
+	first_roll_made = false
 	summary_expanded = false
 	_apply_summary_layout()
 	exploration_active = true
@@ -368,6 +388,20 @@ func refresh(new_inventory: Dictionary) -> void:
 			for amount in b_missing.values(): b_total += int(amount)
 			return a_total < b_total if a_total != b_total else a_idx < b_idx)
 		for position in range(ordered.size()): recipe_grid.move_child(ordered[position], position)
+	var has_material := false
+	for count in inventory.values():
+		if int(count) > 0:
+			has_material = true
+			break
+	var first_action := not first_roll_made and not has_material and selected_goal < 0 and GameManager.total_turns == 0
+	heading_label.text = "팀 목표" if first_action else "내 재료"
+	goal_name.get_parent().size_flags_horizontal = Control.SIZE_EXPAND_FILL if first_action else Control.SIZE_FILL
+	summary_spacer.visible = not first_action and not summary_expanded
+	summary_toggle.visible = not first_action and not portrait_board
+	catalog_open_button.visible = not first_action
+	if first_action:
+		goal_name.text = "밤에도 우리 학교 불을 켜요"
+		return
 	if selected_goal < 0:
 		var ready_count := 0
 		var ready_names: Array[String] = []
@@ -423,7 +457,7 @@ func _build_tutorial() -> void:
 	add_child(preparation_dimmer)
 	tutorial = PanelContainer.new()
 	tutorial.z_index = 15
-	tutorial.position = Vector2(18, 140)
+	tutorial.position = Vector2(14, board_canvas.y - 314) if portrait_board else Vector2(18, 140)
 	tutorial.custom_minimum_size = Vector2(340, 0)
 	tutorial.add_theme_stylebox_override("panel", UI.padded_panel(UI.INK, UI.TEAL_DARK, 14))
 	add_child(tutorial)
@@ -443,6 +477,9 @@ func _build_tutorial() -> void:
 func record_step(step: String, index: int) -> void:
 	if not exploration_active or index != local_index or not tutorial_steps.has(step): return
 	tutorial_steps[step] = true
+	if step == "dice" or step == "pickup":
+		first_roll_made = true
+	refresh(inventory)
 	_refresh_tutorial()
 
 func replay_tutorial() -> void:
@@ -462,23 +499,29 @@ func dismiss_tutorial() -> void:
 
 func _refresh_tutorial() -> void:
 	if exploration_active and GameManager.adventure_waiting_for_start:
-		tutorial.position = Vector2(340, 170)
+		tutorial.position = (board_canvas - Vector2(600, 320)) * 0.5 if portrait_board else Vector2(340, 170)
 		tutorial.custom_minimum_size.x = 600
 		tutorial_body.custom_minimum_size = Vector2(568, 160)
-		tutorial_body.text = "주사위를 굴려 재료를 모아요.\n퀴즈를 맞히면 필요한 부품을 골라요.\n미니게임에서는 모두 함께 보너스에 도전해요.\n모은 재료로 시설을 짓고, 낮과 밤에 전기를 보내요."
+		tutorial_body.text = "밤에도 학교 불이 켜지도록 마을에 전기를 보내요.\n먼저 주사위를 굴려 건설에 쓸 부품을 모아요."
 		var state := GameManager.get_adventure_preparation_state()
 		tutorial_title.text = "모험 시작 전  ·  준비 %d / %d명" % [state["ready_count"], state["player_count"]]
 		tutorial_button.disabled = GameManager.adventure_ready_players.has(local_index)
 		tutorial_button.text = "친구 준비 기다리는 중" if tutorial_button.disabled else "준비 완료 · 모험 시작"
 		_refresh_visibility()
+		tutorial_button.focus_next = NodePath(".")
+		tutorial_button.focus_previous = NodePath(".")
+		if tutorial_button.is_visible_in_tree() and not tutorial_button.disabled:
+			tutorial_button.grab_focus()
 		return
-	tutorial.position = Vector2(18, 140)
+	tutorial_button.focus_next = NodePath("")
+	tutorial_button.focus_previous = NodePath("")
+	tutorial.position = Vector2(14, board_canvas.y - 314) if portrait_board else Vector2(18, 140)
 	tutorial.custom_minimum_size.x = 340
 	tutorial_body.custom_minimum_size = Vector2(308, 0)
 	tutorial.size = Vector2(340, 0)
 	tutorial_button.disabled = false
 	tutorial_button.text = "안내 그만 보기"
-	var descriptions := ["내 턴에 오른쪽 주사위를 눌러 이동해 보세요.", "도착한 칸의 재료를 모아보세요. 재료는 자동으로 가방에 들어와요.", "하단 ‘건설 도감’을 눌러 필요한 재료와 시설 목록을 확인해 보세요.", "퀴즈 정답으로 SP를 모으고, 내 턴에 특수기술 버튼을 눌러보세요."]
+	var descriptions := ["주사위를 눌러 첫 부품을 찾으러 가요.", "도착한 칸의 재료를 모아보세요. 재료는 자동으로 가방에 들어와요.", "하단 ‘건설 도감’을 눌러 필요한 재료와 시설 목록을 확인해 보세요.", "퀴즈 정답으로 SP를 모으고, 내 턴에 특수기술 버튼을 눌러보세요."]
 	var index := 0
 	for step in tutorial_steps:
 		if not tutorial_steps[step]: break
@@ -486,7 +529,7 @@ func _refresh_tutorial() -> void:
 	if index == 4:
 		if tutorial_active: dismiss_tutorial()
 		return
-	tutorial_title.text = "첫 모험 안내  %d / 4" % (index + 1)
+	tutorial_title.text = "내 첫 차례   1 / 4" if index == 0 else "첫 모험 안내  %d / 4" % (index + 1)
 	tutorial_body.text = descriptions[index]
 	_fit_compact_tutorial.call_deferred()
 	_refresh_visibility()

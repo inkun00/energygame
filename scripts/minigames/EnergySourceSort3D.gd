@@ -230,7 +230,7 @@ func _build_overlay() -> void:
 	answer_labels.append(_overlay_label(Vector2(18, 124), Vector2(338, 148), "햇빛 · 바람 · 흐르는 물", Color("e7fff1"), 16))
 	_overlay_label(Vector2(615, 96), Vector2(950, 127), "곧 다시 생기지 않아요 →", Color("ffe0b2"), 20)
 	answer_labels.append(_overlay_label(Vector2(622, 124), Vector2(942, 148), "석탄 · 석유 · 천연가스", Color("fff1dc"), 16))
-	hint_label = _overlay_label(Vector2(145, 259), Vector2(815, 285), "A/← 왼쪽  ·  D/→ 오른쪽  ·  중앙에서 다음 물건 받기", Color("fff1a5"), 16)
+	hint_label = _overlay_label(Vector2(145, 259), Vector2(815, 285), MINIGAME_INPUT.hint("energy_sort", "A/← 왼쪽  ·  D/→ 오른쪽  ·  중앙에서 다음 물건 받기"), Color("fff1a5"), 16)
 	hint_label.anchor_top = 1.0
 	hint_label.anchor_bottom = 1.0
 	hint_label.offset_top = -34.0
@@ -247,7 +247,7 @@ func _next_item() -> void:
 	round_label.text = "%d번째 물건" % (item_step + 1)
 	for label in answer_labels:
 		label.visible = item_step < 2
-	hint_label.text = "처음 두 물건은 목록을 참고해요 · A/← 왼쪽  D/→ 오른쪽" if item_step < 2 else "금방 다시 얻을 수 있나요? · A/← 왼쪽  D/→ 오른쪽"
+	hint_label.text = MINIGAME_INPUT.hint("energy_sort", "처음 두 물건은 목록을 참고해요 · A/← 왼쪽  D/→ 오른쪽") if item_step < 2 else MINIGAME_INPUT.hint("energy_sort", "금방 다시 얻을 수 있나요? · A/← 왼쪽  D/→ 오른쪽")
 	carried_name.text = str(current_source["name"])
 	for child in source_shape.get_children():
 		source_shape.remove_child(child)
@@ -346,7 +346,7 @@ func _process(delta: float) -> void:
 	if waiting_for_release:
 		hint_label.text = "키를 떼고 다시 누르거나, 반대 방향을 눌러요"
 		return
-	hint_label.text = "금방 다시 얻을 수 있나요? · A/← 왼쪽  D/→ 오른쪽"
+	hint_label.text = MINIGAME_INPUT.hint("energy_sort", "금방 다시 얻을 수 있나요? · A/← 왼쪽  D/→ 오른쪽")
 	hero_x = clampf(hero_x + axis * RUN_SPEED * delta, -DELIVERY_X, DELIVERY_X)
 	if axis != 0.0:
 		carry_direction = signf(axis)

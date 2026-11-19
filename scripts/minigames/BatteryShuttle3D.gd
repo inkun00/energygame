@@ -248,7 +248,7 @@ func _build_overlay() -> void:
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		flow_row.add_child(label)
 		flow_step_labels.append(label)
-	instruction_label = _overlay_label(Vector2(90, 260), Vector2(870, 285), "A/D로 달리기 · 태양광 → 배터리 → 도시", Color("fff1ac"), 16)
+	instruction_label = _overlay_label(Vector2(90, 260), Vector2(870, 285), MINIGAME_INPUT.hint("battery_relay", "A/D로 달리기 · 태양광 → 배터리 → 도시"), Color("fff1ac"), 16)
 	instruction_label.anchor_top = 1.0
 	instruction_label.anchor_bottom = 1.0
 	instruction_label.offset_top = -34.0
@@ -388,13 +388,13 @@ func _update_visuals() -> void:
 	if notice_remaining > 0.0:
 		instruction_label.text = notice
 	elif cargo == 1:
-		instruction_label.text = "A/D 이동 · 가운데 배터리에 남는 전기를 넣으세요"
+		instruction_label.text = MINIGAME_INPUT.hint("battery_relay", "A/D 이동 · 가운데 배터리에 남는 전기를 넣으세요")
 	elif cargo == 2:
-		instruction_label.text = "지금은 전기가 충분해요. 흐릴 때까지 저장 전기를 아껴요." if sunny else "A/D 이동 · 오른쪽 도시로 저장 전기를 보내세요"
+		instruction_label.text = "지금은 전기가 충분해요. 흐릴 때까지 저장 전기를 아껴요." if sunny else MINIGAME_INPUT.hint("battery_relay", "A/D 이동 · 오른쪽 도시로 저장 전기를 보내세요")
 	elif sunny:
-		instruction_label.text = "배터리가 가득 찼어요. 구름이 올 때까지 기다리세요" if battery_units >= BATTERY_CAPACITY else "A/D 이동 · 왼쪽 태양광에서 남는 전기를 가져오세요"
+		instruction_label.text = "배터리가 가득 찼어요. 구름이 올 때까지 기다리세요" if battery_units >= BATTERY_CAPACITY else MINIGAME_INPUT.hint("battery_relay", "A/D 이동 · 왼쪽 태양광에서 남는 전기를 가져오세요")
 	else:
-		instruction_label.text = "배터리가 비었어요. 다음 햇빛 때 전기를 저장하세요" if battery_units <= 0 else "A/D 이동 · 가운데 배터리에서 전기를 꺼내세요"
+		instruction_label.text = "배터리가 비었어요. 다음 햇빛 때 전기를 저장하세요" if battery_units <= 0 else MINIGAME_INPUT.hint("battery_relay", "A/D 이동 · 가운데 배터리에서 전기를 꺼내세요")
 
 func get_city_supply_seconds() -> float:
 	var current_demand := float(phase_for_time(elapsed, game_seed)["demand"]) * 0.22

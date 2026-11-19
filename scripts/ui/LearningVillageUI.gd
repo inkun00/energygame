@@ -2,9 +2,11 @@ extends Control
 class_name LearningVillageUI
 
 signal stage_visibility_changed(blocking: bool)
+signal practice_adventure_requested
 
 const UI = preload("res://scripts/ui/CommercialUI.gd")
 const EnergyVillageView = preload("res://scripts/ui/VillageEnergyView.gd")
+const TrialRules = preload("res://scripts/core/VillageEnergyTrial.gd")
 const COMPONENT_PURPOSES := {
 	"solar_panel": "햇빛을 전기로 바꿔요", "wind_blade": "바람을 받아 터빈을 돌려요",
 	"battery": "남는 전기를 저장해요", "insulation": "집 안팎으로 열이 오가는 것을 줄여요",
@@ -44,6 +46,9 @@ var trial_phase_bar: ProgressBar
 var trial_message: Label
 var trial_confirm_button: Button
 var trial_retry_button: Button
+var redesign_row: HBoxContainer
+var retire_option: OptionButton
+var support_option: OptionButton
 var waiting_chip: PanelContainer
 var waiting_label: Label
 var shown_choice_token := -1
@@ -310,6 +315,10 @@ func _build_component() -> void:
 		purpose.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		purpose.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		stack.add_child(purpose)
+		var contribution := _label(_component_use(item_id, int(choice.get("project_idx", -1))), 18, UI.TEAL)
+		contribution.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		contribution.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		stack.add_child(contribution)
 		option_buttons.append(button)
 	_link_focus(option_buttons)
 	if not option_buttons.is_empty(): call_deferred("_focus_if_visible", option_buttons[0])
@@ -318,7 +327,22 @@ func _update_component(choice: Dictionary) -> void:
 	timer_label.text = "%d초" % ceili(float(choice.get("remaining", 8.0)))
 	var project_idx := int(choice.get("project_idx", -1))
 	if project_idx >= 0 and project_idx < GameManager.CONSTRUCTION_PROJECTS.size():
-		subheading.text = "내 목표: %s · 1 / 2 / 3 또는 방향키 + Enter" % GameManager.CONSTRUCTION_PROJECTS[project_idx]["name"]
+		subheading.text = "내 추천 시설 · %s    모둠이 함께 모은 부품으로 지어요." % GameManager.CONSTRUCTION_PROJECTS[project_idx]["name"]
+
+func _component_use(item_id: String, preferred: int) -> String:
+	var inventory := GameManager.get_team_inventory()
+	var goals: Array = [preferred]
+	goals.append_array((GameManager.team_plan.get("choices", {}) as Dictionary).values())
+	for idx in range(GameManager.CONSTRUCTION_PROJECTS.size()):
+		if idx not in goals: goals.append(idx)
+	for idx: int in goals:
+		if idx < 0 or idx >= GameManager.CONSTRUCTION_PROJECTS.size() or idx in GameManager.built_project_ids: continue
+		var project: Dictionary = GameManager.CONSTRUCTION_PROJECTS[idx]
+		var recipe: Dictionary = project["requirements"]
+		var need := int(recipe.get(item_id, 0)) - int(inventory.get(item_id, 0))
+		if need > 0:
+			return "%s\n이 부품 부족 %d개 → %d개" % [project["name"], need, need - 1]
+	return "여분으로 모둠에 보관"
 
 func _choose_component(item_id: String, token: int) -> void:
 	GameManager.choose_quiz_component(_local_index(), item_id, token)
@@ -399,7 +423,10 @@ func _update_plan() -> void:
 	for idx in range(plan_player_labels.size()):
 		var selected := int(choices.get(idx, -1))
 		var project := str(GameManager.CONSTRUCTION_PROJECTS[selected]["name"]) if selected >= 0 and selected < GameManager.CONSTRUCTION_PROJECTS.size() else "고르는 중"
-		plan_player_labels[idx].text = "%s%s\n%s" % [_player_name(idx), "  ✓" if bool(ready.get(idx, false)) else "", project]
+		var status := "추천 완료 ✓" if bool(ready.get(idx, false)) else "고르는 중"
+		plan_player_labels[idx].text = "%s · %s" % [_player_name(idx), status]
+		if selected >= 0:
+			plan_player_labels[idx].text += "\n" + project
 	plan_ready_button.disabled = bool(ready.get(_local_index(), false)) or not choices.has(_local_index())
 	plan_ready_button.text = "친구 기다리는 중" if bool(ready.get(_local_index(), false)) else "추천 완료"
 
@@ -442,6 +469,21 @@ func _build_trial() -> void:
 	trial_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	trial_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(trial_message)
+	redesign_row = HBoxContainer.new()
+	redesign_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	redesign_row.add_theme_constant_override("separation", 12)
+	content.add_child(redesign_row)
+	redesign_row.add_child(_label("팀 설계 지원 1회", 18, UI.GOLD))
+	retire_option = OptionButton.new()
+	support_option = OptionButton.new()
+	for picker in [retire_option, support_option]:
+		picker.add_theme_font_size_override("font_size", 18)
+		UI.apply_input(picker)
+		redesign_row.add_child(picker)
+	support_option.item_selected.connect(func(_idx: int):
+		retire_option.disabled = support_option.selected == 0
+		_link_focus(_trial_result_actions()))
+	redesign_row.hide()
 	mode_buttons["store"] = _button("1  내 구역에 전기 저장", _choose_mode.bind("store"))
 	mode_buttons["supply"] = _button("2  내 배터리 전기 사용", _choose_mode.bind("supply"))
 	footer.add_child(mode_buttons["store"])
@@ -473,15 +515,28 @@ func _update_trial() -> void:
 		mode_buttons[mode].disabled = float(own.get("capacity", 0.0)) <= 0.0
 		UI.apply_secondary_button(mode_buttons[mode], UI.GOLD if str(own.get("mode", "supply")) == mode else UI.TEAL)
 	trial_confirm_button.visible = complete
-	trial_retry_button.visible = complete and not bool(summary.get("success", false)) and bool(trial_state.get("can_retry", false))
+	var practice := GameManager.guided_tutorial_active
+	var personal: Dictionary = trial_state.get("practice_result", {})
+	trial_retry_button.visible = complete and (practice or bool(trial_state.get("can_retry", false))) and not bool((personal if practice else summary).get("success", false))
+	redesign_row.visible = trial_retry_button.visible and not practice
 	if complete:
 		heading.text = "낮과 밤의 전력 확인"
 		subheading.text = "필요한 전기를 보낸 비율 · 낮 %d%% / 밤 %d%%" % [roundi(float(summary.get("daytime_coverage", 0.0)) * 100.0), roundi(float(summary.get("night_coverage", 0.0)) * 100.0)]
-		trial_message.text = "마을에 필요한 전기를 보냈어요." if bool(summary.get("success", false)) else "밤에 쓸 전기를 더 준비해요." if float(summary.get("night_coverage", 0.0)) < float(summary.get("daytime_coverage", 0.0)) else "발전 시설을 늘리거나 필요한 전기를 줄여 봐요."
+		var feedback := personal if practice and not personal.is_empty() else summary
+		var comparison := str(feedback.get("comparison", ""))
+		if not comparison.is_empty(): subheading.text = ("내 구역 · " if practice else "") + comparison
+		trial_message.text = str(feedback.get("cause", ""))
+		if not bool(feedback.get("success", false)):
+			trial_message.text += " " + str(feedback.get("advice", ""))
+		if practice:
+			trial_message.text = "내 구역 밤 %d%% · " % roundi(float(feedback.get("night_coverage", 0.0)) * 100.0) + trial_message.text
 		var ready: Dictionary = trial_state.get("ready", {})
 		trial_confirm_button.disabled = bool(ready.get(_local_index(), false))
-		trial_confirm_button.text = "친구 기다리는 중" if trial_confirm_button.disabled else "결과 확인 완료"
+		trial_confirm_button.text = "새 모험 시작" if practice else ("친구 기다리는 중" if trial_confirm_button.disabled else "결과 확인 완료")
 		trial_retry_button.disabled = trial_confirm_button.disabled
+		trial_retry_button.text = "마지막 40초 다시 해 보기" if practice else "설계 적용 · 건설로"
+		if redesign_row.visible and shown_phase != phase:
+			_fill_redesign_options()
 	else:
 		heading.text = "우리 마을에 전기 보내기"
 		subheading.text = "이번 %s: %s" % ["낮" if phase == "day" else "밤", str(trial_state.get("condition_label", ""))]
@@ -499,11 +554,50 @@ func _update_trial() -> void:
 	if shown_phase != phase:
 		shown_phase = phase
 		if complete:
-			var actions: Array[Button] = []
-			if trial_retry_button.visible: actions.append(trial_retry_button)
-			actions.append(trial_confirm_button)
+			var actions := _trial_result_actions()
 			_link_focus(actions)
 			call_deferred("_focus_if_visible", actions[0])
+		else:
+			_link_focus([mode_buttons["store"], mode_buttons["supply"]])
+			call_deferred("_focus_if_visible", mode_buttons["store"] if phase == "day" else mode_buttons["supply"])
+
+func _trial_result_actions() -> Array[Button]:
+	var actions: Array[Button] = []
+	if redesign_row.visible:
+		actions.append(support_option)
+		if retire_option.visible and not retire_option.disabled: actions.append(retire_option)
+	if trial_retry_button.visible: actions.append(trial_retry_button)
+	actions.append(trial_confirm_button)
+	return actions
+
+func _fill_redesign_options() -> void:
+	var built: Array = trial_state.get("built_ids", [])
+	retire_option.clear()
+	support_option.clear()
+	retire_option.add_item("기존 시설 모두 유지")
+	retire_option.set_item_metadata(0, -1)
+	support_option.add_item("지원 시설 없이 다시 설계")
+	support_option.set_item_metadata(0, -1)
+	var baseline := TrialRules.forecast(built)
+	var best := _supply_score(baseline)
+	var recommendation := 0
+	for idx in range(GameManager.CONSTRUCTION_PROJECTS.size()):
+		var picker := retire_option if idx in built else support_option
+		picker.add_item(("%s 반납" if idx in built else "%s 무상 지원") % GameManager.CONSTRUCTION_PROJECTS[idx]["name"])
+		picker.set_item_metadata(picker.item_count - 1, idx)
+		if idx not in built and not bool(baseline.success):
+			var candidate := built.duplicate()
+			candidate.append(idx)
+			var score := _supply_score(TrialRules.forecast(candidate))
+			if score > best + TrialRules.EPSILON:
+				best = score
+				recommendation = picker.item_count - 1
+	support_option.select(recommendation)
+	retire_option.disabled = recommendation == 0
+	retire_option.visible = not built.is_empty()
+
+func _supply_score(forecast: Dictionary) -> float:
+	return minf(float(forecast.coverage) / TrialRules.REQUIRED_COVERAGE, 1.0) + minf(float(forecast.night_coverage) / TrialRules.REQUIRED_NIGHT_COVERAGE, 1.0)
 
 func _focus_if_visible(button: Variant) -> void:
 	if is_instance_valid(button) and button.is_inside_tree() and button.is_visible_in_tree() and not button.disabled:
@@ -528,7 +622,16 @@ func _choose_mode(mode: String) -> void:
 	GameManager.set_energy_trial_mode(_local_index(), mode)
 
 func _finish_trial(retry: bool) -> void:
-	GameManager.finish_energy_trial(_local_index(), retry)
+	if GameManager.guided_tutorial_active:
+		if retry: GameManager.retry_practice_energy_trial()
+		else: practice_adventure_requested.emit()
+		return
+	var remove_project := -1
+	var support_project := -1
+	if retry and redesign_row.visible and support_option.selected > 0:
+		remove_project = int(retire_option.get_selected_metadata())
+		support_project = int(support_option.get_selected_metadata())
+	GameManager.finish_energy_trial(_local_index(), retry, remove_project, support_project)
 
 func _refresh_inventory() -> void:
 	if not is_instance_valid(inventory_label): return

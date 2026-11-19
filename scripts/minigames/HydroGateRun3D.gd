@@ -189,7 +189,7 @@ func set_practice_mode(value: bool) -> void:
 		practice_closed_gate = false
 		# Same movement, jumping and tap/close mechanics; no overflow or score.
 		water_level = 78.0
-		notice = "A/D로 레버에 접근 · W 점프 · Space 3번 열기 · E 닫기"
+		notice = MINIGAME_INPUT.hint("hydro_gate", "A/D로 레버에 접근 · W 점프 · Space 3번 열기 · E 닫기")
 		notice_remaining = 4.0
 	_update_visuals()
 
@@ -198,7 +198,7 @@ func get_practice_progress() -> Dictionary:
 	var step := 0
 	while step < checks.size() and checks[step]:
 		step += 1
-	var hints := ["A/D로 레버까지 이동해요", "레버 앞에서 Space를 3번 눌러요", "흐르는 물과 돌아가는 터빈을 확인해요", "같은 레버에서 E로 수문을 닫아요", "열기·발전·닫기 연습 완료!"]
+	var hints := [MINIGAME_INPUT.hint("hydro_gate", "A/D로 레버까지 이동해요"), MINIGAME_INPUT.hint("hydro_gate", "레버 앞에서 Space를 3번 눌러요"), "흐르는 물과 돌아가는 터빈을 확인해요", MINIGAME_INPUT.hint("hydro_gate", "같은 레버에서 E로 수문을 닫아요"), "열기·발전·닫기 연습 완료!"]
 	return {"reached_lever": practice_reached_lever, "opened_gate": practice_opened_gate, "generated_power": practice_generated_power, "closed_gate": practice_closed_gate, "complete": step == 4, "step": step, "hint": hints[step]}
 
 func finalize_generation_score() -> void:
@@ -331,7 +331,7 @@ func _build_dam() -> void:
 		if gate_index < 2:
 			var jump_hint := Label3D.new()
 			jump_hint.position = Vector3(2.4, gate_y + 0.20, 1.75)
-			jump_hint.text = "W 점프 ↑"
+			jump_hint.text = MINIGAME_INPUT.hint("hydro_gate", "W 점프 ↑")
 			jump_hint.font_size = 40
 			jump_hint.pixel_size = 0.006
 			jump_hint.outline_size = 7
@@ -411,7 +411,7 @@ func _build_overlay() -> void:
 	choice_label.clip_text = true
 	warning_label = _overlay_label(Vector2(283, 7), Vector2(680, 35), "넘침까지 남은 시간", Color("ffca7e"), HORIZONTAL_ALIGNMENT_CENTER, 19)
 	forecast_label = _overlay_label(Vector2(290, 36), Vector2(680, 62), "", Color("eafaff"), HORIZONTAL_ALIGNMENT_CENTER, 17)
-	control_label = _overlay_label(Vector2(20, 213), Vector2(940, 242), "A/D 이동 · W 점프 · Space 열기 · E 닫기", Color("fff0b4"), HORIZONTAL_ALIGNMENT_CENTER, 17)
+	control_label = _overlay_label(Vector2(20, 213), Vector2(940, 242), MINIGAME_INPUT.hint("hydro_gate", "A/D 이동 · W 점프 · Space 열기 · E 닫기"), Color("fff0b4"), HORIZONTAL_ALIGNMENT_CENTER, 17)
 	control_label.anchor_top = 1.0
 	control_label.anchor_bottom = 1.0
 	control_label.offset_top = -32.0
@@ -541,7 +541,7 @@ func _open_selected_gate() -> void:
 func _close_open_gate(manual: bool) -> void:
 	if open_gate < 0 or (manual and selected_gate != open_gate):
 		if manual:
-			notice = "열린 수문의 레버에서 E를 눌러 닫으세요."
+			notice = MINIGAME_INPUT.hint("hydro_gate", "열린 수문의 레버에서 E를 눌러 닫으세요.")
 			notice_remaining = 1.2
 		return
 	var closed_gate := open_gate
@@ -697,7 +697,7 @@ func _update_visuals() -> void:
 	head_label.text = "낙차  %dm" % roundi(head_for_level(water_level))
 	output_label.text = "발전  %.1f MW" % current_power
 	if selected_gate >= 0:
-		choice_label.text = "%s · %s" % [GATE_NAMES[selected_gate], "E 닫기" if open_gate == selected_gate else "Space ×3 열기"]
+		choice_label.text = "%s · %s" % [GATE_NAMES[selected_gate], MINIGAME_INPUT.hint("hydro_gate", "E 닫기") if open_gate == selected_gate else MINIGAME_INPUT.hint("hydro_gate", "Space ×3 열기")]
 	else:
 		choice_label.text = "수문 레버까지 이동하세요 · 현재 층 %d" % (hero_floor_index + 1) if hero_floor_index >= 0 else "점프해서 위층 발판에 착지하세요"
 	var overflow_eta := projected_overflow_seconds(water_level, elapsed, rain_seed, open_gate)
@@ -707,12 +707,12 @@ func _update_visuals() -> void:
 	var next_change := RAIN_SEGMENT_SECONDS - fposmod(elapsed, RAIN_SEGMENT_SECONDS)
 	var next_inflow := inflow_for_time(elapsed + next_change + 0.01, rain_seed)
 	var save_water := open_gate >= 0 and current_inflow <= 3.0 and water_level < highest_open_level - 3.0
-	forecast_label.text = "소강 · E로 닫고 물 모으기" if save_water else ("%.1f초 뒤 %s" % [next_change, _rain_name(next_inflow)] if elapsed + next_change < 30.0 else "마지막 물결 · 넘침 주의")
+	forecast_label.text = MINIGAME_INPUT.hint("hydro_gate", "소강 · E로 닫고 물 모으기") if save_water else ("%.1f초 뒤 %s" % [next_change, _rain_name(next_inflow)] if elapsed + next_change < 30.0 else "마지막 물결 · 넘침 주의")
 	forecast_label.add_theme_color_override("font_color", Color("ffe078") if save_water else (Color("ffad96") if next_inflow >= 25.0 and next_change < 3.0 else Color("eafaff")))
 	if practice_mode:
 		warning_label.text = "조작 연습 · 넘침 없음"
 		forecast_label.text = "점수 없는 조작 연습"
-	control_label.text = "A/D 이동 · W 점프 · 레버 앞 Space ×3 · E 닫기" if practice_mode else (notice if notice_remaining > 0.0 else "A/D 이동 · W 점프 · 레버 앞 Space ×3 · E 닫기")
+	control_label.text = MINIGAME_INPUT.hint("hydro_gate", "A/D 이동 · W 점프 · 레버 앞 Space ×3 · E 닫기") if practice_mode else (notice if notice_remaining > 0.0 else MINIGAME_INPUT.hint("hydro_gate", "A/D 이동 · W 점프 · 레버 앞 Space ×3 · E 닫기"))
 	choice_label.visible = selected_gate >= 0
 	charge_bar.visible = selected_gate >= 0 and open_gate < 0
 	charge_label.visible = charge_bar.visible

@@ -104,6 +104,7 @@ func _host_scenario() -> void:
 	_check(gm.team_quiz_correct == 4, "four accepted correct answers counted once")
 	for player in gm.players:
 		_check(int(player["quiz_correct"]) == 1, "each player earns one quiz success")
+		_check(int(player["bonus_quiz_score"]) == 3 * gm.SPECTATOR_QUIZ_BONUS_SCORE, "early and late private peer answers are credited once")
 	for game_id in gm.MINIGAME_DEFINITIONS:
 		results.clear()
 		gm._start_minigame(0, game_id)
@@ -153,7 +154,7 @@ func _host_scenario() -> void:
 		gm.player_inventory_changed.emit(idx, gm.players[idx]["inventory"].duplicate(true))
 	gm.game_time_remaining = 0.01
 	await _until(func(): return gm.village_construction_active, "shared plan completes for all four humans")
-	_check(gm.get_team_inventory()["solar_panel"] == 8, "planning keeps shared materials intact")
+	_check(gm.get_team_inventory()["solar_panel"] == 9, "planning keeps the four personal pairs and one shared solar reward")
 	var inventory_before: Dictionary = gm.get_team_inventory()
 	probe.command.rpc("invalid_build")
 	await _all_reports("invalid_build")
@@ -239,6 +240,11 @@ func _quiz_requested(idx: int, quiz: Dictionary) -> void:
 	var answer := str(quiz["answer"])
 	var seat: int = nm.get_local_player_index()
 	if seat != idx:
+		if seat == (idx + 1) % 4:
+			await create_timer(0.55).timeout
+			_check(gm.quiz_collecting_peers and not quiz_seats.has(idx), "host answer leaves a private window for the last reader")
+			for value in gm.active_spectator_quiz_attempts.values():
+				_check(value is bool, "snapshots expose submission flags only")
 		nm.request_spectator_guess(idx, answer)
 		return
 	await create_timer(0.2).timeout
@@ -327,6 +333,8 @@ func _minigame_finished(ranking: Array) -> void:
 	_check(not results.has(round_id), "one result event per round")
 	results[round_id] = true
 	_check(ranking.size() == 4, "four scores in round results")
+	var team: Dictionary = gm.active_minigame.get("team_goal_result", {})
+	_check(team.get("awarded", false) and team.get("required", 0) == 3 and team.get("reached", 0) == 4 and gm.team_parts.get(team.get("part", ""), 0) > 0, "every peer sees the shared, subject-related part")
 	for entry in ranking:
 		var idx := int(entry["player_idx"])
 		_check(int(entry["score"]) == SCORES[idx], "accepted score belongs to correct seat")
@@ -352,7 +360,7 @@ func _energies() -> Array[int]:
 	return values
 
 func _snapshot() -> Dictionary:
-	return {"players": gm.players.duplicate(true), "turn": gm.current_turn_idx, "total_turns": gm.total_turns, "quizzes": gm.team_quiz_correct, "completed": gm.completed_minigame_ids.duplicate(), "projects": gm.built_project_ids.duplicate(), "owners": gm.built_project_owners.duplicate(), "health": gm.kingdom_health, "endings": endings.duplicate(true)}
+	return {"players": gm.players.duplicate(true), "team_parts": gm.team_parts.duplicate(true), "turn": gm.current_turn_idx, "total_turns": gm.total_turns, "quizzes": gm.team_quiz_correct, "completed": gm.completed_minigame_ids.duplicate(), "projects": gm.built_project_ids.duplicate(), "owners": gm.built_project_owners.duplicate(), "health": gm.kingdom_health, "endings": endings.duplicate(true)}
 
 func _send_report(kind: String, payload: Dictionary) -> void:
 	var seat: int = nm.get_local_player_index()

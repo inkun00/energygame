@@ -104,6 +104,15 @@ func _run() -> void:
 	_check(_ideal([0, 6])["success"], "complementary generation can succeed without a battery")
 	_check(_ideal([0, 3, 4])["success"], "the practical solar hydro storage fixture succeeds")
 	_check(_ideal([0, 3, 9])["success"], "daytime electric bus charging fits a viable plan")
+	var projects: Array = root.get_node("GameManager").CONSTRUCTION_PROJECTS
+	var tidal := MODEL.summarize(_ideal([6]), projects)
+	_check(tidal.period == "낮" and tidal.cause.contains("낮") and tidal.facilities == ["조력 발전소"], "Tidal daytime shortfall reports the actual failed period and facility")
+	var charged := MODEL.summarize(matched, projects)
+	_check(charged.success and charged.cause.contains("90.0칸") and charged.cause.contains("80.0칸"), "Successful storage explains actual daytime charge and nighttime delivery")
+	_check(MODEL.summarize(forgotten, projects).advice.contains("전기 저장") and MODEL.summarize(held, projects).advice.contains("배터리 전기 사용"), "Skipped charging and skipped releasing give different next actions")
+	_check(MODEL.summarize(three, projects, 3).night_coverage == 0 and MODEL.summarize(three, projects, 0).success, "Practice feedback evaluates each learner's own district")
+	_check(MODEL.summarize(_ideal([2, 4]), projects).cause.contains("절전") and not MODEL.summarize(_ideal([2, 4]), projects).cause.contains("저장"), "Direct generation and demand reduction explain a battery-free success")
+	_check(MODEL.comparison(tidal, charged).contains("33% → 100%"), "Before and after use measured percentages")
 
 	var expected_day := [8.0, 5.0, 0.0, 0.0, 3.2, 2.8, 1.0, 2.5, 0.0, 0.0]
 	var expected_night := [0.0, 2.0, 0.0, 0.0, 3.2, 2.8, 4.0, 2.5, 0.0, 0.0]

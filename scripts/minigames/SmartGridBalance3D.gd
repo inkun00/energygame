@@ -246,7 +246,7 @@ func _build_overlay() -> void:
 	danger_tint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(danger_tint)
 
-	help_label = _overlay_label("W/S 또는 ↑/↓  공급량 조절", Vector2(14, 8), 16, Color("eafff8"))
+	help_label = _overlay_label(MINIGAME_INPUT.hint("grid_balance", "W/S 또는 ↑/↓  공급량 조절"), Vector2(14, 8), 16, Color("eafff8"))
 	event_label = _overlay_label("", Vector2(14, 36), 21, Color("ffe47d"))
 
 	demand_label = Label.new()
@@ -515,10 +515,10 @@ func _update_hud(difference: float, balanced: bool) -> void:
 		balance_label.text = "도시 불빛 안정 · 균형 유지 · 차이 %.1f MW" % gap
 		balance_label.add_theme_color_override("font_color", Color("65f2b3"))
 	elif difference < 0.0:
-		balance_label.text = "불빛 약해짐 · 공급 부족 %.1f MW · W/↑" % gap
+		balance_label.text = MINIGAME_INPUT.hint("grid_balance", "불빛 약해짐 · 공급 부족 %.1f MW · W/↑") % gap
 		balance_label.add_theme_color_override("font_color", Color("8ed8ff"))
 	else:
-		balance_label.text = "공급 과잉 %.1f MW · S/↓로 낮춰요" % gap
+		balance_label.text = MINIGAME_INPUT.hint("grid_balance", "공급 과잉 %.1f MW · S/↓로 낮춰요") % gap
 		balance_label.add_theme_color_override("font_color", Color("ff796d"))
 
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:

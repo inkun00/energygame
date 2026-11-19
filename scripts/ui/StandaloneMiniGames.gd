@@ -77,7 +77,7 @@ func _build_menu() -> void:
 	heading.add_theme_color_override("font_color", Color("fff0a6"))
 	content.add_child(heading)
 	var intro := Label.new()
-	intro.text = "미션을 골라 나와 AI 3명이 도전해요. 시작 전 P로 조작을 연습할 수 있어요."
+	intro.text = "미션을 골라 나와 AI 3명이 도전해요. 시작 전 직접 조작을 연습할 수 있어요."
 	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	intro.add_theme_font_size_override("font_size", 18)
 	intro.add_theme_color_override("font_color", Color("c9e5e1"))
@@ -147,7 +147,7 @@ func _build_menu() -> void:
 		action.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		box.add_child(action)
 		var hint := Label.new()
-		hint.text = "%d초 · %s" % [int(definition.get("duration", 30)), KEY_PREVIEWS[game_id]]
+		hint.text = "%d초 · %s" % [int(definition.get("duration", 30)), MiniGameInput.hint(game_id, KEY_PREVIEWS[game_id])]
 		hint.name = "MissionKeys"
 		hint.add_theme_font_size_override("font_size", 16)
 		hint.add_theme_color_override("font_color", UI.TEXT_MUTED)
@@ -155,7 +155,7 @@ func _build_menu() -> void:
 		hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		box.add_child(hint)
 	var footer := Label.new()
-	footer.text = "↑↓←→ 선택 · Enter 시작 · 아래로 스크롤"
+	footer.text = "미션을 눌러 시작해요 · 아래로 스크롤" if MiniGameInput.uses_touch() else "↑↓←→ 선택 · Enter 시작 · 아래로 스크롤"
 	footer.add_theme_font_size_override("font_size", 16)
 	footer.add_theme_color_override("font_color", Color("94b8be"))
 	content.add_child(footer)
@@ -165,7 +165,7 @@ func _update_menu_layout() -> void:
 		return
 	# canvas_items may keep a 1280-unit logical canvas on a 1024px laptop.
 	# Choose the readable card count from the actual window, not that canvas.
-	cards_grid.columns = 2 if get_window().size.x < 1150 else 3
+	cards_grid.columns = 1 if get_window().size.y > get_window().size.x else (2 if get_window().size.x < 1150 else 3)
 	for index in range(card_buttons.size()):
 		var button := card_buttons[index]
 		button.focus_neighbor_left = card_buttons[maxi(0, index - 1)].get_path()
@@ -212,7 +212,7 @@ func _start_game(game_id: String) -> void:
 		{"name": "바람 토끼 보리", "is_ai": true, "char_icon": "res://assets/characters/eco_roster/wind_rabbit_bori.webp"},
 	]
 	GameManager.setup_game(players, 600)
-	GameManager._start_minigame(0, game_id)
+	GameManager._start_minigame(0, game_id, false)
 
 func _on_minigame_finished(_results: Array) -> void:
 	# 보드 턴 진행 예약을 취소하되 결과 화면은 재시작할 때까지 유지합니다.

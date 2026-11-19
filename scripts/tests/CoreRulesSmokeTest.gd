@@ -466,7 +466,7 @@ func _test_energy_ranking() -> void:
 	game_manager.players[0]["laps_completed"] = 10
 	game_manager.players[0]["quiz_correct"] = 20
 	game_manager.players[1]["energy"] = 20
-	game_manager.players[2]["energy"] = 14
+	game_manager.players[2]["energy"] = 20
 	game_manager.players[3]["energy"] = 11
 	game_manager.game_over.connect(func(rankings: Array): result["rankings"] = rankings)
 	game_manager._start_village_construction_phase()
@@ -477,6 +477,7 @@ func _test_energy_ranking() -> void:
 	if rankings.size() == 4:
 		_expect(int(rankings[0]["index"]) == 1 and int(rankings[3]["index"]) == 0, "다른 활동 점수가 높아도 보유 에너지가 많은 플레이어가 더 높은 최종 순위를 얻어야 합니다.")
 		_expect(int(rankings[0]["final_score"]) == 20, "결과 화면의 최종 점수는 보유 에너지와 같아야 합니다.")
+		_expect(rankings[0]["rank"] == 1 and rankings[1]["rank"] == 1 and rankings[0]["shared_rank"] and rankings[1]["shared_rank"] and rankings[2]["rank"] == 3, "에너지와 동점 판정까지 같은 친구들은 좌석 순서와 관계없이 공동 1위여야 합니다.")
 
 func _test_ending_cinematics() -> void:
 	var success_ending = ENDING_CINEMATIC.new()
@@ -717,22 +718,23 @@ func _test_other_player_quiz_observation() -> void:
 			child.pressed.emit()
 			break
 	await process_frame
-	_expect(game_manager.players[0].get("bonus_quiz_score", 0) == game_manager.SPECTATOR_QUIZ_BONUS_SCORE, "선행 정답 보너스는 자기 차례 정답 점수의 절반이어야 합니다.")
+	_expect(game_manager.players[0].get("bonus_quiz_score", 0) == 0, "함께 공개하기 전에는 관전 보너스를 지급하지 않아야 합니다.")
 	_expect(game_manager.SPECTATOR_QUIZ_BONUS_SCORE * 2 == game_manager.QUIZ_CORRECT_SCORE, "관전 보너스 점수 비율은 정확히 1/2이어야 합니다.")
 	_expect(game_manager.players[0].get("energy", 0) == energy_before and game_manager.players[0].get("skill_energy", 0) == skill_energy_before, "관전 보너스는 에너지나 특수기술 게이지를 지급하지 않아야 합니다.")
-	_expect("동점 비교 점수 +5" in quiz_modal.explanation_label.text and "에너지는 그대로" in quiz_modal.explanation_label.text, "관전 정답 직후 동점 점수 +5와 에너지 보상 없음이 구분되어야 합니다.")
+	_expect("비공개" in quiz_modal.explanation_label.text and "정답" not in quiz_modal.explanation_label.text, "함께 공개하기 전에는 제출한 답의 정오를 보여주지 않아야 합니다.")
 	for child in quiz_modal.choice_container.get_children():
 		if child is Button:
 			_expect(child.disabled, "관전 보너스 답안은 한 문제에 한 번만 제출할 수 있어야 합니다.")
 	var duplicate_result: Dictionary = game_manager.submit_spectator_quiz_guess(0, 1, "에너지")
-	_expect(not bool(duplicate_result.get("accepted", false)) and game_manager.players[0].get("bonus_quiz_score", 0) == 5, "같은 관전 문제에 중복 보너스를 받을 수 없어야 합니다.")
+	_expect(not bool(duplicate_result.get("accepted", false)) and game_manager.players[0].get("bonus_quiz_score", 0) == 0, "비공개 답안을 바꾸거나 중복 집계할 수 없어야 합니다.")
 	var wrong_observer_energy: int = game_manager.players[2].get("energy", 0)
 	var wrong_result: Dictionary = game_manager.submit_spectator_quiz_guess(2, 1, "온도")
-	_expect(bool(wrong_result.get("accepted", false)) and not bool(wrong_result.get("is_correct", true)) and int(wrong_result.get("bonus_score", -1)) == 0, "선행 답안이 틀리면 보너스 점수를 지급하지 않아야 합니다.")
+	_expect(bool(wrong_result.get("accepted", false)) and not wrong_result.has("is_correct") and not wrong_result.has("bonus_score"), "정답 공개 전에는 오답 여부도 공개하지 않아야 합니다.")
 	_expect(game_manager.players[2].get("bonus_quiz_score", 0) == 0 and game_manager.players[2].get("energy", 0) == wrong_observer_energy, "오답 관전자에게 점수나 에너지 보상이 생기지 않아야 합니다.")
 
 	game_manager.on_network_quiz_resolved(1, true)
 	await process_frame
+	_expect(game_manager.players[0].get("bonus_quiz_score", 0) == 5 and game_manager.players[2].get("bonus_quiz_score", 0) == 0, "함께 확인할 때 선택에 따라 한 번만 보너스를 지급해야 합니다.")
 	_expect("선택: 에너지" in quiz_modal.explanation_label.text, "다른 플레이어가 선택한 객관식 답안이 표시되어야 합니다.")
 	_expect("내 관전 도전: 정답 · 동점 비교 점수 +5" in quiz_modal.explanation_label.text, "대상 플레이어 결과와 함께 내 관전 도전 결과가 표시되어야 합니다.")
 	_expect("테스트 1님 보상:" in quiz_modal.explanation_label.text and "부품 1개" in quiz_modal.explanation_label.text and "에너지 +2" in quiz_modal.explanation_label.text, "대상 플레이어의 정답 에너지와 선택 부품 보상 주체가 명확히 표시되어야 합니다.")

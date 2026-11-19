@@ -3,6 +3,8 @@ class_name GameBoardController
 
 ## GameBoardController: 100칸 사다리 게임을 회전·확대 가능한 입체 쿼터뷰로 렌더링합니다.
 
+signal layout_state_changed
+
 const TileMarker3D = preload("res://scripts/board/TileMarker3D.gd")
 const BoardItemPickup3D = preload("res://scripts/board/BoardItemPickup3D.gd")
 const SpecialSkillEffect3D = preload("res://scripts/effects/SpecialSkillEffect3D.gd")
@@ -108,6 +110,7 @@ func _board_overlay_is_visible() -> bool:
 	return GameManager.adventure_waiting_for_start
 
 func _refresh_board_render_budget() -> void:
+	layout_state_changed.emit()
 	var awake := board_render_warmup or (board_surface_active and visible and not _board_overlay_is_visible())
 	board_presentation_suspended = not awake
 	RENDER_QUALITY.set_board_world_awake(viewport, energy_fairy_village, player_pawns, tile_markers, awake)

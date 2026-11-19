@@ -11,6 +11,7 @@ const FINAL_SCENE_DURATION := 9.0
 const CROSSFADE_DURATION := 0.72
 const DURATION := SCENE_DURATION * 2.0 + FINAL_SCENE_DURATION
 const UI = preload("res://scripts/ui/CommercialUI.gd")
+const SchoolWindow = preload("res://scripts/ui/SchoolWindow.gd")
 
 const SUCCESS_SCENES: Array[Dictionary] = [
 	{
@@ -38,8 +39,8 @@ const FAILURE_SCENES: Array[Dictionary] = [
 	},
 	{
 		"image": "res://assets/story/ending/failure_02_safe_night.webp",
-		"title": "밤에는 무엇이 필요할까요?",
-		"caption": "해가 지면 태양광 발전이 멈춰요. 저장한 전기나 다른 발전 시설이 필요해요."
+		"title": "언제 전기가 부족했을까요?",
+		"caption": "낮과 밤에 보낸 전기의 양을 비교해 보세요."
 	},
 	{
 		"image": "res://assets/story/ending/failure_03_new_plan.webp",
@@ -72,6 +73,11 @@ var _recovery_label: Label
 var _team_panel: PanelContainer
 var _team_row: HBoxContainer
 var team_cards: Array[PanelContainer] = []
+var _facility_panel: PanelContainer
+var _facility_row: HBoxContainer
+var _school_panel: PanelContainer
+var _school_view: Control
+var _school_connection: Label
 
 func setup(success: bool, energy_value: int, target_value: int, players_snapshot: Array = [], electricity_summary: Dictionary = {}) -> void:
 	is_success = success
@@ -90,6 +96,23 @@ func setup(success: bool, energy_value: int, target_value: int, players_snapshot
 			team_snapshot.append(player.duplicate(true))
 	team_snapshot.sort_custom(func(a: Dictionary, b: Dictionary): return int(a.get("index", 0)) < int(b.get("index", 0)))
 	scenes = (SUCCESS_SCENES if is_success else FAILURE_SCENES).duplicate(true)
+	if trial_summary.has("cause"):
+		var names: Array = trial_summary.get("facilities", [])
+		if not names.is_empty():
+			var facilities := str(names[0])
+			if names.size() == 2: facilities += " · " + str(names[1])
+			elif names.size() > 2: facilities += " 등 %d곳" % names.size()
+			scenes[0]["caption"] = "우리 팀이 마련한 시설: %s." % facilities
+		else:
+			scenes[0]["caption"] = "이번에는 마을에 시설을 짓지 못했어요."
+		var period := str(trial_summary.get("period", "낮과 밤"))
+		scenes[1]["title"] = "어떻게 전기를 보냈을까요?" if is_success else "%s에 전기가 부족했어요" % period
+		scenes[1]["caption"] = trial_summary["cause"]
+		if not is_success and period == "낮":
+			scenes[1]["image"] = "res://assets/kingdom/kingdom_stage_25.webp"
+		scenes[2]["caption"] = "우리 시설이 보낸 전기로 학교 창문이 밝아졌어요. 다음에는 무엇을 하나 바꿔 볼까요?" if is_success else trial_summary["advice"]
+		if not str(trial_summary.get("comparison", "")).is_empty():
+			scenes[2]["caption"] += "\n" + str(trial_summary["comparison"])
 	if is_node_ready():
 		_restart_story()
 
@@ -148,6 +171,31 @@ func _build_view() -> void:
 	_recovery_label.clip_text = true
 	_recovery_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_recovery_label)
+
+	_facility_panel = PanelContainer.new()
+	_facility_panel.position = Vector2(28, 98)
+	_facility_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("102c38ed"), UI.TEAL_DARK, 10, 10))
+	_facility_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_facility_panel)
+	_facility_row = HBoxContainer.new()
+	_facility_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_facility_panel.add_child(_facility_row)
+	_school_connection = _team_text("SchoolConnection", "→", 28, UI.GOLD)
+	_school_connection.add_theme_constant_override("outline_size", 6)
+	_school_connection.add_theme_color_override("font_outline_color", UI.INK)
+	add_child(_school_connection)
+	_school_panel = PanelContainer.new()
+	_school_panel.position = Vector2(28, 98)
+	_school_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_school_panel.add_theme_stylebox_override("panel", UI.padded_panel(Color("102c38ed"), UI.TEAL_DARK, 10, 10))
+	add_child(_school_panel)
+	var school_box := VBoxContainer.new()
+	school_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_school_panel.add_child(school_box)
+	_school_view = SchoolWindow.new()
+	_school_view.custom_minimum_size = Vector2(122, 78)
+	school_box.add_child(_school_view)
+	school_box.add_child(_team_text("SchoolCaption", "우리 학교의 밤", 16, UI.TEXT))
 
 	_team_panel = PanelContainer.new()
 	_team_panel.name = "TeamContributionPanel"
@@ -264,6 +312,21 @@ func _restart_story() -> void:
 	if _scene_tween and _scene_tween.is_valid():
 		_scene_tween.kill()
 	_rebuild_team_cards()
+	for child in _facility_row.get_children():
+		_facility_row.remove_child(child)
+		child.queue_free()
+	var projects: Array = get_node("/root/GameManager").CONSTRUCTION_PROJECTS
+	for id in trial_summary.get("built_ids", []):
+		if id < 0 or id >= projects.size(): continue
+		var icon := TextureRect.new()
+		icon.texture = load(projects[id]["image"])
+		icon.custom_minimum_size = Vector2(56, 52)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_facility_row.add_child(icon)
+	_facility_panel.reset_size()
+	_school_view.set_night_supply(float(trial_summary.get("night_coverage", 0.0)))
 	for image in _image_layers:
 		image.visible = false
 	_show_scene(0, true)
@@ -273,6 +336,12 @@ func _show_scene(next_index: int, immediate: bool = false) -> void:
 		_finish()
 		return
 	scene_index = next_index
+	_facility_panel.visible = scene_index in [0, 2] and _facility_row.get_child_count() > 0
+	_school_panel.visible = scene_index == 2 and trial_summary.has("night_coverage")
+	_school_connection.visible = _school_panel.visible and _facility_panel.visible
+	_facility_panel.position.y = 120 if _school_connection.visible else 98
+	_school_connection.position = Vector2(_facility_panel.position.x + _facility_panel.get_combined_minimum_size().x + 6, 136)
+	_school_panel.position.x = _school_connection.position.x + 38 if _school_connection.visible else 28
 	scene_elapsed = 0.0
 	var scene: Dictionary = scenes[scene_index]
 	title_text = str(scene["title"])
@@ -284,7 +353,7 @@ func _show_scene(next_index: int, immediate: bool = false) -> void:
 			_energy_label.text = "공급 · 낮 %d%% / 밤 %d%%" % [roundi(float(trial_summary.get("daytime_coverage", 0.0)) * 100.0), roundi(float(trial_summary.get("night_coverage", 0.0)) * 100.0)]
 		_energy_label.add_theme_color_override("font_color", UI.TEAL if is_success else Color("d4e8ef"))
 	if _recovery_label:
-		var stages := ["함께 건설", "낮과 밤", "마을 회복"] if is_success else ["공급 부족", "밤의 전기", "마을 계획"]
+		var stages := ["함께 건설", "낮과 밤", "마을 회복"] if is_success else ["공급 부족", str(trial_summary.get("period", "낮과 밤")) + "의 전기", "마을 계획"]
 		var stage_text := ""
 		for index in range(stages.size()):
 			stage_text += ("▶ " if index == scene_index else "") + str(stages[index])

@@ -4,7 +4,7 @@ extends SceneTree
 ## Socket delivery is covered separately by the real four-player transport tests.
 const TRIAL = preload("res://scripts/core/VillageEnergyTrial.gd")
 const ACTIONS := ["quiz_component", "quiz_review", "team_project", "team_confirm", "trial_mode", "trial_finish"]
-const LEARNING_KEYS := ["component_choices", "component_choice_serial", "team_plan", "energy_trial", "energy_trial_retries"]
+const LEARNING_KEYS := ["component_choices", "component_choice_serial", "team_plan", "energy_trial", "energy_trial_retries", "previous_energy_trial"]
 const EVENTS := ["component_choice_changed", "team_plan_changed", "energy_trial_changed"]
 
 var gm: Node
@@ -169,6 +169,22 @@ func _test_phase_guards_and_retry() -> void:
 	TRIAL.advance(gm.energy_trial, 40.0)
 	nm._handle_game_action(22, "trial_finish", payload)
 	_check(gm.energy_trial_retries == 1 and not gm.village_construction_active and gm.energy_trial["ready"] == {1: true}, "A second retry request cannot grant another construction round")
+	payload = _fixture("trial_finish")
+	payload.merge({"retry": true, "attempt": 0, "remove_project": 3, "support_project": 6}, true)
+	var scores: Array = gm.players.duplicate(true)
+	var inventory: Dictionary = gm.get_team_inventory()
+	var invalid := payload.duplicate()
+	invalid["support_project"] = 95
+	_reject("trial_finish", invalid, "invalid redesign leaves the retry available")
+	nm._handle_game_action(22, "trial_finish", payload)
+	_check(gm.built_project_ids == [0, 6] and gm.built_project_placements.has(6) and not gm.built_project_owners.has(3), "Host exchanges the chosen facility and remaps its valid cell")
+	_check(gm.players == scores and gm.get_team_inventory() == inventory, "The redesign consumes no further materials and awards no score")
+	var update: Dictionary = nm._capture_game_state_patch("village_construction_started", [])
+	_check(update["built_project_ids"] == [0, 6] and update["previous_energy_trial"]["night_coverage"] == 0, "All clients receive the revised facilities and exact previous result")
+	gm._start_energy_trial()
+	TRIAL.advance(gm.energy_trial, 40.0)
+	_reject("trial_finish", payload, "a delayed action from the first attempt cannot confirm the second")
+	_check(gm.get_energy_trial_state().summary.comparison.contains("밤 0% → 100%"), "Second trial reports the verified supply improvement")
 
 func _on_learning_event(state: Dictionary, event_name: String) -> void:
 	event_counts[event_name] = int(event_counts.get(event_name, 0)) + 1
@@ -185,6 +201,7 @@ func _seed_snapshot_state() -> void:
 	TRIAL.advance(gm.energy_trial, 7.5)
 	gm.energy_trial["ready"] = {}
 	gm.energy_trial_retries = 1
+	gm.previous_energy_trial = {"daytime_coverage": 0.33, "night_coverage": 1.0}
 
 func _event_state(event_name: String) -> Dictionary:
 	match event_name:

@@ -120,6 +120,8 @@ var heat_arcade: SubViewportContainer
 
 func _ready() -> void:
 	_build_ui()
+	resized.connect(_fit_arcade_layout)
+	_fit_arcade_layout()
 	visible = false
 	set_process(true)
 	if GameManager:
@@ -244,7 +246,7 @@ func _build_ui() -> void:
 	practice_actions.alignment = BoxContainer.ALIGNMENT_CENTER
 	practice_actions.visible = false
 	content.add_child(practice_actions)
-	var practice_end_button := _make_button("연습 마치기 · 안내로 (Esc)", Color("287ca8"))
+	var practice_end_button := _make_button("연습 마치기 · 안내로" if MINIGAME_INPUT.uses_touch() else "연습 마치기 · 안내로 (Esc)", Color("287ca8"))
 	# Space is a repeated gate action here, never a GUI button activation.
 	# The keyboard exit remains Esc; this button is a pointer alternative.
 	practice_end_button.focus_mode = Control.FOCUS_NONE
@@ -267,6 +269,30 @@ func _build_ui() -> void:
 		menu_button.pressed.connect(func(): standalone_menu_requested.emit())
 		standalone_actions.add_child(menu_button)
 	_build_guide_ui()
+
+func _fit_arcade_layout() -> void:
+	var narrow := size.y > size.x and size.x < 950
+	# Side-view arenas need enough horizontal field of view to see the next
+	# stop, lane, or reservoir. Reserve tall space for the instructions instead.
+	var inset := maxf(10, (size.y - 1020) * 0.5) if narrow else 10.0
+	dimmer.color = Color("071d27") if narrow else Color("03151fe8")
+	card.offset_top = inset
+	card.offset_bottom = -inset
+	guide_controls_container.columns = 1 if narrow else 2
+	guide_start_button.custom_minimum_size.y = 80 if narrow else 48
+	guide_practice_button.custom_minimum_size.y = 80 if narrow else 48
+	goal_label.add_theme_font_size_override("font_size", 23 if narrow else 17)
+	feedback_label.add_theme_font_size_override("font_size", 22 if narrow else 17)
+	guide_objective_label.add_theme_font_size_override("font_size", 24 if narrow else 18)
+	guide_rewards_label.add_theme_font_size_override("font_size", 18 if narrow else 13)
+	guide_title_label.add_theme_font_size_override("font_size", 32 if narrow else 26)
+	var content := card.get_node("ContentBox") as VBoxContainer
+	content.add_theme_constant_override("separation", 14 if narrow else 6)
+	var current := _current_arcade()
+	if narrow and is_instance_valid(current):
+		arena_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		if current == commute_arcade:
+			commute_arcade._update_camera_and_bus()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not surface_enabled or not is_visible_in_tree():
@@ -299,7 +325,8 @@ func _build_touch_controls(parent: Control) -> void:
 	for spec in [[KEY_A, "←"], [KEY_D, "→"], [KEY_W, "↑"], [KEY_S, "↓"], [KEY_SPACE, "동작"], [KEY_E, "닫기"]]:
 		var holder := Control.new()
 		holder.set_meta("input_key", int(spec[0]))
-		holder.custom_minimum_size = Vector2(76, 48)
+		holder.custom_minimum_size = Vector2(100, 88)
+		holder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		touch_controls.add_child(holder)
 		var background := ColorRect.new()
@@ -310,6 +337,7 @@ func _build_touch_controls(parent: Control) -> void:
 		var label := Label.new()
 		label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		label.text = str(spec[1])
+		label.add_theme_font_size_override("font_size", 26)
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -317,36 +345,26 @@ func _build_touch_controls(parent: Control) -> void:
 		var button := TouchScreenButton.new()
 		button.name = "Touch_%d" % int(spec[0])
 		var shape := RectangleShape2D.new()
-		shape.size = Vector2(76, 48)
+		shape.size = holder.custom_minimum_size
 		button.shape = shape
-		button.position = Vector2(38, 24)
+		button.position = holder.custom_minimum_size * 0.5
+		holder.resized.connect(_fit_touch_button.bind(holder, button))
 		button.pressed.connect(MINIGAME_INPUT.set_touch.bind(int(spec[0]), true))
 		button.released.connect(MINIGAME_INPUT.set_touch.bind(int(spec[0]), false))
 		holder.add_child(button)
+		button.pressed.connect(func(): background.color = UI.TEAL_DARK)
+		button.released.connect(func(): background.color = Color("235366"))
 
 func _configure_touch_controls() -> void:
-	var keys: Array = [KEY_A, KEY_D, KEY_SPACE]
-	var action_label := "동작"
-	match game_id:
-		"solar_align": action_label = "점프"
-		"wind_rhythm": action_label = "제동"
-		"grid_balance": keys = [KEY_W, KEY_S]
-		"standby_hunt":
-			keys = [KEY_A, KEY_D, KEY_W, KEY_SPACE]
-			action_label = "뽑기"
-		"hydro_gate":
-			keys = [KEY_A, KEY_D, KEY_W, KEY_SPACE, KEY_E]
-			action_label = "열기"
-		"energy_sort", "battery_relay": keys = [KEY_A, KEY_D]
-		"eco_commute":
-			keys = [KEY_A, KEY_D, KEY_S, KEY_SPACE]
-			action_label = "태우기"
-		"heat_leak": action_label = "닫기"
+	var bindings: Dictionary = MINIGAME_INPUT.ACTION_KEYS.get(game_id, {})
 	for holder in touch_controls.get_children():
 		var key := int(holder.get_meta("input_key"))
-		holder.visible = key in keys
-		if key == KEY_SPACE:
-			holder.get_child(1).text = action_label
+		holder.visible = bindings.has(key)
+		holder.get_child(1).text = str(bindings.get(key, ""))
+
+func _fit_touch_button(holder: Control, button: TouchScreenButton) -> void:
+	(button.shape as RectangleShape2D).size = holder.size
+	button.position = holder.size * 0.5
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
@@ -388,7 +406,7 @@ func _process(delta: float) -> void:
 			_advance_arcade_simulation(minf(practice_seconds, practice_elapsed))
 		var progress: Dictionary = practice_plan.progress(practice_arcade)
 		var practice_steps := 4 if game_id == "hydro_gate" else 2
-		goal_label.text = "조작 연습 %d/%d  |  %s" % [mini(practice_steps, int(progress.get("step", 0)) + 1), practice_steps, str(progress.get("hint", ""))]
+		goal_label.text = "조작 연습 %d/%d  |  %s" % [mini(practice_steps, int(progress.get("step", 0)) + 1), practice_steps, MINIGAME_INPUT.hint(game_id, str(progress.get("hint", "")))]
 		if bool(progress.get("complete", false)):
 			if practice_completed_at < 0.0:
 				practice_completed_at = practice_elapsed
@@ -510,7 +528,7 @@ func _on_submission_changed(state: Dictionary) -> void:
 		var player_count := int(state.get("player_count", 4))
 		var guide_seconds := ceili(float(state.get("guide_remaining", 0.0)))
 		if practice_active:
-			submission_label.text = "조작 연습 · %d초 뒤 전체 자동 시작" % guide_seconds if NetworkManager.is_online else "한 단계씩 해봐요 · Esc로 안내로 돌아가기"
+			submission_label.text = "조작 연습 · %d초 뒤 전체 자동 시작" % guide_seconds if NetworkManager.is_online else ("한 단계씩 직접 해봐요" if MINIGAME_INPUT.uses_touch() else "한 단계씩 해봐요 · Esc로 안내로 돌아가기")
 		elif is_guide_open():
 			guide_badge_label.text = "게임 방법 · %d명 준비 · %d초 뒤 자동 시작" % [ready_count, guide_seconds]
 			if GameManager.guided_tutorial_active:
@@ -631,7 +649,12 @@ func _on_minigame_finished(results: Array) -> void:
 		if is_instance_valid(standalone_actions):
 			standalone_actions.visible = true
 		return
-	submission_label.text = "잠시 후 보드 게임이 이어집니다."
+	var team: Dictionary = GameManager.active_minigame.get("team_goal_result", {})
+	if not team.is_empty():
+		var part_name: String = GameManager.ITEM_DEFINITIONS[team["part"]]["name"]
+		submission_label.text = ("모둠 목표 달성! 공동 부품 %s +1" % part_name) if team["awarded"] else ("모둠 목표 행동 %d명 / 필요한 %d명 · 다음 기회에 함께 도전해요." % [team["reached"], team["required"]])
+	else:
+		submission_label.text = "잠시 후 보드 게임이 이어집니다."
 	var finished_round := round_id
 	get_tree().create_timer(GameManager.MINIGAME_RESULTS_SECONDS - 0.2, false).timeout.connect(func():
 		if round_id == finished_round and not active:
@@ -697,8 +720,8 @@ func _set_arcades_running(running_state: bool) -> void:
 	else:
 		get_viewport().gui_release_focus()
 	if is_instance_valid(touch_controls):
-		touch_controls.visible = running_state and DisplayServer.is_touchscreen_available()
-		arena_panel.custom_minimum_size.y = 320 if touch_controls.visible else 400
+		touch_controls.visible = running_state and MINIGAME_INPUT.uses_touch()
+		arena_panel.custom_minimum_size.y = 290 if touch_controls.visible else 400
 	var arcades := [
 		solar_arcade, wind_arcade, grid_arcade, standby_arcade,
 		hydro_arcade, sort_arcade, battery_arcade, commute_arcade, heat_arcade
@@ -708,7 +731,7 @@ func _set_arcades_running(running_state: bool) -> void:
 			# The modal owns the shared simulation clock; children must not run twice.
 			arc.set_process(false)
 			arc.set_physics_process(false)
-			arc.custom_minimum_size.y = 304 if touch_controls.visible else 384
+			arc.custom_minimum_size.y = 274 if touch_controls.visible else 384
 			if arc.has_method("set_running"):
 				arc.call("set_running", running_state)
 			elif "running" in arc:
@@ -811,12 +834,17 @@ func _populate_guide_content() -> void:
 	var title := str(game_data.get("title", "에너지 미니게임"))
 	var duration_val := int(game_data.get("duration", 30))
 	guide_title_label.text = title
+	guide_start_button.text = "준비 완료" if MINIGAME_INPUT.uses_touch() else "준비 완료  (Space / Enter)"
+	guide_practice_button.text = "직접 연습" if MINIGAME_INPUT.uses_touch() else "직접 연습 (P)"
 	guide_badge_label.text = "게임 방법 · %d초" % duration_val
 	guide_objective_label.text = str(GUIDE_PREVIEW.OBJECTIVES.get(game_id, game_data.get("objective", "제한시간 안에 최고 점수를 달성하세요.")))
 	guide_lesson_label.text = str(game_data.get("lesson", ""))
 	guide_tip_label.text = str(game_data.get("tip", ""))
 	guide_practice_button.visible = true
 	guide_rewards_label.text = "%s · 성공 시 순위 보너스 20 / 10 / 5 / 1 · 같은 점수는 공동 순위" % LEARNING_FEEDBACK.goal_requirement(game_id)
+	if bool(game_data.get("board_round", false)):
+		var part: String = GameManager.MINIGAME_TEAM_PARTS[game_id]
+		guide_rewards_label.text = "%s · %d명 달성 시 공동 부품 %s +1 · 개인 순위 20/10/5/1" % [LEARNING_FEEDBACK.goal_requirement(game_id), GameManager.team_goal_required(), GameManager.ITEM_DEFINITIONS[part]["name"]]
 
 	for child in guide_controls_container.get_children():
 		guide_controls_container.remove_child(child)
@@ -830,7 +858,7 @@ func _populate_guide_content() -> void:
 	else:
 		for item in controls:
 			if item is Dictionary:
-				var key_str := str(item.get("key", ""))
+				var key_str := MINIGAME_INPUT.hint(game_id, str(item.get("key", "")))
 				var action_str := str(item.get("action", ""))
 				var row := _create_control_row(key_str, action_str)
 				guide_controls_container.add_child(row)
@@ -855,7 +883,7 @@ func _create_control_row(key_text: String, action_text: String) -> HBoxContainer
 
 	var key_lbl := Label.new()
 	key_lbl.text = key_text
-	key_lbl.add_theme_font_size_override("font_size", 15)
+	key_lbl.add_theme_font_size_override("font_size", 22 if size.y > size.x else 15)
 	key_lbl.add_theme_color_override("font_color", Color("ffffff"))
 	key_badge.add_child(key_lbl)
 
@@ -869,7 +897,7 @@ func _create_control_row(key_text: String, action_text: String) -> HBoxContainer
 	action_lbl.text = action_text
 	action_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	action_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	action_lbl.add_theme_font_size_override("font_size", 15)
+	action_lbl.add_theme_font_size_override("font_size", 21 if size.y > size.x else 15)
 	action_lbl.add_theme_color_override("font_color", Color("d5f1ed"))
 	row.add_child(action_lbl)
 
@@ -937,7 +965,7 @@ func _start_practice() -> void:
 	objective_label.visible = false
 	lesson_label.visible = false
 	goal_label.visible = true
-	goal_label.text = "조작 연습  |  " + str(practice_plan.progress(practice_arcade).get("hint", ""))
+	goal_label.text = "조작 연습  |  " + MINIGAME_INPUT.hint(game_id, str(practice_plan.progress(practice_arcade).get("hint", "")))
 	goal_label.add_theme_color_override("font_color", UI.GOLD)
 	practice_actions.visible = true
 	timer_bar.max_value = PRACTICE.seconds_for(game_id)
@@ -945,7 +973,7 @@ func _start_practice() -> void:
 	timer_label.add_theme_color_override("font_color", UI.TEXT)
 	score_label.text = "점수 없는 연습"
 	feedback_label.text = "안내에 따라 조작해 보세요."
-	submission_label.text = "Esc로 안내로 돌아가기"
+	submission_label.text = "한 단계씩 직접 해봐요" if MINIGAME_INPUT.uses_touch() else "Esc로 안내로 돌아가기"
 	if game_id == "hydro_gate":
 		hydro_arcade.call("set_practice_mode", true)
 	_set_arcades_running(true)

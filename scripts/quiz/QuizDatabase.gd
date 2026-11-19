@@ -12,6 +12,11 @@ const EXPECTED_QUIZ_COUNT := 200
 
 var quizzes: Array[Dictionary] = []
 var learning_grade := 5
+var challenge_enabled := false
+var extra_reading_time := false
+
+func configure_challenge(enabled: bool) -> void:
+	challenge_enabled = enabled
 var _session_quiz_ids: Dictionary = {}
 
 func configure_learning_grade(grade: int) -> void:
@@ -34,8 +39,11 @@ func reading_seconds(quiz: Dictionary) -> float:
 	var characters := str(quiz.get("question", "")).length()
 	for option in quiz.get("options", []):
 		characters += str(option).length()
+	for label in (quiz.get("diagram", {}) as Dictionary).get("labels", []):
+		characters += str(label).length() + 3
 	var reading_rate := 7.0 if learning_grade == 4 else (9.0 if learning_grade == 5 else 11.0)
-	return clampf(12.0 + float(characters) / reading_rate, 20.0, 40.0)
+	var seconds := clampf(12.0 + float(characters) / reading_rate, 20.0, 40.0)
+	return seconds * 2.0 if extra_reading_time else seconds
 
 
 func _init() -> void:
@@ -76,6 +84,21 @@ func _load_quizzes() -> Array[Dictionary]:
 
 
 func _is_valid_multiple_choice_quiz(quiz: Dictionary) -> bool:
+	if quiz.has("diagram"):
+		var diagram: Variant = quiz["diagram"]
+		if not diagram is Dictionary or not diagram.get("labels") is Array:
+			return false
+		var labels: Array = diagram["labels"]
+		if labels.size() < 2 or labels.size() > 4:
+			return false
+		for label in labels:
+			if not label is String or label.strip_edges().is_empty(): return false
+		if diagram.has("values"):
+			if not diagram["values"] is Array or diagram["values"].size() != labels.size() or str(diagram.get("unit", "")).is_empty(): return false
+			for value in diagram["values"]:
+				if not (value is int or value is float) or float(value) < 0.0: return false
+	if quiz.has("choice_feedback") and not quiz["choice_feedback"] is Dictionary:
+		return false
 	var options: Variant = quiz.get("options", [])
 	if not options is Array or options.size() != 4:
 		return false
@@ -108,7 +131,15 @@ func get_random_quiz() -> Dictionary:
 	if available.is_empty():
 		_session_quiz_ids.clear()
 		available = pool
-	var selected := available[randi() % available.size()].duplicate(true)
+	var preferred: Array[Dictionary] = []
+	for entry in available:
+		var level := int(entry.get("difficulty", 1))
+		if challenge_enabled and _minimum_grade(entry) == learning_grade and (level >= 3 or entry.has("diagram")):
+			preferred.append(entry)
+		elif not challenge_enabled and level < 3:
+			preferred.append(entry)
+	var selection_pool := preferred if not preferred.is_empty() else available
+	var selected := selection_pool[randi() % selection_pool.size()].duplicate(true)
 	_session_quiz_ids[str(selected["id"])] = true
 	var options: Array = selected["options"]
 	options.shuffle()

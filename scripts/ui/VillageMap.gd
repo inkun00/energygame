@@ -80,6 +80,14 @@ func set_environment_health(health: int, animate: bool = true) -> void:
 	health_tween.tween_method(_set_environment_health_visual, environment_health_visual, target, 0.65).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 func sync_projects(projects: Array, built_project_ids: Array[int], placements: Dictionary, owners: Dictionary, players: Array, health: int, animate_new: bool = true) -> void:
+	for previous_id in placed_project_nodes.keys():
+		if previous_id in built_project_ids: continue
+		var removed: Control = placed_project_nodes[previous_id]
+		removed.hide()
+		removed.queue_free()
+		placed_project_nodes.erase(previous_id)
+		for cell_id in occupied_cell_ids.keys():
+			if occupied_cell_ids[cell_id] == previous_id: occupied_cell_ids.erase(cell_id)
 	for project_index in built_project_ids:
 		if project_index < 0 or project_index >= projects.size() or placed_project_nodes.has(project_index):
 			continue
@@ -264,7 +272,7 @@ func _add_building(project_index: int, image_path: String, project_name: String,
 	_gather_building_parts(project_index, center_position)
 	visual.scale = Vector2(0.84, 0.84)
 	visual.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	var place_tween := create_tween()
+	var place_tween := visual.create_tween()
 	place_tween.tween_interval(0.18)
 	place_tween.tween_property(visual, "modulate", Color.WHITE, 0.16)
 	place_tween.parallel().tween_property(visual, "scale", Vector2(1.06, 1.06), 0.24).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)

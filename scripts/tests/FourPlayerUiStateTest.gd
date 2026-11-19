@@ -40,6 +40,9 @@ func _run() -> void:
 		var building: Control = map.placed_project_nodes[project_idx]
 		_expect(building.position == map._clamp_icon_position(winner_position * map.size - map.BUILDING_SIZE * 0.5), "All four map sizes use the winning server cell, including losing local requests")
 		_expect(map.pending_project_cells.is_empty() and map.reserved_cell_ids.is_empty(), "A confirmed project releases every local reservation")
+		var revised_ids: Array[int] = [3]
+		map.sync_projects(gm.CONSTRUCTION_PROJECTS, revised_ids, {3: Vector2(0.44, 0.44)}, {3: -1}, gm.players, 25, false)
+		_expect(map.get_placed_project_count() == 1 and map.placed_project_nodes.has(3) and not project_idx in map.occupied_cell_ids.values(), "A team exchange removes the retired building and frees its old cell on each screen")
 		map.queue_free()
 	await process_frame
 	var repeated: Node = load("res://scripts/ui/VillageMap.gd").new()

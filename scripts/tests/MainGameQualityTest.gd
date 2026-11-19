@@ -120,7 +120,10 @@ func _run() -> void:
 	_expect(modal._get_observed_answer(false) == wrong_choice, "관전자에게 실제 선택한 오답을 표시해야 합니다.")
 	modal.cancel_quiz()
 	modal.queue_free()
+	gm.last_quiz_choice = ""
 	gm.on_network_quiz_resolved(1, false, wrong_choice)
+	_expect(gm.quiz_collecting_peers and gm.last_quiz_choice.is_empty(), "마지막 친구에게 답할 기회를 주는 동안 주인의 선택은 비공개여야 합니다.")
+	gm._process(gm.QUIZ_PEER_GRACE_SECONDS + 0.1)
 	_expect(gm.last_quiz_choice == wrong_choice and gm.active_quiz_player_idx == -1, "권한 상태에 실제 선택과 완료가 함께 기록되어야 합니다.")
 	_expect(not gm.has_minigame_goal_actions("hydro_gate", 100, {"correct": 1, "attempts": 2}), "수문을 닫지 않았으면 수력 관리 목표는 미충족입니다.")
 	_expect(gm.has_minigame_goal_actions("hydro_gate", 100, {"correct": 1, "attempts": 2, "hydro_managed_closures": 1}), "발전과 수문 닫기를 모두 수행한 수력 행동을 인정해야 합니다.")

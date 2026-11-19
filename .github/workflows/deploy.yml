@@ -102,6 +102,8 @@ jobs:
             AdventurePresentationTest \
             GuidedTutorialTest \
             BoardReadabilityTest \
+            BoardTouchPresentationTest \
+            LobbyPortraitLayoutTest \
             DesignPolishTest \
             CommercialPolishPreview \
             MiniGameGuidePreviewTest \

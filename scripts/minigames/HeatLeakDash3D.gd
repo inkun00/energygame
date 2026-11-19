@@ -73,7 +73,7 @@ func setup(player_data: Dictionary, round_seed: int) -> void:
 	closed_count = 0
 	next_wave = 1
 	space_was_down = false
-	notice = "A/D 이동 · 열린 창문 앞에서 Space로 닫기"
+	notice = MINIGAME_INPUT.hint("heat_leak", "A/D 이동 · 열린 창문 앞에서 Space로 닫기")
 	notice_remaining = 3.0
 	flash_remaining = 0.0
 	usage_before_close = 0.0
@@ -192,7 +192,7 @@ func _build_window(index: int) -> void:
 		particles.append(particle)
 	var reach_marker := _box(world, Vector3(x, 0.08, 1.12), Vector3(CLOSE_REACH * 2.0, 0.035, 0.42), Color("88f0b9"), true)
 	reach_marker.visible = false
-	var prompt := _label3d(world, "Space 닫기", Vector3(x, 2.30, 0.25), Color("b8ffd4"))
+	var prompt := _label3d(world, MINIGAME_INPUT.hint("heat_leak", "Space 닫기"), Vector3(x, 2.30, 0.25), Color("b8ffd4"))
 	prompt.font_size = 42
 	prompt.pixel_size = 0.008
 	prompt.outline_size = 5
@@ -234,7 +234,7 @@ func _build_overlay() -> void:
 	cooling_use_bar.add_theme_stylebox_override("fill", cooling_fill)
 	cooling_use_bar.add_theme_stylebox_override("background", cooling_background)
 	add_child(cooling_use_bar)
-	action_label = _overlay_label(Vector2(95, 254), Vector2(865, 283), "A/D 이동 · 열린 창문 앞에서 Space로 닫기", Color("fff0bf"), 17)
+	action_label = _overlay_label(Vector2(95, 254), Vector2(865, 283), MINIGAME_INPUT.hint("heat_leak", "A/D 이동 · 열린 창문 앞에서 Space로 닫기"), Color("fff0bf"), 17)
 	action_label.anchor_top = 1.0
 	action_label.anchor_bottom = 1.0
 	action_label.offset_top = -36.0
@@ -309,7 +309,7 @@ func _try_close() -> void:
 			closest = window
 			nearest = distance
 	if closest.is_empty():
-		_notice("열린 창문 가까이 이동해 Space를 누르세요.")
+		_notice(MINIGAME_INPUT.hint("heat_leak", "열린 창문 가까이 이동해 Space를 누르세요."))
 		return
 	if not bool(closest["open"]):
 		arcade_event.emit(15, false, "이미 닫힌 창문이에요. 열린 창문을 찾으세요!", false)
@@ -438,7 +438,7 @@ func _update_overlay() -> void:
 			(window["status"] as Label3D).visible = true
 			(window["status"] as Label3D).text = "열림 · 유입" if bool(window["open"]) else "닫힘"
 			(window["status"] as Label3D).modulate = Color("ffb16f") if bool(window["open"]) else Color("b6e8db")
-	action_label.text = notice if notice_remaining > 0.0 else "A/D 이동 · 열린 창문 앞 Space · 닫으면 냉방 효율 상승"
+	action_label.text = notice if notice_remaining > 0.0 else MINIGAME_INPUT.hint("heat_leak", "A/D 이동 · 열린 창문 앞 Space · 닫으면 냉방 효율 상승")
 	action_label.visible = not has_reachable_window
 
 func _box(parent: Node3D, where: Vector3, size_value: Vector3, color: Color, glowing: bool = false) -> MeshInstance3D:

@@ -35,9 +35,13 @@ func _run() -> void:
 	gm.current_state = gm.TurnState.RESOLVING_QUIZ
 	gm.active_quiz_player_idx = 1
 	gm.active_quiz_data = root.get_node("QuizDatabase").get_random_quiz().duplicate(true)
+	gm.active_quiz_time_remaining = 20.0
+	var possible: Array = gm.active_quiz_data["options"].duplicate()
 	gm.take_over_disconnected_player(1)
 	await create_timer(0.3).timeout
-	_expect(gm.active_quiz_player_idx == -1, "AI resolves disconnected human's pending quiz")
+	_expect(gm.quiz_collecting_peers and gm.active_quiz_player_idx == 1, "AI locks its choice while the remaining human can still answer")
+	gm.submit_spectator_quiz_guess(0, 1, str(gm.active_quiz_data["answer"]))
+	_expect(gm.active_quiz_player_idx == -1 and gm.last_quiz_choice in possible, "AI resolves disconnected human's pending quiz with an actual answer")
 
 	gm.setup_game(configs, 120)
 	gm._start_minigame(0, "grid_balance")

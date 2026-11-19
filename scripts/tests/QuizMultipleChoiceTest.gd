@@ -28,6 +28,10 @@ func _run_tests() -> void:
 		quiz_modal.display_quiz(0, quiz)
 		await process_frame
 		_expect(quiz_modal.choice_container.get_child_count() == 4, "%s가 보기 버튼 4개를 표시하지 않습니다." % quiz.get("id", "알 수 없음"))
+		if quiz.has("diagram"):
+			_expect(quiz_modal.diagram_row.visible and quiz_modal.diagram_row.get_child_count() >= quiz["diagram"]["labels"].size(), "도표의 각 자료값이나 흐름 단계가 보여야 합니다.")
+		else:
+			_expect(not quiz_modal.diagram_row.visible, "일반 문항에는 이전 문항의 그림이 남지 않아야 합니다.")
 		for child in quiz_modal.choice_container.get_children():
 			_expect(child is Button, "객관식 보기에는 버튼만 있어야 합니다.")
 			if child is Button:

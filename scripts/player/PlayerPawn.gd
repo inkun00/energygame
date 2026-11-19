@@ -35,6 +35,7 @@ var board_display_name := ""
 var board_is_local := false
 var board_turn_ring: MeshInstance3D
 var board_turn_label: Label3D
+var board_face: Sprite3D
 var board_turn_material: StandardMaterial3D
 var player_icon_path := ""
 var board_model: Node3D
@@ -182,6 +183,8 @@ func setup_player(p_data: Dictionary) -> void:
 	if player_icon_path.is_empty():
 		player_icon_path = LEGACY_CAPTAIN_ICON
 	_configure_avatar()
+	if board_face:
+		board_face.texture = preload("res://scripts/ui/HeroFace.gd").for_portrait(player_icon_path)
 	_set_avatar_animation_state(false)
 	set_shield_active(bool(p_data.get("shield", false)))
 	_place_on_tile(0)
@@ -292,6 +295,16 @@ func set_board_presentation(enabled: bool, display_name: String = "", is_local: 
 		board_turn_material.albedo_color = Color("ffd166")
 		board_turn_ring.material_override = board_turn_material
 		add_child(board_turn_ring)
+		board_face = Sprite3D.new()
+		board_face.name = "ActiveHeroFace"
+		board_face.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		board_face.shaded = false
+		board_face.no_depth_test = true
+		board_face.render_priority = 10
+		board_face.pixel_size = 0.0042
+		board_face.position.y = 1.49
+		board_face.texture = preload("res://scripts/ui/HeroFace.gd").for_portrait(player_icon_path)
+		add_child(board_face)
 		board_turn_label = Label3D.new()
 		board_turn_label.name = "ActivePlayerName"
 		board_turn_label.font_size = 42
@@ -308,10 +321,12 @@ func set_board_current_turn(active: bool) -> void:
 	board_current_turn = active and board_presentation_enabled
 	if board_turn_ring:
 		board_turn_ring.visible = board_current_turn
+	if board_face:
+		board_face.visible = board_current_turn
 	if board_turn_label:
 		board_turn_label.visible = board_current_turn
 		board_turn_label.text = ("내 캐릭터 · " if board_is_local else "진행 중 · ") + board_display_name.left(12)
-		board_turn_label.position.y = 1.32
+		board_turn_label.position.y = 1.95
 	if avatar_sprite:
 		avatar_sprite.no_depth_test = board_current_turn
 		_apply_avatar_contact_scale()

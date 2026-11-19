@@ -22,7 +22,7 @@ const TOTAL_FIELDS := [
 	"total_generation", "total_demand", "total_delivered", "total_direct",
 	"total_charge_input", "total_stored", "total_loss", "total_curtailed",
 	"total_discharged", "daytime_demand", "daytime_delivered",
-	"night_demand", "night_delivered",
+	"night_demand", "night_delivered", "daytime_stored", "night_discharged",
 ]
 const FLOW_FIELDS := [
 	"generation", "demand", "direct", "charging", "discharging",
@@ -107,6 +107,75 @@ static func forecast(built_ids: Array) -> Dictionary:
 static func is_complete(state: Dictionary) -> bool:
 	return state.get("phase", "") == "complete" or float(state.get("elapsed", 0.0)) >= DURATION
 
+static func summarize(state: Dictionary, projects: Array, district_index: int = -1) -> Dictionary:
+	var districts: Array = state.get("players", [])
+	var record: Dictionary = districts[district_index] if district_index >= 0 and district_index < districts.size() else state
+	var ids: Array = state.get("built_ids", [])
+	var names: Array[String] = []
+	var generators: Array[String] = []
+	for id in ids:
+		if id >= 0 and id < projects.size():
+			var facility := str(projects[id]["name"])
+			names.append(facility)
+			if GENERATION.has(id): generators.append(facility)
+	var day := float(record.get("daytime_coverage", 0.0))
+	var night := float(record.get("night_coverage", 0.0))
+	var overall := float(record.get("coverage", 0.0))
+	var success := overall + EPSILON >= REQUIRED_COVERAGE and night + EPSILON >= REQUIRED_NIGHT_COVERAGE
+	var day_store := float(record.get("daytime_stored", record.get("total_stored", 0.0)))
+	var night_use := float(record.get("night_discharged", record.get("total_discharged", 0.0)))
+	var cause := ""
+	var advice := ""
+	var period := "낮과 밤"
+	if success:
+		if night_use > EPSILON:
+			cause = "낮에 저장한 전기 %.1f칸 중 %.1f칸을 밤에 꺼내 썼어요." % [day_store, night_use]
+		elif not generators.is_empty():
+			cause = "%s에서 만든 전기를 바로 보냈어요." % "·".join(generators)
+		if 2 in ids or 8 in ids: cause += " 절전 시설 덕분에 필요한 전기도 줄었어요."
+		advice = "시설을 하나 바꾸면 어느 시간의 공급이 달라질까요?"
+	elif generators.is_empty():
+		cause = "마을에서 전기를 만드는 시설이 없었어요."
+		advice = "강물이 있는 곳에 소수력 발전소를 놓고 낮과 밤을 비교해 봐요."
+	elif day + EPSILON < night:
+		period = "낮"
+		cause = "낮에 만든 전기가 마을에서 쓸 양보다 적었어요."
+		advice = "낮에 발전하는 태양광을 더하거나 절전 건물로 수요를 줄여 봐요."
+	elif day < 0.95 and absf(day - night) < 0.05:
+		cause = "낮과 밤 모두 마을에서 쓸 전기가 부족했어요."
+		advice = "강물이나 지열로 두 시간대 모두 발전해 봐요."
+	else:
+		period = "밤"
+		if 3 not in ids:
+			cause = "밤에 발전량이 부족했고, 저장소도 없었어요."
+			advice = "낮에 전기가 남으면 저장소를, 남지 않으면 밤에도 발전할 시설을 더해 봐요."
+		elif day_store < EPSILON:
+			cause = "밤에 쓸 전기를 낮에 저장하지 못했어요."
+			advice = "낮에 전기가 남을 때 ‘전기 저장’을 눌러 봐요." if float(record.get("total_curtailed", 0.0)) > EPSILON else "낮에 발전을 늘려 저장할 전기를 먼저 마련해 봐요."
+		elif float(record.get("battery", 0.0)) > EPSILON:
+			var empty_district := false
+			if district_index < 0:
+				for area in districts:
+					if float(area.get("night_coverage", 1.0)) < 0.99 and float(area.get("battery", 0.0)) <= EPSILON:
+						empty_district = true
+			if empty_district:
+				cause = "한 구역의 배터리는 비었는데 다른 구역에는 전기가 남았어요."
+				advice = "각자 낮에 자기 구역의 전기를 저장하고, 밤에는 함께 꺼내 봐요."
+			else:
+				cause = "밤이 끝났을 때도 배터리에 전기가 %.1f칸 남았어요." % float(record["battery"])
+				advice = "밤에 필요한 전기가 모자랄 때 ‘배터리 전기 사용’을 눌러 봐요."
+		else:
+			cause = "저장한 전기를 꺼냈지만 밤에 필요한 양보다 적었어요."
+			advice = "밤에도 발전하는 시설을 더하거나 절전 시설로 수요를 줄여 봐요."
+	return {"success": success, "coverage": overall, "daytime_coverage": day, "night_coverage": night,
+		"built_ids": ids.duplicate(), "facilities": names, "period": period, "cause": cause, "advice": advice}
+
+static func comparison(before: Dictionary, after: Dictionary) -> String:
+	if before.is_empty(): return ""
+	return "첫 시험 → 이번 시험    낮 %d%% → %d%%   ·   밤 %d%% → %d%%" % [
+		roundi(float(before.get("daytime_coverage", 0.0)) * 100.0), roundi(float(after.get("daytime_coverage", 0.0)) * 100.0),
+		roundi(float(before.get("night_coverage", 0.0)) * 100.0), roundi(float(after.get("night_coverage", 0.0)) * 100.0)]
+
 static func _profile(ids: Array) -> Dictionary:
 	var output := Vector2.ZERO
 	for id in ids:
@@ -157,6 +226,10 @@ static func _integrate(state: Dictionary, dt: float, is_day: bool) -> void:
 		player["total_loss"] += charge_input - stored
 		player["total_curtailed"] += surplus - charge_input
 		player["total_discharged"] += discharge
+		if is_day:
+			player["daytime_stored"] = float(player.get("daytime_stored", 0.0)) + stored
+		else:
+			player["night_discharged"] = float(player.get("night_discharged", 0.0)) + discharge
 		var prefix := "daytime" if is_day else "night"
 		player[prefix + "_demand"] += demand * dt
 		player[prefix + "_delivered"] += direct + discharge
@@ -189,9 +262,9 @@ static func _refresh(state: Dictionary) -> void:
 		player["light_ratio"] = _ratio(direct + discharge, demand)
 		_update_coverage(player)
 		for field in FLOW_FIELDS:
-			state[field] += float(player[field])
+			state[field] += float(player.get(field, 0.0))
 		for field in TOTAL_FIELDS:
-			state[field] += float(player[field])
+			state[field] += float(player.get(field, 0.0))
 	_update_coverage(state)
 	state["light_ratio"] = _ratio(float(state["delivered"]), float(state["demand"]))
 	state["success"] = is_complete(state) and float(state["coverage"]) + EPSILON >= REQUIRED_COVERAGE and float(state["night_coverage"]) + EPSILON >= REQUIRED_NIGHT_COVERAGE

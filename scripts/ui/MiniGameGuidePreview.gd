@@ -159,7 +159,7 @@ func _animate_demo(delta: float) -> void:
 	var done := t >= 3.6
 	var q := smoothstep(1.0, 3.6, t)
 	var text: Array = CAPTIONS[game_id]
-	key_badge.text = str(text[0])
+	key_badge.text = MiniGameInput.hint(game_id, str(text[0]))
 	key_badge.modulate = Color("ffd166") if moving else Color("bed5d2")
 	caption.text = str(text[2] if done else text[1])
 	caption.modulate = Color("9af0c9") if done else Color("f3fbf8")
@@ -266,7 +266,7 @@ func _animate_demo(delta: float) -> void:
 					pupil.rotation.y = float(state["waiting_yaw"])
 					arcade.call("_play_student_animation", state["animator"], "idle", float(state["phase"]), 1.0)
 				index += 1
-			key_badge.text = "D" if t < 2.5 else ("S" if t < 3.0 else "Space")
+			key_badge.text = MiniGameInput.hint(game_id, "D" if t < 2.5 else ("S" if t < 3.0 else "Space"))
 		"heat_leak":
 			demo_record["open"] = not done
 			demo_record["closed"] = done

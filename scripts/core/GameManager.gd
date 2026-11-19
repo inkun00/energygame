@@ -8,6 +8,7 @@ signal player_state_changed(player_idx)
 signal dice_rolled(player_idx, value)
 signal dice_input_time_changed(player_idx, remaining_seconds)
 signal quiz_requested(player_idx, quiz_data)
+signal quiz_response_window_changed
 signal quiz_resolved(player_idx, is_correct)
 signal spectator_quiz_bonus_resolved(observer_idx, target_idx, is_correct, bonus_score)
 signal game_over(rankings)
@@ -39,6 +40,7 @@ var component_choice_serial := 0
 var team_plan: Dictionary = {"active": false, "remaining": 20.0, "choices": {}, "ready": {}}
 var energy_trial: Dictionary = {}
 var energy_trial_retries := 0
+var previous_energy_trial: Dictionary = {}
 var _learning_update_remaining := 0.0
 var _village_result_finalized := false
 
@@ -86,6 +88,7 @@ const CONSTRUCTION_COMPLETION_REWARD := 5
 const TEAM_MATERIAL_REWARD := 2
 const QUIZ_CORRECT_SCORE := 10
 const SPECTATOR_QUIZ_BONUS_SCORE := QUIZ_CORRECT_SCORE / 2
+const QUIZ_PEER_GRACE_SECONDS := 5.0
 const MINIGAME_DURATION_SECONDS := 30.0
 const MINIGAME_SUBMISSION_GRACE_SECONDS := 1.0
 const MINIGAME_READY_COUNTDOWN_SECONDS := 3.0
@@ -94,6 +97,11 @@ const MINIGAME_SCORE_LIMIT := 5000
 const MINIGAME_NETWORK_CLOCK_TOLERANCE_SECONDS := 0.5
 const MINIGAME_NETWORK_EVENT_LIMIT := 4096
 const MINIGAME_RANK_REWARDS: Array[int] = [20, 10, 5, 1]
+const MINIGAME_TEAM_PARTS := {
+	"solar_align": "solar_panel", "wind_rhythm": "wind_blade", "hydro_gate": "hydro_turbine",
+	"grid_balance": "smart_grid", "battery_relay": "battery", "heat_leak": "insulation",
+	"standby_hunt": "smart_grid", "energy_sort": "recycled_composite", "eco_commute": "fast_charge_module"
+}
 const VILLAGE_PLACEMENT_RULES = preload("res://scripts/core/VillagePlacementRules.gd")
 const STANDBY_POWER_HUNT = preload("res://scripts/minigames/StandbyPowerHunt3D.gd")
 const SMART_GRID_BALANCE = preload("res://scripts/minigames/SmartGridBalance3D.gd")
@@ -270,6 +278,10 @@ var active_quiz_time_remaining := 0.0
 var last_quiz_choice := ""
 var learning_grade := 5
 var active_spectator_quiz_attempts: Dictionary = {}
+var quiz_collecting_peers := false
+var _private_spectator_answers: Dictionary = {}
+var _pending_quiz_answer: Dictionary = {}
+var team_parts: Dictionary = {}
 var game_session_id: int = 0
 var projects_built := 0
 var kingdom_health := 0
@@ -363,18 +375,22 @@ func _process(delta: float) -> void:
 		return
 	if not is_game_active or village_construction_active or not pending_lap_reward.is_empty():
 		return
-	game_time_remaining = maxf(0.0, game_time_remaining - delta)
+	var extra_quiz_reading := QuizDatabase.extra_reading_time and current_state == TurnState.RESOLVING_QUIZ
+	if not extra_quiz_reading:
+		game_time_remaining = maxf(0.0, game_time_remaining - delta)
 	var display_seconds := ceili(game_time_remaining)
 	if display_seconds != _last_emitted_time_seconds:
 		_last_emitted_time_seconds = display_seconds
 		game_time_changed.emit(display_seconds, game_duration_seconds)
-	if game_time_remaining <= 0.0:
+	if game_time_remaining <= 0.0 and not quiz_collecting_peers and not extra_quiz_reading:
 		_start_team_planning_phase()
 		return
 	_update_player_dice_input_timer(delta)
 	if current_state == TurnState.RESOLVING_QUIZ and active_quiz_player_idx >= 0:
 		active_quiz_time_remaining = maxf(0.0, active_quiz_time_remaining - delta)
-		if active_quiz_time_remaining <= 0.0:
+		if quiz_collecting_peers and (active_quiz_time_remaining <= 0.0 or not _awaiting_quiz_peers()):
+			_reveal_quiz_answers()
+		elif active_quiz_time_remaining <= 0.0:
 			on_network_quiz_resolved(active_quiz_player_idx, false, "")
 
 # 게임 초기화 (로비에서 호출)
@@ -591,6 +607,8 @@ func _apply_network_values(values: Dictionary) -> void:
 		energy_trial = (values["energy_trial"] as Dictionary).duplicate(true)
 	if values.has("energy_trial_retries"):
 		energy_trial_retries = int(values["energy_trial_retries"])
+	if values.has("previous_energy_trial"):
+		previous_energy_trial = (values["previous_energy_trial"] as Dictionary).duplicate(true)
 	if values.has("players"):
 		players.clear()
 		for player_value in values["players"]:
@@ -622,9 +640,19 @@ func _apply_network_values(values: Dictionary) -> void:
 	if values.has("last_quiz_choice"):
 		last_quiz_choice = str(values["last_quiz_choice"])
 	if values.has("learning_grade"):
-		learning_grade = int(values["learning_grade"])
+		var grade := clampi(int(values["learning_grade"]), 4, 6)
+		if grade != learning_grade:
+			set_learning_grade(grade)
+	if values.has("quiz_challenge"):
+		QuizDatabase.configure_challenge(bool(values["quiz_challenge"]))
+	if values.has("extra_reading_time"):
+		QuizDatabase.extra_reading_time = bool(values["extra_reading_time"])
 	if values.has("active_spectator_quiz_attempts"):
 		active_spectator_quiz_attempts = (values["active_spectator_quiz_attempts"] as Dictionary).duplicate(true)
+	if values.has("quiz_collecting_peers"):
+		quiz_collecting_peers = bool(values["quiz_collecting_peers"])
+	if values.has("team_parts"):
+		team_parts = (values["team_parts"] as Dictionary).duplicate(true)
 	if values.has("projects_built"):
 		projects_built = int(values["projects_built"])
 	if values.has("kingdom_health"):
@@ -989,6 +1017,7 @@ func _resolve_tile_event(player_idx: int, tile_idx: int, shortcut_history: Array
 			active_quiz_player_idx = player_idx
 			active_quiz_time_remaining = float(quiz.get("time_limit", 25.0)) + 1.0
 			last_quiz_choice = ""
+			_clear_private_quiz()
 			active_spectator_quiz_attempts.clear()
 			quiz_requested.emit(player_idx, quiz)
 			if cur_p["is_ai"]:
@@ -1015,7 +1044,7 @@ func resolve_ai_quiz_if_pending(player_idx: int) -> void:
 	options.erase(answer)
 	on_network_quiz_resolved(player_idx, is_correct, answer if is_correct else str(options[randi() % options.size()]))
 
-func _start_minigame(trigger_player_idx: int, minigame_id: String) -> void:
+func _start_minigame(trigger_player_idx: int, minigame_id: String, board_round: bool = true) -> void:
 	if not is_game_active or not MINIGAME_DEFINITIONS.has(minigame_id):
 		end_turn()
 		return
@@ -1028,6 +1057,7 @@ func _start_minigame(trigger_player_idx: int, minigame_id: String) -> void:
 	_last_minigame_time_seconds = ceili(minigame_time_remaining)
 	active_minigame = (MINIGAME_DEFINITIONS[minigame_id] as Dictionary).duplicate(true)
 	active_minigame["round_id"] = minigame_round_count
+	active_minigame["board_round"] = board_round and not guided_tutorial_active
 	active_minigame["seed"] = randi()
 	active_minigame["duration"] = round_duration
 	var has_human := false
@@ -1687,12 +1717,28 @@ func _finalize_minigame() -> void:
 			"stats": (entry.get("stats", {}) as Dictionary).duplicate(true)
 		})
 	var completed_id := str(active_minigame.get("id", ""))
+	if bool(active_minigame.get("board_round", false)):
+		var reached := 0
+		for entry in results:
+			if not bool(players[int(entry["player_idx"])].get("is_ai", false)) and bool(entry["goal_checked"]):
+				reached += 1
+		var required := team_goal_required()
+		var part: String = MINIGAME_TEAM_PARTS[completed_id]
+		if reached >= required:
+			team_parts[part] = int(team_parts.get(part, 0)) + 1
+		active_minigame["team_goal_result"] = {"part": part, "reached": reached, "required": required, "awarded": reached >= required}
 	if not completed_id.is_empty() and completed_id not in completed_minigame_ids:
 		completed_minigame_ids.append(completed_id)
 	status_message_posted.emit("이번 미니게임이 끝났어요. 순위와 목표 행동을 함께 확인해요.")
 	active_minigame["results"] = results.duplicate(true)
 	minigame_finished.emit(results)
 	_schedule_game_action(MINIGAME_RESULTS_SECONDS, _complete_minigame_turn.bind(minigame_round_count))
+
+func team_goal_required() -> int:
+	var human_count := 0
+	for player in players:
+		if not bool(player.get("is_ai", false)): human_count += 1
+	return floori(human_count / 2.0) + 1
 
 func _complete_minigame_turn(round_id: int) -> void:
 	if active_minigame.is_empty() or int(active_minigame.get("round_id", -1)) != round_id:
@@ -1704,30 +1750,37 @@ func _complete_minigame_turn(round_id: int) -> void:
 	end_turn()
 
 func submit_spectator_quiz_guess(observer_idx: int, target_idx: int, choice: String) -> Dictionary:
-	var result := {"accepted": false, "is_correct": false, "bonus_score": 0}
+	var result := {"accepted": false}
 	if not is_game_active or current_state != TurnState.RESOLVING_QUIZ or target_idx != active_quiz_player_idx:
 		return result
 	if observer_idx < 0 or observer_idx >= players.size() or target_idx < 0 or target_idx >= players.size():
 		return result
 	if observer_idx == target_idx or bool(players[observer_idx].get("is_ai", false)):
 		return result
-	if active_spectator_quiz_attempts.has(observer_idx):
+	if active_spectator_quiz_attempts.has(observer_idx) or choice not in active_quiz_data.get("options", []):
 		return result
 
-	active_spectator_quiz_attempts[observer_idx] = choice
-	var is_correct := choice == str(active_quiz_data.get("answer", ""))
-	var bonus_score := SPECTATOR_QUIZ_BONUS_SCORE if is_correct else 0
-	if is_correct:
-		players[observer_idx]["bonus_quiz_score"] = int(players[observer_idx].get("bonus_quiz_score", 0)) + bonus_score
-		player_state_changed.emit(observer_idx)
-		status_message_posted.emit("⚡ [%s] 선행 정답 성공! 관전 보너스 +%d점" % [players[observer_idx]["name"], bonus_score])
-	else:
-		status_message_posted.emit("💭 [%s] 선행 답안은 아쉽게 빗나갔습니다. 보너스 점수는 없습니다." % players[observer_idx]["name"])
-	spectator_quiz_bonus_resolved.emit(observer_idx, target_idx, is_correct, bonus_score)
+	active_spectator_quiz_attempts[observer_idx] = true
+	_private_spectator_answers[observer_idx] = choice
 	result["accepted"] = true
-	result["is_correct"] = is_correct
-	result["bonus_score"] = bonus_score
+	quiz_response_window_changed.emit()
+	if quiz_collecting_peers and not _awaiting_quiz_peers():
+		_reveal_quiz_answers()
 	return result
+
+func _awaiting_quiz_peers() -> bool:
+	for idx in range(players.size()):
+		if idx != active_quiz_player_idx and not bool(players[idx].get("is_ai", false)) and (NetworkManager.is_online or idx == 0) and not active_spectator_quiz_attempts.has(idx):
+			return true
+	return false
+
+func quiz_peer_grace_seconds() -> float:
+	return QUIZ_PEER_GRACE_SECONDS * (2.0 if QuizDatabase.extra_reading_time else 1.0)
+
+func _clear_private_quiz() -> void:
+	_private_spectator_answers.clear()
+	_pending_quiz_answer.clear()
+	quiz_collecting_peers = false
 
 func _follow_shortcut(player_idx: int, from_tile: int, target_tile: int, shortcut_history: Array[int], message: String) -> void:
 	var updated_history := shortcut_history.duplicate()
@@ -1744,6 +1797,27 @@ func _follow_shortcut(player_idx: int, from_tile: int, target_tile: int, shortcu
 func on_network_quiz_resolved(player_idx: int, is_correct: bool, selected_choice: String = "") -> void:
 	if not is_game_active or current_state != TurnState.RESOLVING_QUIZ or player_idx != active_quiz_player_idx:
 		return
+	if not _pending_quiz_answer.is_empty():
+		return
+	_pending_quiz_answer = {"correct": is_correct, "choice": selected_choice}
+	if not guided_tutorial_active and _awaiting_quiz_peers():
+		quiz_collecting_peers = true
+		active_quiz_time_remaining = quiz_peer_grace_seconds()
+		quiz_response_window_changed.emit()
+		return
+	_reveal_quiz_answers()
+
+func _reveal_quiz_answers() -> void:
+	var player_idx := active_quiz_player_idx
+	var is_correct := bool(_pending_quiz_answer["correct"])
+	var selected_choice := str(_pending_quiz_answer["choice"])
+	quiz_collecting_peers = false
+	for idx: int in _private_spectator_answers:
+		var correct: bool = _private_spectator_answers[idx] == active_quiz_data["answer"]
+		var bonus := SPECTATOR_QUIZ_BONUS_SCORE if correct else 0
+		players[idx]["bonus_quiz_score"] = int(players[idx].get("bonus_quiz_score", 0)) + bonus
+		spectator_quiz_bonus_resolved.emit(idx, player_idx, correct, bonus)
+		player_state_changed.emit(idx)
 	var cur_p = players[player_idx]
 	var resolved_quiz := active_quiz_data.duplicate(true)
 	last_quiz_choice = selected_choice
@@ -1775,6 +1849,7 @@ func on_network_quiz_resolved(player_idx: int, is_correct: bool, selected_choice
 	active_quiz_player_idx = -1
 	active_quiz_time_remaining = 0.0
 	active_spectator_quiz_attempts.clear()
+	_clear_private_quiz()
 	# Practice advances only when the child closes the explanation. A hidden
 	# reading timer must not cancel the review and strand the tutorial stage.
 	if guided_tutorial_active:
@@ -1789,11 +1864,14 @@ func on_network_quiz_resolved(player_idx: int, is_correct: bool, selected_choice
 	)
 
 func _reset_learning_flow() -> void:
+	_clear_private_quiz()
+	team_parts.clear()
 	component_choices.clear()
 	component_choice_serial = 0
 	team_plan = {"active": false, "remaining": 20.0, "choices": {}, "ready": {}}
 	energy_trial.clear()
 	energy_trial_retries = 0
+	previous_energy_trial.clear()
 	_learning_update_remaining = 0.0
 	_village_result_finalized = false
 
@@ -1808,6 +1886,14 @@ func get_energy_trial_state() -> Dictionary:
 	if not state.is_empty():
 		state["can_retry"] = energy_trial_retries < 1 and not bool(state.get("success", false))
 		state["summary"] = {"success": bool(state.get("success", false)), "coverage": float(state.get("coverage", 0.0)), "daytime_coverage": float(state.get("daytime_coverage", 0.0)), "night_coverage": float(state.get("night_coverage", 0.0))}
+		if EnergyTrial.is_complete(state):
+			var summary := EnergyTrial.summarize(state, CONSTRUCTION_PROJECTS)
+			summary["comparison"] = EnergyTrial.comparison(previous_energy_trial, summary)
+			state["summary"] = summary
+			if guided_tutorial_active:
+				var personal := EnergyTrial.summarize(state, CONSTRUCTION_PROJECTS, 0)
+				personal["comparison"] = EnergyTrial.comparison(previous_energy_trial.get("personal", {}), personal)
+				state["practice_result"] = personal
 	return state
 
 func _component_options(player_idx: int) -> Array[String]:
@@ -1983,27 +2069,69 @@ func _update_energy_trial(delta: float) -> void:
 		_learning_update_remaining = 0.1
 		energy_trial_changed.emit(get_energy_trial_state())
 
-func finish_energy_trial(player_idx: int, retry: bool = false) -> void:
+func retry_practice_energy_trial() -> bool:
+	if not guided_tutorial_active or NetworkManager.is_online or energy_trial.is_empty() or not EnergyTrial.is_complete(energy_trial) or _village_result_finalized:
+		return false
+	if previous_energy_trial.is_empty():
+		previous_energy_trial = EnergyTrial.summarize(energy_trial, CONSTRUCTION_PROJECTS)
+		previous_energy_trial["personal"] = EnergyTrial.summarize(energy_trial, CONSTRUCTION_PROJECTS, 0)
+	_start_energy_trial()
+	return true
+
+func finish_energy_trial(player_idx: int, retry: bool = false, remove_project: int = -1, support_project: int = -1) -> void:
 	if NetworkManager.is_online and not NetworkManager.is_host:
-		NetworkManager.request_learning_action("trial_finish", {"player_idx": player_idx, "retry": retry})
+		NetworkManager.request_learning_action("trial_finish", {"player_idx": player_idx, "retry": retry, "remove_project": remove_project, "support_project": support_project, "attempt": energy_trial_retries})
 		return
-	if player_idx < 0 or player_idx >= players.size() or energy_trial.is_empty() or not EnergyTrial.is_complete(energy_trial) or _village_result_finalized or village_construction_active:
+	if guided_tutorial_active or player_idx < 0 or player_idx >= players.size() or energy_trial.is_empty() or not EnergyTrial.is_complete(energy_trial) or _village_result_finalized or village_construction_active or energy_trial.get("ready", {}).has(player_idx):
 		return
 	if retry and not bool(energy_trial.get("success", false)) and energy_trial_retries < 1:
+		if remove_project != -1 or support_project != -1:
+			if not _apply_trial_redesign(remove_project, support_project):
+				return
+		previous_energy_trial = EnergyTrial.summarize(energy_trial, CONSTRUCTION_PROJECTS)
 		energy_trial_retries += 1
 		energy_trial.clear()
 		energy_trial_changed.emit(get_energy_trial_state())
 		_start_village_construction_phase()
+		if support_project != -1:
+			kingdom_progress_changed.emit(projects_built, CONSTRUCTION_PROJECTS.size(), kingdom_health)
 		return
 	energy_trial["ready"][player_idx] = true
 	energy_trial_changed.emit(get_energy_trial_state())
 	if energy_trial["ready"].size() == players.size():
 		_finalize_village_evaluation()
 
+func _apply_trial_redesign(remove_project: int, support_project: int) -> bool:
+	if support_project < 0 or support_project >= CONSTRUCTION_PROJECTS.size() or support_project in built_project_ids:
+		return false
+	if remove_project != -1 and remove_project not in built_project_ids:
+		return false
+	var placements := built_project_placements.duplicate(true)
+	placements.erase(remove_project)
+	var project: Dictionary = CONSTRUCTION_PROJECTS[support_project]
+	var placement := VILLAGE_PLACEMENT_RULES.resolve_placement(project, VILLAGE_PLACEMENT_RULES.INVALID_POSITION, placements)
+	if placement == VILLAGE_PLACEMENT_RULES.INVALID_POSITION:
+		return false
+	# A single team redesign uses donated equipment. It gives no new player score or parts.
+	if remove_project != -1:
+		built_project_ids.erase(remove_project)
+		built_project_owners.erase(remove_project)
+	placements[support_project] = placement
+	built_project_placements = placements
+	built_project_ids.append(support_project)
+	built_project_owners[support_project] = -1
+	projects_built = built_project_ids.size()
+	kingdom_health = 0
+	for id in built_project_ids:
+		kingdom_health += int(CONSTRUCTION_PROJECTS[id]["health"])
+	kingdom_health = mini(100, kingdom_health)
+	return true
+
 static func quiz_result_reading_seconds(quiz: Dictionary, grade: int = 5) -> float:
 	var reading_characters := str(quiz.get("explanation", "")).length() + str(quiz.get("answer", "")).length()
 	var characters_per_second := 8.0 if grade <= 4 else 10.0
-	return clampf(3.0 + float(reading_characters) / characters_per_second, 7.0, 12.0)
+	var seconds := clampf(3.0 + float(reading_characters) / characters_per_second, 7.0, 12.0)
+	return seconds * 2.0 if QuizDatabase.extra_reading_time else seconds
 
 # 턴 종료 및 다음 플레이어 전환
 func end_turn() -> void:
@@ -2594,6 +2722,8 @@ func _start_village_construction_phase() -> void:
 
 func get_team_inventory() -> Dictionary:
 	var inventory := _create_empty_inventory()
+	for item in team_parts:
+		inventory[item] += int(team_parts[item])
 	for player in players:
 		for item_id in inventory:
 			inventory[item_id] += int((player.get("inventory", {}) as Dictionary).get(item_id, 0))
@@ -2664,6 +2794,10 @@ func build_village_project(project_index: int, player_idx: int = -1, map_positio
 	for requirement_item_id in project["requirements"]:
 		var item_id := str(requirement_item_id)
 		var remaining := int(project["requirements"][item_id])
+		var shared_used := mini(remaining, int(team_parts.get(item_id, 0)))
+		if shared_used > 0:
+			team_parts[item_id] -= shared_used
+			remaining -= shared_used
 		for contributor_idx in contributor_order:
 			var contributor_inventory: Dictionary = players[contributor_idx]["inventory"]
 			var used := mini(remaining, int(contributor_inventory.get(item_id, 0)))
@@ -2722,6 +2856,14 @@ func _finalize_village_evaluation() -> void:
 			return tiebreak_a > tiebreak_b
 		return int(a.get("index", 0)) < int(b.get("index", 0))
 	)
+	var previous: Dictionary = {}
+	for idx in range(rankings.size()):
+		var entry: Dictionary = rankings[idx]
+		var tied: bool = not previous.is_empty() and entry["final_score"] == previous["final_score"] and entry["ranking_tiebreak_score"] == previous["ranking_tiebreak_score"]
+		entry["rank"] = previous["rank"] if tied else idx + 1
+		entry["shared_rank"] = tied
+		if tied: previous["shared_rank"] = true
+		previous = entry
 	game_over.emit(rankings)
 	if kingdom_recovered:
 		status_message_posted.emit("낮에도 밤에도 마을에 전기를 보냈어요!")

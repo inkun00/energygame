@@ -107,7 +107,7 @@ func setup(_player_data: Dictionary, game_seed: int) -> void:
 	elapsed = 0.0
 	space_was_down = false
 	flash_remaining = 0.0
-	notice = "D/A 길게 가속 · S 정차 · 정류장에서 Space"
+	notice = MINIGAME_INPUT.hint("eco_commute", "D/A 길게 가속 · S 정차 · 정류장에서 Space")
 	notice_remaining = 3.0
 	for index in segments.keys():
 		(segments[index] as Dictionary)["root"].queue_free()
@@ -363,10 +363,22 @@ func _build_parking_outline(parent: Node3D, target_x: float, reach: float) -> vo
 	center.name = "ParkingTargetCentre"
 
 func _build_overlay() -> void:
+	var readout_back := ColorRect.new()
+	readout_back.anchor_right = 1.0
+	readout_back.offset_bottom = 78
+	readout_back.color = Color("122d39eb")
+	readout_back.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(readout_back)
+	var action_back := ColorRect.new()
+	action_back.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	action_back.offset_top = -35
+	action_back.color = Color("122d39ec")
+	action_back.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(action_back)
 	passenger_label = _overlay_label(Vector2(24, 8), Vector2(300, 39), "승객 0 / 45명", Color("fff2b8"), 22)
 	efficiency_label = _overlay_label(Vector2(305, 8), Vector2(655, 39), "1인당 에너지 --", Color("d7ffed"), 20)
 	route_label = _overlay_label(Vector2(668, 8), Vector2(935, 39), "속도 0 · 에너지 3.0", Color("fff0b7"), 17)
-	action_label = _overlay_label(Vector2(85, 255), Vector2(875, 282), "D/A 길게 가속 · S 정차 · 정류장에서 Space", Color("fff4bd"), 17)
+	action_label = _overlay_label(Vector2(85, 255), Vector2(875, 282), MINIGAME_INPUT.hint("eco_commute", "D/A 길게 가속 · S 정차 · 정류장에서 Space"), Color("fff4bd"), 17)
 	action_label.anchor_top = 1.0
 	action_label.anchor_bottom = 1.0
 	action_label.offset_top = -34.0
@@ -508,7 +520,7 @@ func _animate_students(delta: float) -> void:
 						_play_student_animation(animator, "idle", float(state["phase"]), 0.92 + float(state["variant"]) * 0.12)
 					student.rotation.y = lerp_angle(student.rotation.y, float(state["waiting_yaw"]), 1.0 - exp(-8.0 * delta))
 			stop["waiting"] = ready_count
-			(stop["label"] as Label3D).text = "정류장 · Space" if absf(bus_x - stop_x) <= PICKUP_REACH and absf(bus_speed) <= STOP_SPEED_LIMIT else "정류장"
+			(stop["label"] as Label3D).text = MINIGAME_INPUT.hint("eco_commute", "정류장 · Space") if absf(bus_x - stop_x) <= PICKUP_REACH and absf(bus_speed) <= STOP_SPEED_LIMIT else "정류장"
 			(stop["label"] as Label3D).modulate = Color("ffc288") if running_count > 0 else Color("fff3c4")
 
 func _attempt_pickup() -> void:
@@ -523,10 +535,10 @@ func _attempt_pickup() -> void:
 				closest = stop
 				closest_gap = gap
 	if closest.is_empty():
-		_notice("정류장 표시 안에 정확히 멈춰 Space를 누르세요.")
+		_notice(MINIGAME_INPUT.hint("eco_commute", "정류장 표시 안에 정확히 멈춰 Space를 누르세요."))
 		return
 	if absf(bus_speed) > STOP_SPEED_LIMIT:
-		_notice("학생을 태우려면 먼저 S로 버스를 멈추세요!")
+		_notice(MINIGAME_INPUT.hint("eco_commute", "학생을 태우려면 먼저 S로 버스를 멈추세요!"))
 		return
 	if passengers >= BUS_CAPACITY:
 		_notice("버스가 가득 찼어요! 앞으로 가면 학교에 도착해요.")
@@ -548,7 +560,7 @@ func _attempt_pickup() -> void:
 		if not bool(state["arrived"]) and not bool(state["boarded"]):
 			late_remaining += 1
 	if late_remaining > 0 and passengers < BUS_CAPACITY:
-		_notice("%d명 탑승 · %d명 뛰어오는 중! 기다려 Space 또는 출발" % [boarding, late_remaining])
+		_notice(MINIGAME_INPUT.hint("eco_commute", "%d명 탑승 · %d명 뛰어오는 중! 기다려 Space 또는 출발") % [boarding, late_remaining])
 	else:
 		_notice("학생 %d명 탑승! 함께 탈수록 1인당 에너지가 줄어요." % boarding)
 	arcade_event.emit(0, true, "학생 %d명 탑승 · 앞으로 달리세요" % boarding, false)
@@ -565,7 +577,7 @@ func _check_school_stop() -> void:
 			_unload_at_school(school_x)
 		elif not bool(record["school_served"]) and not bool(record["school_missed_notice"]) and bus_x > school_x + SCHOOL_REACH:
 			record["school_missed_notice"] = true
-			_notice("학교를 지나쳤어요! S로 멈추고 A로 조금 후진하세요.")
+			_notice(MINIGAME_INPUT.hint("eco_commute", "학교를 지나쳤어요! S로 멈추고 A로 조금 후진하세요."))
 
 var last_trip_per_person := 0.0
 var last_trip_solo_energy := 0.0
@@ -704,7 +716,7 @@ func _update_visuals() -> void:
 		efficiency_label.text = "도착 · 1인당 %.1f" % last_trip_per_person
 	var direction := "후진" if bus_speed < -STOP_SPEED_LIMIT else "전진" if bus_speed > STOP_SPEED_LIMIT else "정차"
 	route_label.text = "%s %.1f · 에너지 %.1f" % [direction, absf(bus_speed), route_energy(route_distance)]
-	action_label.text = "학생 %d명이 학교로 들어가는 중 · 안전하게 기다려요" % dropped_students.size() if not dropped_students.is_empty() else ("학생 %d명 승차 중 · 문 앞을 비우면 출발해요" % boarding_students.size() if not boarding_students.is_empty() else (notice if notice_remaining > 0.0 else "차량 ▼를 노란 선 안으로 · D 전진 / A 후진 · S 정차"))
+	action_label.text = "학생 %d명이 학교로 들어가는 중 · 안전하게 기다려요" % dropped_students.size() if not dropped_students.is_empty() else ("학생 %d명 승차 중 · 문 앞을 비우면 출발해요" % boarding_students.size() if not boarding_students.is_empty() else (notice if notice_remaining > 0.0 else MINIGAME_INPUT.hint("eco_commute", "차량 ▼를 노란 선 안으로 · D 전진 / A 후진 · S 정차")))
 	var next := get_next_service_point()
 	parking_reference.visible = not next.is_empty() and absf(float(next["x"]) - bus_x) <= 10.0
 	parking_reference.modulate = Color("a8ffe0") if not next.is_empty() and absf(float(next["x"]) - bus_x) <= float(next["reach"]) else Color("fff2b0")
@@ -719,10 +731,10 @@ func _update_visuals() -> void:
 		var where := "후진 %.1f칸" % absf(distance) if distance < -float(next["reach"]) else "앞으로 %.1f칸" % maxf(0.0, distance)
 		next_stop_label.text = "학교 · " + where if bool(next["school"]) else "다음 정류장 · %s · 대기 %d명 / 뛰는 중 %d명" % [where, int(next["waiting"]), int(next["late"])]
 		var aligned := absf(distance) <= float(next["reach"])
-		service_label.text = ("중앙 맞음 · S 정차" if absf(bus_speed) > STOP_SPEED_LIMIT else ("학교 자동 하차" if bool(next["school"]) else "정차 완료 · Space")) if aligned else "차량 ▼를 정차선 안으로"
+		service_label.text = (MINIGAME_INPUT.hint("eco_commute", "중앙 맞음 · S 정차") if absf(bus_speed) > STOP_SPEED_LIMIT else ("학교 자동 하차" if bool(next["school"]) else MINIGAME_INPUT.hint("eco_commute", "정차 완료 · Space"))) if aligned else "차량 ▼를 정차선 안으로"
 	else:
 		next_stop_label.text = "앞으로 달려 다음 구간으로 가요"
-		service_label.text = "D 전진"
+		service_label.text = MINIGAME_INPUT.hint("eco_commute", "D 전진")
 
 func get_next_service_point() -> Dictionary:
 	var nearest: Dictionary = {}
@@ -758,7 +770,9 @@ func _update_camera_and_bus() -> void:
 	var wheel_angle := fposmod(-bus_x / wheel_radius, TAU)
 	for wheel in wheels:
 		wheel.rotation.z = wheel_angle
-	var view_width := camera.size * viewport.size.aspect()
+	var aspect := maxf(0.1, viewport.size.aspect())
+	camera.size = maxf(6.5, 13.0 / aspect)
+	var view_width := camera.size * aspect
 	var look_ahead := clampf(view_width * 0.5 - 2.9, 0.0, 5.0)
 	camera.position = Vector3(bus_x + look_ahead + 1.3, 6.7, 12.5)
 	camera.look_at(Vector3(bus_x + look_ahead, 1.30, 0), Vector3.UP)
