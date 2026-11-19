@@ -119,8 +119,10 @@ func _test_bus() -> bool:
 	game._update_visuals()
 	_check(game.service_label.text.contains("중앙 맞음") and game.parking_reference.position.x == 0.0, "The bus's visible centre marker matches the actual stop coordinate")
 	game.bus_speed = 0.0
+	game._animate_bus_door(0.5)
 	game._update_visuals()
 	_check(game.service_label.text.contains("Space"), "An aligned stopped bus visibly offers pickup")
+	_check(game.world.to_local(game.camera.global_position).z < game._door_position().z, "The gameplay camera sees the curb-side doorway")
 	await _capture("bus-aligned-stop")
 	game.passengers = 45
 	game.bus_x = 56.8
@@ -129,7 +131,9 @@ func _test_bus() -> bool:
 	game.segments[0]["school_served"] = true
 	game._unload_at_school(56.0)
 	var students: Array = game.dropped_students.duplicate()
-	_check(absf(float(students[0]["start_x"]) - (game.bus_x + 1.08)) <= 0.081, "Off-centre legal school stops still spawn pupils at the actual bus door")
+	game._update_camera_and_bus()
+	var doorway := game.bus.find_child("DoorThreshold", true, false) as Node3D
+	_check(game.world.to_global(students[0]["start"]).distance_to(doorway.global_position) <= 0.081, "Off-centre legal school stops still spawn pupils at the actual bus door")
 	var lane_points: Array[Vector3] = []
 	for index in range(3): lane_points.append(game.dropoff_path_position(students[index], 0.6))
 	_check(lane_points[0].distance_to(lane_points[1]) > 0.25 and lane_points[1].distance_to(lane_points[2]) > 0.25, "Three walking lanes visibly separate students instead of one ghosted line")

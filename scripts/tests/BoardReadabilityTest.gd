@@ -49,7 +49,10 @@ func _run() -> void:
 	board._refresh_board_player_focus(0)
 	_check(board.player_pawns[0].board_turn_label.visible and board.player_pawns[0].board_turn_ring.visible, "Active player has a name and ring")
 	_check(not board.player_pawns[1].board_turn_label.visible, "Inactive player does not add nameplate clutter")
-	_check(board.player_pawns[0].avatar_sprite.scale.x > board.player_pawns[1].avatar_sprite.scale.x, "Current player silhouette is larger")
+	_check(board.player_pawns[0].board_model != null and board.player_pawns[1].board_model != null, "Default players use modeled board pawns")
+	if board.player_pawns[0].board_model and board.player_pawns[1].board_model:
+		_check(board.player_pawns[0].board_model.scale.x > board.player_pawns[1].board_model.scale.x, "Current player silhouette is larger")
+	_check_modeled_roster(main.lobby_ui.characters, board.pawns_container)
 	board._show_movement_route(0, 6)
 	_check(board.movement_route_tiles == [0, 1, 2, 3, 4, 5, 6], "The actual rolled path has no missing tiles")
 	_check(board.tile_markers[0].route_current and board.tile_markers[6].route_destination, "Route distinguishes current and destination")
@@ -65,7 +68,7 @@ func _run() -> void:
 	var arcade_pawn := PlayerPawn.new()
 	root.add_child(arcade_pawn)
 	arcade_pawn.setup_player(gm.players[0])
-	_check(not arcade_pawn.board_presentation_enabled and arcade_pawn.avatar_sprite.scale == Vector3.ONE, "Arcade pawn scale and overlays are unchanged")
+	_check(arcade_pawn.board_model == null and arcade_pawn.avatar_sprite.visible and arcade_pawn.avatar_sprite.scale == Vector3.ONE, "Arcade pawn keeps its original sprite and contact size")
 	arcade_pawn.queue_free()
 	await create_timer(0.55).timeout
 	_check(hud.center_dice_button.focus_mode == Control.FOCUS_ALL, "Dice is keyboard focusable")
@@ -131,3 +134,63 @@ func _run() -> void:
 	if failures.is_empty(): print("[PASS] Board readability: 100 tiles, active pawn, route, kind/completion badges, cutaway, readable HUD and practice input guard")
 	for failure in failures: push_error(failure)
 	quit(0 if failures.is_empty() else 1)
+
+func _check_modeled_roster(roster: Array, container: Node3D) -> void:
+	var pawn := PlayerPawn.new()
+	container.add_child(pawn)
+	pawn.set_board_presentation(true)
+	for character in roster:
+		var portrait: String = character["icon"]
+		var slug := portrait.get_file().get_basename()
+		pawn.setup_player({"index": 0, "char_icon": portrait})
+		_check(pawn.board_model != null and not pawn.avatar_sprite.visible, "%s uses a 3D board pawn" % slug)
+		if not pawn.board_model or not pawn.board_animator:
+			continue
+		_check(pawn.board_model.scene_file_path.get_file() == slug + ".glb", "%s selects its own model" % slug)
+		_check(pawn.board_animator.current_animation == "idle" and pawn.board_animator.has_animation("walk"), "%s provides an idle and a traveling gait" % slug)
+		_check(pawn.board_animator.get_animation("idle").get_track_count() > 0 and pawn.board_animator.get_animation("walk").get_track_count() > 0, "%s animates its model" % slug)
+	if pawn.board_model:
+		pawn.setup_player({"char_icon": "res://assets/images/char_water_popo.webp"})
+		_check(pawn.board_model.scene_file_path.ends_with("/water_popo.glb"), "Legacy portrait paths resolve to the same modeled character")
+		pawn.animate_move_to_tile(1)
+		pawn.move_tween.custom_step(BoardGrid.MOVE_STEP_SECONDS * 0.5)
+		var stride_phase := fposmod(0.5 * BoardGrid.TILE_SPACING_3D / (pawn.board_model.scale.x * pawn.board_stride_length), 1.0)
+		var walk_time := pawn.board_animator.current_animation_position
+		_check(absf(walk_time / pawn.board_animator.current_animation_length - stride_phase) < 0.0001, "A half tile advances the authored gait by its actual distance")
+		pawn._process(0.05)
+		_check(is_equal_approx(pawn.board_animator.current_animation_position, walk_time), "A stationary board pawn does not advance its stride")
+		_check(pawn.board_animator.current_animation == "walk" and pawn.board_model.rotation.y > 0.0 and pawn.board_model.rotation.y < PI * 0.5, "Regular movement turns gradually toward the travel direction")
+		_check(absf(pawn.position.y - BoardGrid.get_tile_surface_height(1)) < 0.04, "Ordinary walking stays in contact with the tile")
+		pawn._process(0.2)
+		_check(pawn.board_model.basis.z.normalized().dot(Vector3.RIGHT) > 0.99, "The model faces along the row")
+		pawn.set_process(false)
+		pawn.move_tween.custom_step(BoardGrid.MOVE_STEP_SECONDS * 0.1)
+		_check(is_equal_approx(pawn.board_animator.current_animation_position, walk_time), "A covered board keeps its rendered pose")
+		pawn.set_process(true)
+		pawn._process(0.01)
+		_check(is_equal_approx(pawn.board_animator.current_animation_position, pawn.board_pose_time) and not is_equal_approx(pawn.board_pose_time, walk_time), "Restoring the board catches up to the traveled distance")
+		pawn.snap_to_tile(8)
+		pawn.animate_move_to_tile(10)
+		pawn.move_tween.custom_step(BoardGrid.MOVE_STEP_SECONDS * 0.94)
+		_check(pawn.board_target_yaw > PI * 0.5 and pawn.board_target_yaw < PI, "The pawn starts turning before the corner")
+		pawn.snap_to_tile(9)
+		pawn.animate_move_to_tile(10)
+		pawn.move_tween.custom_step(BoardGrid.MOVE_STEP_SECONDS * 0.5)
+		pawn._process(0.2)
+		_check(pawn.board_model.basis.z.normalized().dot(Vector3.FORWARD) > 0.99, "The model turns at a board corner")
+		pawn.snap_to_tile(10)
+		_check(pawn.board_animator.current_animation == "idle" and is_zero_approx(pawn.shadow_mesh.position.y - pawn.GROUND_SHADOW_OFFSET), "Stopping restores idle and grounds the contact shadow")
+		for tile in BoardGrid.TILE_DATA:
+			if not tile.has("target"):
+				continue
+			pawn.snap_to_tile(int(tile.index))
+			pawn.set_shield_active(true)
+			pawn.animate_move_to_tile(int(tile.target))
+			pawn.move_tween.custom_step(BoardGrid.SHORTCUT_MOVE_SECONDS * 0.5)
+			var has_jump := pawn.board_animator.has_animation(&"jump")
+			var expected_clip := &"jump" if has_jump else &"walk"
+			var phase := pawn.board_animator.current_animation_position / pawn.board_animator.current_animation_length
+			_check(pawn.board_shortcut_jump and pawn.board_animator.current_animation == expected_clip and is_equal_approx(phase, 0.5 if has_jump else 0.25), "Shortcut apex selects the flight pose of the model")
+			_check(pawn.position.y > pawn.shadow_mesh.global_position.y + 1.5 and pawn.shield_visual.visible, "A shielded shortcut casts its shadow on the tile")
+			break
+	pawn.free()

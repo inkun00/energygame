@@ -842,7 +842,7 @@ func _test_local_game_start() -> void:
 	var static_pickup_position: Vector3 = static_pickup.position
 	await create_timer(0.2).timeout
 	_expect(static_pickup.position.is_equal_approx(static_pickup_position), "게임 칸의 건설 재료는 위아래로 떠다니지 않고 고정되어야 합니다.")
-	_expect(static_pickup.item_sprite.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF, "건설 재료 형상의 조명 그림자는 꺼져야 합니다.")
+	_expect(static_pickup.item_visual is MeshInstance3D and static_pickup.item_visual.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF, "건설 재료 형상의 조명 그림자는 꺼져야 합니다.")
 	_expect(static_pickup.shadow_mesh != null and static_pickup.shadow_mesh.visible, "건설 재료 아래의 부드러운 바닥 그림자는 유지되어야 합니다.")
 	_expect(game_board.energy_fairy_village != null and game_board.energy_fairy_village.get_child_count() >= 40, "게임판 바깥에 에너지요정 마을 3D 배경이 충분히 구성되어야 합니다.")
 	_expect(game_board.energy_fairy_village.animated_rotors.size() >= 3, "에너지요정 마을 배경에 움직이는 풍력 터빈이 있어야 합니다.")

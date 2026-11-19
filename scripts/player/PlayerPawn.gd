@@ -36,9 +36,19 @@ var board_is_local := false
 var board_turn_ring: MeshInstance3D
 var board_turn_label: Label3D
 var board_turn_material: StandardMaterial3D
+var player_icon_path := ""
+var board_model: Node3D
+var board_animator: AnimationPlayer
+var board_target_yaw := 0.0
+var board_shortcut_jump := false
+var board_stride_length := LEGACY_BOARD_STRIDE_LENGTH
+var board_pose_time := 0.0
 
 const BOARD_AVATAR_SCALE := 1.35
 const BOARD_ACTIVE_AVATAR_SCALE := 1.60
+const BOARD_MODEL_DIR := "res://assets/models/board_pawns/"
+const LEGACY_CAPTAIN_ICON := "res://assets/images/char_captain_eco.webp"
+const LEGACY_BOARD_STRIDE_LENGTH := 0.42
 
 # 원본 스프라이트 첫 프레임의 투명 여백(약 0.047)을 포함해 실제 발끝이
 # 타일 윗면에 닿도록 맞춘 중심 높이입니다. 루트는 타일 윗면에 놓입니다.
@@ -117,6 +127,13 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_update_shield_visual(delta)
+	if board_model:
+		board_model.rotation.y = rotate_toward(board_model.rotation.y, board_target_yaw, delta * 12.0)
+		if board_animator.current_animation == &"idle":
+			board_animator.advance(delta)
+		elif not is_equal_approx(board_animator.current_animation_position, board_pose_time):
+			board_animator.seek(board_pose_time, true)
+		return
 	if not animation_position_ready:
 		last_animation_position = position
 		animation_position_ready = true
@@ -161,8 +178,68 @@ func _init_components() -> void:
 func setup_player(p_data: Dictionary) -> void:
 	_init_components()
 	player_index = p_data.get("index", 0)
-	
-	var icon_path = p_data.get("char_icon", "res://assets/images/char_captain_eco.webp")
+	player_icon_path = str(p_data.get("char_icon", LEGACY_CAPTAIN_ICON))
+	if player_icon_path.is_empty():
+		player_icon_path = LEGACY_CAPTAIN_ICON
+	_configure_avatar()
+	_set_avatar_animation_state(false)
+	set_shield_active(bool(p_data.get("shield", false)))
+	_place_on_tile(0)
+
+func _configure_avatar() -> void:
+	if player_icon_path.is_empty():
+		return
+	var model_path := ""
+	var roster_icon := player_icon_path.replace("res://assets/images/char_", "res://assets/characters/eco_roster/")
+	if board_presentation_enabled and roster_icon in IDLE_SPRITE_BY_ICON:
+		var slug := roster_icon.get_file().get_basename()
+		if slug == "fairy_sparky":
+			slug = "captain_eco"
+		model_path = BOARD_MODEL_DIR + slug + ".glb"
+	if board_model:
+		if board_model.scene_file_path == model_path:
+			return
+		board_model.free()
+		board_model = null
+		board_animator = null
+	if not model_path.is_empty() and ResourceLoader.exists(model_path, "PackedScene"):
+		var scene := load(model_path) as PackedScene
+		board_model = scene.instantiate() as Node3D
+		add_child(board_model)
+		board_model.rotation.y = board_target_yaw
+		board_animator = board_model.find_child("AnimationPlayer", true, false) as AnimationPlayer
+		if board_animator and board_animator.has_animation(&"idle") and board_animator.has_animation(&"walk"):
+			board_stride_length = _read_board_stride(board_model)
+			board_animator.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
+			for clip_name in [&"idle", &"walk"]:
+				board_animator.get_animation(clip_name).loop_mode = Animation.LOOP_LINEAR
+			if board_animator.has_animation(&"jump"):
+				board_animator.get_animation(&"jump").loop_mode = Animation.LOOP_NONE
+			avatar_sprite.hide()
+			_apply_avatar_contact_scale()
+			_set_avatar_animation_state(is_moving)
+			return
+		board_model.free()
+		board_model = null
+		board_animator = null
+	avatar_sprite.show()
+	_load_sprite_textures(player_icon_path)
+	_set_avatar_animation_state(is_moving)
+
+func _read_board_stride(model: Node3D) -> float:
+	# Imported glTF node extras carry the authored travel for one complete loop.
+	for node: Node in [model] + model.find_children("*", "", true, false):
+		var extras: Dictionary = node.get_meta(&"extras", {})
+		var length := float(extras.get("board_stride_length", 0.0))
+		if is_finite(length) and length > 0.0:
+			return length
+	return LEGACY_BOARD_STRIDE_LENGTH
+
+func _load_sprite_textures(icon_path: String) -> void:
+	idle_sprite_texture = null
+	move_sprite_texture = null
+	back_run_sprite_texture = null
+	side_run_sprite_texture = null
 	var idle_sprite_path := str(IDLE_SPRITE_BY_ICON.get(icon_path, ""))
 	var move_sprite_path := str(MOVE_SPRITE_BY_ICON.get(icon_path, ""))
 	var back_run_sprite_path := str(BACK_RUN_SPRITE_BY_ICON.get(icon_path, ""))
@@ -193,17 +270,13 @@ func setup_player(p_data: Dictionary) -> void:
 		avatar_sprite.vframes = 1
 		avatar_sprite.frame = 0
 		avatar_sprite.pixel_size = 0.00068
-	_set_avatar_animation_state(false)
-	set_shield_active(bool(p_data.get("shield", false)))
-		
-	# 시작 위치를 타일 중심이 아닌 실제 윗면으로 계산합니다.
-	_place_on_tile(0)
 
 func set_board_presentation(enabled: bool, display_name: String = "", is_local: bool = false) -> void:
 	# Arcade pawns deliberately keep their original contact size and prompts.
 	board_presentation_enabled = enabled
 	board_display_name = display_name
 	board_is_local = is_local
+	_configure_avatar()
 	if enabled and board_turn_ring == null:
 		board_turn_ring = MeshInstance3D.new()
 		board_turn_ring.name = "ActivePlayerRing"
@@ -249,6 +322,9 @@ func _board_avatar_scale() -> float:
 	return BOARD_ACTIVE_AVATAR_SCALE if board_current_turn else BOARD_AVATAR_SCALE
 
 func _apply_avatar_contact_scale(stretch_y: float = 1.0) -> void:
+	if board_model:
+		board_model.scale = Vector3.ONE * _board_avatar_scale()
+		return
 	if avatar_sprite:
 		var visual_scale := _board_avatar_scale()
 		avatar_sprite.scale = Vector3(visual_scale / sqrt(stretch_y), visual_scale * stretch_y, 1.0)
@@ -258,6 +334,9 @@ func _face_board_step(from_position: Vector3, to_position: Vector3) -> void:
 	if not board_presentation_enabled:
 		return
 	var direction := to_position - from_position
+	if board_model:
+		board_target_yaw = atan2(direction.x, direction.z)
+		return
 	use_side_run_sprite = absf(direction.x) > absf(direction.z)
 	use_back_run_sprite = not use_side_run_sprite and direction.z < 0.0
 	avatar_sprite.flip_h = use_side_run_sprite and direction.x < 0.0
@@ -270,11 +349,12 @@ func animate_move_to_tile(to_tile_idx: int) -> void:
 	
 	if move_tween and move_tween.is_valid():
 		move_tween.kill()
+	board_shortcut_jump = BoardGrid.is_shortcut_transition(from_tile, to_tile_idx)
 	_set_avatar_animation_state(true)
 	move_tween = create_tween().set_parallel(false)
 
 	# 사다리/미끄럼틀 3D 아치형 점프 도약
-	if BoardGrid.is_shortcut_transition(from_tile, to_tile_idx):
+	if board_shortcut_jump:
 		var from_pos := position
 		var to_pos := _get_tile_contact_position(to_tile_idx, pawn_offset)
 		var jump_duration: float = BoardGrid.SHORTCUT_MOVE_SECONDS
@@ -289,7 +369,7 @@ func animate_move_to_tile(to_tile_idx: int) -> void:
 		move_tween.tween_callback(_set_avatar_animation_state.bind(false))
 		return
 
-	# 일반 칸 이동: 기존 사다리 경로를 따라 한 칸씩 통통 튀며 이동
+	# 입체 말은 칸 사이를 걸어서 이동하고 스프라이트 말은 칸마다 도약합니다.
 	var direction := 1 if to_tile_idx > from_tile else -1
 	var step_tile := from_tile + direction
 	
@@ -299,11 +379,13 @@ func animate_move_to_tile(to_tile_idx: int) -> void:
 		var target_p := _get_tile_contact_position(step_tile, pawn_offset)
 		var step_dur: float = BoardGrid.MOVE_STEP_SECONDS
 		move_tween.tween_callback(_face_board_step.bind(start_p, target_p))
-		
-		move_tween.tween_method(
-			_update_hop_position.bind(start_p, target_p, 0.68),
-			0.0, 1.0, step_dur
-		).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		if board_model:
+			var exit_direction := Vector3.ZERO
+			if step_tile != to_tile_idx:
+				exit_direction = _get_tile_contact_position(step_tile + direction, pawn_offset) - target_p
+			move_tween.tween_method(_advance_board_step.bind(start_p, target_p, exit_direction), 0.0, 1.0, step_dur)
+		else:
+			move_tween.tween_method(_update_hop_position.bind(start_p, target_p, 0.68), 0.0, 1.0, step_dur).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		
 		step_tile += direction
 	move_tween.tween_callback(_place_on_tile.bind(to_tile_idx))
@@ -317,6 +399,18 @@ func snap_to_tile(to_tile_idx: int) -> void:
 	_set_avatar_animation_state(false)
 
 func _set_avatar_animation_state(should_move: bool) -> void:
+	if board_animator:
+		is_moving = should_move
+		var clip_name := &"walk" if should_move else &"idle"
+		if should_move and board_shortcut_jump and board_animator.has_animation(&"jump"):
+			clip_name = &"jump"
+		if board_animator.current_animation != clip_name:
+			var initial_pose := board_animator.assigned_animation.is_empty()
+			board_pose_time = 0.0
+			board_animator.play(clip_name, 0.12 if clip_name == &"idle" else 0.0)
+			if initial_pose:
+				board_animator.seek(board_animator.current_animation_length * fmod(player_index * 0.27, 1.0), true)
+		return
 	if avatar_sprite == null:
 		is_moving = should_move
 		return
@@ -348,12 +442,38 @@ func set_side_run_enabled(enabled: bool) -> void:
 		use_back_run_sprite = false
 	_set_avatar_animation_state(is_moving)
 
+func _advance_board_step(progress: float, from_position: Vector3, to_position: Vector3, exit_direction: Vector3) -> void:
+	var previous_position := position
+	position = from_position.lerp(to_position, progress)
+	_update_ground_shadow(position.y, 0.0)
+	var distance := Vector2(position.x - previous_position.x, position.z - previous_position.z).length()
+	var cycles := distance / (_board_avatar_scale() * board_stride_length)
+	var loop_length := board_animator.current_animation_length
+	_set_board_motion_time(fposmod(board_pose_time + cycles * loop_length, loop_length))
+	if exit_direction != Vector3.ZERO:
+		var heading := to_position - from_position
+		var turn := 0.5 * smoothstep(0.80, 1.0, progress)
+		board_target_yaw = lerp_angle(atan2(heading.x, heading.z), atan2(exit_direction.x, exit_direction.z), turn)
+
+func _set_board_motion_time(time: float) -> void:
+	board_pose_time = time
+	# Movement continues behind overlays. Sample the skeleton again when visible.
+	if is_processing():
+		board_animator.seek(board_pose_time, true)
+
 func _update_hop_position(progress: float, from_position: Vector3, to_position: Vector3, hop_height: float) -> void:
 	var ground := from_position.lerp(to_position, progress)
 	var lift := sin(progress * PI) * hop_height
 	position = ground + Vector3(0, lift, 0)
 	_update_ground_shadow(ground.y, lift)
-	if avatar_sprite:
+	if board_model and board_shortcut_jump:
+		var phase := progress
+		if board_animator.current_animation != &"jump":
+			# Older models can still tuck their feet using the travel clip.
+			phase = lerpf(0.0, 0.5, smoothstep(0.0, 1.0, progress))
+			board_model.rotation.x = sin(progress * TAU) * 0.10
+		_set_board_motion_time(board_animator.current_animation_length * phase)
+	elif avatar_sprite:
 		var stretch_y := 1.0 + sin(progress * TAU) * 0.07
 		_apply_avatar_contact_scale(stretch_y)
 
@@ -365,6 +485,11 @@ func _get_tile_contact_position(tile_index: int, pawn_offset: Vector3 = Vector3.
 func _place_on_tile(tile_index: int) -> void:
 	current_tile = clampi(tile_index, 0, BoardGrid.LAST_TILE_INDEX)
 	position = _get_tile_contact_position(current_tile, PAWN_OFFSETS_3D[player_index % 4])
+	last_animation_position = position
+	animation_speed = 0.0
+	board_shortcut_jump = false
+	if board_model:
+		board_model.rotation.x = 0.0
 	_update_ground_shadow(position.y, 0.0)
 	if avatar_sprite:
 		_apply_avatar_contact_scale()

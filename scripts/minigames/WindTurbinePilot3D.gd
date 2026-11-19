@@ -8,6 +8,7 @@ signal arcade_event(points: int, success: bool, message: String, count_correct: 
 const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
+const TURBINE_BLADE = preload("res://assets/models/wind/turbine_blade.glb")
 const WIND_PHASE_SECONDS := 4.0
 const YAW_LIMIT := 65.0
 const YAW_SPEED := 72.0
@@ -26,6 +27,8 @@ var wind_vane: Node3D
 var wind_streaks: Array[MeshInstance3D] = []
 var main_blades: Array[Node3D] = []
 var background_rotors: Array[Node3D] = []
+var rotor_speed := 0.0
+var background_rotor_speed := 0.0
 
 var rng := RandomNumberGenerator.new()
 var visual_rng := RandomNumberGenerator.new()
@@ -47,7 +50,6 @@ var visual_time := 0.0
 var normal_head_material: StandardMaterial3D
 var aligned_head_material: StandardMaterial3D
 var storm_head_material: StandardMaterial3D
-var blade_material: StandardMaterial3D
 var wind_material: StandardMaterial3D
 var safe_material: StandardMaterial3D
 
@@ -136,7 +138,6 @@ func _create_materials() -> void:
 	aligned_head_material.emission_energy_multiplier = 0.62
 	storm_head_material = _material(Color("ed5b53"), true)
 	storm_head_material.emission_energy_multiplier = 0.62
-	blade_material = _material(Color("edf7f2"), false)
 	wind_material = _material(Color("a9f1ff"), true)
 	wind_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	wind_material.albedo_color.a = 0.66
@@ -210,18 +211,10 @@ func _build_rotor_blades() -> void:
 	if not is_instance_valid(rotor) or not main_blades.is_empty():
 		return
 	for blade_index in range(3):
-		var blade_root := Node3D.new()
+		var blade_root := TURBINE_BLADE.instantiate() as Node3D
 		blade_root.name = "BladeRoot%d" % blade_index
-		blade_root.rotation.z = deg_to_rad(float(blade_index) * 120.0)
+		blade_root.rotation.z = blade_index * TAU / 3.0
 		rotor.add_child(blade_root)
-		var blade := MeshInstance3D.new()
-		var blade_box := BoxMesh.new()
-		blade_box.size = Vector3(0.16, 1.72, 0.09)
-		blade.mesh = blade_box
-		blade.position.y = 0.93
-		blade.rotation.z = deg_to_rad(-7.0)
-		blade.material_override = blade_material
-		blade_root.add_child(blade)
 		main_blades.append(blade_root)
 
 func _build_background_turbine(base_position: Vector3, scale_value: float) -> void:
@@ -239,20 +232,24 @@ func _build_background_turbine(base_position: Vector3, scale_value: float) -> vo
 	tower.material_override = _material(Color("c7d8d5"), false)
 	root_3d.add_child(tower)
 	var rotor_root := Node3D.new()
-	rotor_root.position = Vector3(0.0, 4.0, 0.22)
+	rotor_root.position = Vector3(0.0, 4.0, 0.24)
+	rotor_root.rotation.z = base_position.x * 0.7
 	root_3d.add_child(rotor_root)
 	background_rotors.append(rotor_root)
+	var hub := MeshInstance3D.new()
+	var hub_mesh := SphereMesh.new()
+	hub_mesh.radius = 0.19
+	hub_mesh.height = 0.38
+	hub_mesh.radial_segments = 12
+	hub_mesh.rings = 5
+	hub.mesh = hub_mesh
+	hub.material_override = normal_head_material
+	rotor_root.add_child(hub)
 	for blade_index in range(3):
-		var blade_root := Node3D.new()
-		blade_root.rotation.z = deg_to_rad(float(blade_index) * 120.0)
-		rotor_root.add_child(blade_root)
-		var blade := MeshInstance3D.new()
-		var blade_box := BoxMesh.new()
-		blade_box.size = Vector3(0.10, 1.25, 0.06)
-		blade.mesh = blade_box
-		blade.position = Vector3(0.0, 0.68, 0.0)
-		blade.material_override = blade_material
-		blade_root.add_child(blade)
+		var blade := TURBINE_BLADE.instantiate() as Node3D
+		blade.rotation.z = blade_index * TAU / 3.0
+		blade.scale = Vector3.ONE * 0.72
+		rotor_root.add_child(blade)
 
 func _build_wind_vane() -> void:
 	wind_vane = Node3D.new()
@@ -628,14 +625,16 @@ func _update_rotor(delta: float, power_percent: float) -> void:
 	# 발전 효율은 낮고, 위험 돌풍에서는 브레이크 전까지 가장 빠르게 회전합니다.
 	var wind_factor := clampf((float(wind_speed) - 7.0) / 25.0, 0.0, 1.0)
 	var capture_factor := 1.0 if storm_phase else 0.38 + clampf(power_percent / 100.0, 0.0, 1.0) * 0.62
-	var spin_speed := 0.0 if brake_active else lerpf(1.35, 7.2, wind_factor) * capture_factor
-	rotor.rotation.z -= delta * spin_speed
+	var target_speed := 0.0 if brake_active or rotor_broken else lerpf(1.35, 7.2, wind_factor) * capture_factor
+	var previous_speed := rotor_speed
+	rotor_speed = move_toward(rotor_speed, target_speed, delta * (24.0 if brake_active else 5.0))
+	rotor.rotation.z -= delta * (previous_speed + rotor_speed) * 0.5
+	var farm_target := 0.0 if storm_phase else lerpf(0.8, 4.6, wind_factor)
+	var previous_farm_speed := background_rotor_speed
+	background_rotor_speed = move_toward(background_rotor_speed, farm_target, delta * (16.0 if storm_phase else 3.0))
+	var farm_step := delta * (previous_farm_speed + background_rotor_speed) * 0.5
 	for background_rotor in background_rotors:
-		if is_instance_valid(background_rotor):
-			# Distant farm turbines use automatic storm protection. They must not
-			# contradict the safety lesson by racing on while our hero parks one.
-			if not storm_phase:
-				background_rotor.rotation.z -= delta * lerpf(0.8, 4.6, wind_factor)
+		background_rotor.rotation.z -= farm_step
 	if is_instance_valid(nacelle) and not storm_phase:
 		nacelle.material_override = aligned_head_material if power_percent >= 72.0 else normal_head_material
 
@@ -661,20 +660,25 @@ func _break_turbine_blades() -> void:
 	repair_delay = 1.15
 	var detached_blades := main_blades.duplicate()
 	main_blades.clear()
-	for blade_index in range(detached_blades.size()):
-		var blade: Node3D = detached_blades[blade_index]
-		var preserved_transform := blade.global_transform
-		rotor.remove_child(blade)
-		world.add_child(blade)
-		blade.global_transform = preserved_transform
-		var side := -1.0 if blade_index == 0 else (1.0 if blade_index == 1 else 0.35)
-		var target := blade.position + Vector3(side * visual_rng.randf_range(3.6, 5.4), visual_rng.randf_range(2.0, 4.2), visual_rng.randf_range(1.2, 3.8))
-		var target_rotation := blade.rotation + Vector3(visual_rng.randf_range(2.5, 5.0), visual_rng.randf_range(2.0, 4.5), side * visual_rng.randf_range(5.5, 9.0))
-		var tween := create_tween().set_parallel(true)
-		tween.tween_property(blade, "position", target, 1.05).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		tween.tween_property(blade, "rotation", target_rotation, 1.05).set_trans(Tween.TRANS_QUAD)
-		tween.tween_property(blade, "scale", Vector3.ONE * 0.35, 1.05).set_delay(0.45)
-		tween.chain().tween_callback(blade.queue_free)
+	for blade in detached_blades:
+		# After separation the blade tumbles around its mass centre, carrying
+		# its tangential velocity from the hub into a falling arc.
+		var fragment := Node3D.new()
+		world.add_child(fragment)
+		fragment.global_transform = blade.global_transform.translated_local(Vector3.UP * 0.85)
+		blade.reparent(fragment, true)
+		var initial_position := fragment.position
+		var velocity := fragment.basis.x * rotor_speed * 0.85 + fragment.basis.z * 1.2
+		var flight_time := (velocity.y + sqrt(velocity.y * velocity.y + 19.6 * initial_position.y)) / 9.8
+		var spin := Vector3(visual_rng.randf_range(-2.0, 2.0), visual_rng.randf_range(-1.5, 1.5), -rotor_speed)
+		var tween := fragment.create_tween().set_parallel(true)
+		tween.tween_method(func(t: float) -> void:
+			fragment.position = initial_position + velocity * t + Vector3.DOWN * 4.9 * t * t
+		, 0.0, flight_time, flight_time)
+		tween.tween_property(fragment, "rotation", fragment.rotation + spin * flight_time, flight_time)
+		tween.tween_property(fragment, "scale", Vector3.ONE * 0.05, 0.14).set_delay(flight_time - 0.14)
+		tween.chain().tween_callback(fragment.queue_free)
+	rotor_speed = 0.0
 	if is_instance_valid(camera):
 		var base_position := camera.position
 		var shake := create_tween()

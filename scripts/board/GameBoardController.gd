@@ -749,9 +749,9 @@ func start_board_game(player_configs: Array[Dictionary], duration_seconds: int =
 	for p_data in GameManager.players:
 		var pawn = PlayerPawn.new()
 		pawns_container.add_child(pawn)
-		pawn.setup_player(p_data)
 		var local_idx: int = NetworkManager.get_local_player_index() if NetworkManager.is_online else 0
 		pawn.set_board_presentation(true, str(p_data.get("name", "플레이어")), int(p_data.get("index", -1)) == local_idx)
+		pawn.setup_player(p_data)
 		VISUAL_STYLE.style_hero(pawn)
 		player_pawns.append(pawn)
 	_refresh_board_player_focus(GameManager.current_turn_idx)

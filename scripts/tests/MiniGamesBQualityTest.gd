@@ -154,6 +154,18 @@ func _test_bus() -> void:
 	var stop: Dictionary = arcade.segments[0]["stops"][0]
 	var first_student: Node3D = stop["states"][0]["node"]
 	_check(is_equal_approx(first_student.position.y, 0.255), "bus: waiting students' feet touch the stop platform")
+	var waiting_position := first_student.position
+	arcade.elapsed = 1.4
+	arcade._animate_students(1.4)
+	_check(first_student.position.is_equal_approx(waiting_position), "bus: idle feet stay planted")
+	var idle_player: AnimationPlayer = stop["states"][0]["animator"]
+	_check(idle_player.get_animation("idle").loop_mode == Animation.LOOP_LINEAR, "bus: idle cycles continuously")
+	for distance in [0.18, 0.09, 0.09, 0.0]:
+		arcade.bus_x = distance
+		arcade._update_camera_and_bus()
+		var expected_rotation := Basis(Vector3.BACK, -distance / arcade.wheel_radius)
+		for wheel in arcade.wheels:
+			_check(wheel.basis.is_equal_approx(expected_rotation), "bus: each tire rolls by road distance through driving, reversing, stopping and restart")
 	arcade.bus_x = 12.0
 	arcade._animate_students(0.0)
 	arcade._attempt_pickup()
@@ -213,13 +225,21 @@ func _test_heat() -> void:
 	var pane := window["pane"] as MeshInstance3D
 	var pane_center: Vector3 = pane.global_transform * pane.mesh.get_aabb().get_center()
 	_check(absf(pane_center.x - float(window["x"])) < 0.01, "heat: interaction centre matches the actual window mesh")
+	var closed_pose := pane.global_transform
+	var hinge_edge := Vector3(pane.get_aabb().position.x, 0.0, pane.get_aabb().get_center().z)
 	window["open"] = true
+	for tick in range(24):
+		arcade._animate_heat(1.0 / 60.0)
+		_check(pane.to_global(hinge_edge).is_equal_approx(closed_pose * hinge_edge), "heat: the sash must stay attached to its fixed hinge")
+	_check(pane.to_global(pane.get_aabb().get_center()).z > pane_center.z + 0.15, "heat: the free side swings into the room")
 	arcade.hero_x = float(window["x"])
 	arcade._update_overlay()
 	_check(window["prompt"].visible and window["reach_marker"].visible, "heat: an open window in reach shows Space and its usable area")
 	_check(not arcade.action_label.visible and float(window["prompt"].position.y) > 2.0, "heat: reachable windows show one local prompt above the hero instead of overlapping footer instructions")
 	var open_usage: float = arcade.cooling_use_bar.value
 	arcade._try_close()
+	arcade._animate_heat(0.4)
+	_check(pane.global_transform.is_equal_approx(closed_pose), "heat: closing seats the sash in its original frame")
 	_check(arcade.cooling_use_bar.value < open_usage and not window["prompt"].visible, "heat: closing visibly lowers air-conditioning power use")
 	_check(arcade.action_label.visible, "heat: after closing, the footer returns to explain the cooling effect")
 	for room_window in arcade.windows:

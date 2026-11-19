@@ -11,6 +11,7 @@ signal game_over(generated_kwh: float)
 const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PLAYER_PAWN = preload("res://scripts/player/PlayerPawn.gd")
 const VISUAL_STYLE = preload("res://scripts/minigames/MiniGameVisualStyle.gd")
+const RUNNER_MODEL = preload("res://assets/models/hydro/crossflow_runner.glb")
 const GATE_NAMES: Array[String] = ["하단", "중단", "상단"]
 const GATE_LEVELS: Array[float] = [20.0, 48.0, 72.0]
 const GATE_Y: Array[float] = [1.40, 2.90, 4.20]
@@ -55,10 +56,12 @@ var lever_lights: Array[MeshInstance3D] = []
 var active_channels: Array[MeshInstance3D] = []
 var channel_pulses: Array = []
 var turbine: Node3D
+var turbine_speed := 0.0
+var water_pulse_phase := 0.0
+var electric_pulse_phase := 0.0
 var generator_light: MeshInstance3D
 var city_light: MeshInstance3D
 var power_line: MeshInstance3D
-var generator_shaft: MeshInstance3D
 var electric_pulses: Array[MeshInstance3D] = []
 var city_windows: Array[MeshInstance3D] = []
 var city_window_material: StandardMaterial3D
@@ -155,6 +158,10 @@ func setup(player_data: Dictionary, game_seed: int) -> void:
 	awarded_points = 0
 	score_elapsed = 0.0
 	visual_time = 0.0
+	turbine.rotation.z = 0.0
+	turbine_speed = 0.0
+	water_pulse_phase = 0.0
+	electric_pulse_phase = 0.0
 	overflowed = false
 	jump_was_down = false
 	space_was_down = false
@@ -330,18 +337,16 @@ func _build_dam() -> void:
 			jump_hint.outline_size = 7
 			jump_hint.no_depth_test = true
 			world.add_child(jump_hint)
-	turbine = Node3D.new()
+	# The runner and shaft share one axle. Its far end enters the generator.
+	var axle_mount := Node3D.new()
+	axle_mount.position = Vector3(4.8, TAILWATER_Y, 1.12)
+	axle_mount.rotation.y = deg_to_rad(-62.0)
+	world.add_child(axle_mount)
+	turbine = RUNNER_MODEL.instantiate()
 	turbine.name = "WaterTurbine"
-	turbine.position = Vector3(4.8, TAILWATER_Y, 0.9)
-	world.add_child(turbine)
-	_sphere_on(turbine, Vector3.ZERO, 0.27, Color("d8f7fa"))
-	for blade_index in range(4):
-		var blade := _box("TurbineBlade%d" % blade_index, Vector3(0, 0.55, 0), Vector3(0.18, 0.9, 0.13), Color("e4f5f6"), false, turbine)
-		blade.rotation_degrees.z = float(blade_index) * 90.0
-		blade.position = Vector3(sin(float(blade_index) * PI / 2.0) * 0.46, cos(float(blade_index) * PI / 2.0) * 0.46, 0)
-	_box("Generator", Vector3(6.45, 1.0, 0.8), Vector3(1.15, 1.2, 1.1), Color("566d79"))
-	generator_shaft = _box("TurbineGeneratorShaft", Vector3(5.65, TAILWATER_Y, 1.05), Vector3(1.5, 0.13, 0.13), Color("d9ecf0"))
-	generator_light = _sphere("GeneratorPower", Vector3(6.45, 1.8, 1.25), 0.28, Color("ffe872"), true)
+	axle_mount.add_child(turbine)
+	_box("Generator", Vector3(6.45, 1.0, 0.24), Vector3(1.15, 1.2, 1.1), Color("566d79"))
+	generator_light = _sphere("GeneratorPower", Vector3(6.45, 1.8, 0.55), 0.28, Color("ffe872"), true)
 	# Keep the entire turbine → generator → city chain inside laptop viewports.
 	power_line = _box("PowerToCity", Vector3(7.6, 2.0, 0.4), Vector3(2.4, 0.10, 0.12), Color("ffe872"), true)
 	for pulse_index in range(4):
@@ -630,19 +635,25 @@ func _animate_world(delta: float) -> void:
 			hero.call("_set_avatar_animation_state", moving)
 		if absf(hero_move_axis) > 0.01 and hero.avatar_sprite:
 			hero.avatar_sprite.flip_h = hero_move_axis < 0.0
-	var current_power := power_for_gate(water_level, open_gate)
-	if current_power <= 0.0:
+	var flow := flow_for_gate(water_level, open_gate)
+	var target_speed := flow * 0.12
+	var acceleration := 7.0 if flow > 0.0 else 11.0
+	var ramp_time := minf(delta, absf(target_speed - turbine_speed) / acceleration)
+	var next_speed := move_toward(turbine_speed, target_speed, acceleration * delta)
+	turbine.rotate_z((turbine_speed + next_speed) * 0.5 * ramp_time + next_speed * (delta - ramp_time))
+	turbine_speed = next_speed
+	if flow <= 0.0:
 		return
-	turbine.rotation_degrees.z += (180.0 + flow_for_gate(water_level, open_gate) * 3.0) * delta
-	generator_shaft.rotation.x += delta * (3.0 + visual_power_fraction * 8.0)
 	generator_light.scale = Vector3.ONE * (0.85 + 0.18 * sin(visual_time * 10.0))
+	var flow_speed := 0.65 + clampf(flow / 50.0, 0.0, 1.0) * 1.1
+	water_pulse_phase = fposmod(water_pulse_phase + delta * flow_speed, 1.0)
+	electric_pulse_phase = fposmod(electric_pulse_phase + delta * (0.55 + visual_power_fraction * 1.2), 1.0)
 	for pulse_index in range((channel_pulses[open_gate] as Array).size()):
 		var pulse := channel_pulses[open_gate][pulse_index] as MeshInstance3D
-		var flow_speed := 0.65 + clampf(flow_for_gate(water_level, open_gate) / 50.0, 0.0, 1.0) * 1.1
-		var progress := fposmod(visual_time * flow_speed + float(pulse_index) * 0.25, 1.0)
+		var progress := fposmod(water_pulse_phase + float(pulse_index) * 0.25, 1.0)
 		pulse.position = Vector3(-0.65, GATE_Y[open_gate], 0.8).lerp(Vector3(4.65, TAILWATER_Y, 0.8), progress)
 	for pulse_index in range(electric_pulses.size()):
-		var progress := fposmod(visual_time * (0.55 + visual_power_fraction * 1.2) + float(pulse_index) * 0.25, 1.0)
+		var progress := fposmod(electric_pulse_phase + float(pulse_index) * 0.25, 1.0)
 		electric_pulses[pulse_index].position = Vector3(6.45, 2.0, 0.65).lerp(Vector3(8.8, 2.0, 0.65), progress)
 
 func _update_visuals() -> void:
@@ -783,16 +794,6 @@ func _sphere(node_name: String, where: Vector3, radius: float, color: Color, glo
 	instance.material_override = _material(color, glowing)
 	world.add_child(instance)
 	return instance
-
-func _sphere_on(parent: Node3D, where: Vector3, radius: float, color: Color) -> void:
-	var mesh := SphereMesh.new()
-	mesh.radius = radius
-	mesh.height = radius * 2.0
-	var instance := MeshInstance3D.new()
-	instance.mesh = mesh
-	instance.position = where
-	instance.material_override = _material(color, false)
-	parent.add_child(instance)
 
 func _material(color: Color, glowing: bool) -> StandardMaterial3D:
 	return VISUAL_STYLE.material(color, glowing)

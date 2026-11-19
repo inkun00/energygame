@@ -249,13 +249,22 @@ func _animate_demo(delta: float) -> void:
 			arcade.call("_update_camera_and_bus")
 			arcade.set("bus_door_open", smoothstep(2.5, 3.2, t))
 			arcade.call("_set_bus_door_position")
+			var door: Vector3 = arcade.call("_door_position")
 			var index := 0
 			for state in demo_record["states"]:
 				var pupil := state["node"] as Node3D
 				var travel := smoothstep(3.0 + index * 0.04, 4.1 + index * 0.04, t)
-				pupil.position = Vector3(float(state["base_x"]), 0.255, float(state["base_z"])).lerp(Vector3(13.08, 0.335, 1.98), travel)
+				var wait_at := Vector3(float(state["base_x"]), 0.255, float(state["base_z"]))
+				var previous := pupil.position
+				pupil.position = arcade.call("boarding_path_position", wait_at, door, travel)
 				pupil.visible = index < 6 and travel < 1.0
-				arcade.call("_play_student_animation", state["animator"], "walk" if travel > 0.0 and travel < 1.0 else "idle", float(state["phase"]), 1.0)
+				if pupil.visible and travel > 0.0:
+					var step := pupil.position - previous
+					arcade.call("_face_student", pupil, step)
+					arcade.call("_play_gait", state, step.length() / maxf(0.001, delta))
+				elif pupil.visible:
+					pupil.rotation.y = float(state["waiting_yaw"])
+					arcade.call("_play_student_animation", state["animator"], "idle", float(state["phase"]), 1.0)
 				index += 1
 			key_badge.text = "D" if t < 2.5 else ("S" if t < 3.0 else "Space")
 		"heat_leak":

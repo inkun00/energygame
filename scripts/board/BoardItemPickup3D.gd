@@ -1,21 +1,48 @@
 extends Node3D
 class_name BoardItemPickup3D
 
-## 각 게임 칸 위에 고정해서 표시하는 발전소 건설 재료입니다.
+## 각 게임 칸에 놓이는 발전소 건설 재료입니다.
 
-var tile_index: int = -1
+const TOKEN_MODELS = preload("res://assets/models/board/construction_tokens.glb")
+
+static var token_meshes: Dictionary = {}
+
+var tile_index := -1
 var item_id := ""
-var item_sprite: Sprite3D
+var item_visual: GeometryInstance3D
 var shadow_mesh: MeshInstance3D
 var shadow_material: ShaderMaterial
-var ground_height := 0.0
 var is_collected := false
+var resting_height := 0.014
+var collect_tween: Tween
+
+static func _get_token_mesh(id: String) -> Mesh:
+	if token_meshes.is_empty():
+		var collection := TOKEN_MODELS.instantiate()
+		for part in collection.get_children():
+			if part is MeshInstance3D:
+				token_meshes[String(part.name)] = part.mesh
+		collection.free()
+	return token_meshes.get(id)
 
 func setup_pickup(tile_idx: int, pickup_item_id: String, item_data: Dictionary, pickup_shadow_material: ShaderMaterial = null) -> void:
 	tile_index = tile_idx
 	item_id = pickup_item_id
-	ground_height = BoardGrid.get_tile_surface_height(tile_idx)
-	position = BoardGrid.get_tile_position_3d(tile_idx) + Vector3(0, ground_height - BoardGrid.get_tile_position_3d(tile_idx).y + 0.52, 0)
+	var token := _get_token_mesh(item_id)
+	if token:
+		var model := MeshInstance3D.new()
+		model.mesh = token
+		item_visual = model
+	else:
+		var icon := Sprite3D.new()
+		icon.texture = load(str(item_data["asset"]))
+		icon.pixel_size = 0.00078
+		icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		icon.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+		item_visual = icon
+		resting_height = 0.5
+	item_visual.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(item_visual)
 
 	shadow_mesh = MeshInstance3D.new()
 	var shadow_plane := PlaneMesh.new()
@@ -24,44 +51,33 @@ func setup_pickup(tile_idx: int, pickup_item_id: String, item_data: Dictionary, 
 	shadow_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	shadow_material = pickup_shadow_material if pickup_shadow_material != null else _create_soft_shadow_material(0.28)
 	shadow_mesh.material_override = shadow_material
+	shadow_mesh.position.y = 0.011
 	add_child(shadow_mesh)
-	_update_ground_shadow()
-
-	item_sprite = Sprite3D.new()
-	item_sprite.texture = load(str(item_data.get("asset", "")))
-	item_sprite.pixel_size = 0.00078
-	item_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	item_sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-	# 조명이 스프라이트의 잘린 형상을 다시 투영하지 않도록 합니다. 바닥에는 위의
-	# 부드러운 타원 그림자 하나만 남습니다.
-	item_sprite.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	item_sprite.position = Vector3(0, -0.02, 0)
-	add_child(item_sprite)
+	reset_pickup()
 
 func reset_pickup() -> void:
+	if collect_tween:
+		collect_tween.kill()
 	is_collected = false
-	scale = Vector3.ONE
-	rotation = Vector3.ZERO
-	ground_height = BoardGrid.get_tile_surface_height(tile_index)
-	position = BoardGrid.get_tile_position_3d(tile_index) + Vector3(0, ground_height - BoardGrid.get_tile_position_3d(tile_index).y + 0.52, 0)
+	position = BoardGrid.get_tile_position_3d(tile_index)
+	position.y = BoardGrid.get_tile_surface_height(tile_index)
+	# Keep the back-left tile badge and the front number clear at the turn camera angle.
+	position.x += 0.13
+	item_visual.position.y = resting_height
+	item_visual.scale = Vector3.ONE
+	shadow_mesh.scale = Vector3.ONE
 	visible = true
-	_update_ground_shadow()
 
 func collect() -> void:
 	if is_collected:
 		return
 	is_collected = true
-	var tween := create_tween().set_parallel(true)
-	tween.tween_property(self, "position:y", position.y + 0.55, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(self, "scale", Vector3(1.45, 1.45, 1.45), 0.20).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tween.tween_property(self, "scale", Vector3.ZERO, 0.16).set_delay(0.20).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tween.chain().tween_callback(queue_free)
-
-func _update_ground_shadow() -> void:
-	if shadow_mesh == null:
-		return
-	shadow_mesh.position = Vector3(0, ground_height - position.y + 0.012, 0)
-	shadow_mesh.scale = Vector3.ONE
+	collect_tween = create_tween().set_parallel(true)
+	collect_tween.tween_property(item_visual, "position:y", resting_height + 0.55, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	collect_tween.tween_property(item_visual, "scale", Vector3.ONE * 1.45, 0.20).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	collect_tween.tween_property(item_visual, "scale", Vector3.ZERO, 0.16).set_delay(0.20).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	collect_tween.tween_property(shadow_mesh, "scale", Vector3(0.02, 1.0, 0.02), 0.36)
+	collect_tween.chain().tween_callback(queue_free)
 
 func _create_soft_shadow_material(alpha: float) -> ShaderMaterial:
 	var shader := Shader.new()

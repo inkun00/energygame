@@ -69,9 +69,20 @@ func _wind() -> bool:
 	game.turbine_yaw = game.wind_angle
 	game._update_direction_feedback(1.0, 60.0)
 	_check(is_equal_approx(game.wind_pointer.position.x, game.turbine_pointer.position.x), "Wind: matching directions must visibly line up")
+	game.wind_speed = 22
+	game._update_rotor(0.10, 100.0)
+	var starting_speed: float = game.rotor_speed
+	for frame in range(10):
+		game._update_rotor(0.10, 100.0)
+	_check(starting_speed > 0.0 and game.rotor_speed > starting_speed, "Wind: the loaded blades must spin up progressively")
 	game.storm_phase = true
 	game._engage_storm_brake(false)
 	game._update_hud(1.0, 0.0)
+	var cruising_speed: float = game.rotor_speed
+	game._update_rotor(1.0 / 60.0, 0.0)
+	_check(game.rotor_speed > 0.0 and game.rotor_speed < cruising_speed, "Wind: emergency braking must slow a moving rotor before parking it")
+	for frame in range(24):
+		game._update_rotor(1.0 / 60.0, 0.0)
 	var rotation_before: float = game.rotor.rotation.z
 	var background_before: float = game.background_rotors[0].rotation.z
 	game._update_rotor(0.25, 0.0)
@@ -146,7 +157,10 @@ func _hydro() -> bool:
 	game._update_visuals()
 	rotation_before = game.turbine.rotation_degrees.z
 	game._animate_world(0.2)
-	_check(not game.power_line.visible and is_equal_approx(rotation_before, game.turbine.rotation_degrees.z), "Hydro: closing the gate must stop the hydraulic/electric chain")
+	_check(not game.power_line.visible and game.turbine.rotation_degrees.z > rotation_before, "Hydro: cutting flow stops generation immediately while the runner coasts")
+	rotation_before = game.turbine.rotation_degrees.z
+	game._animate_world(0.2)
+	_check(is_equal_approx(rotation_before, game.turbine.rotation_degrees.z), "Hydro: the runner must settle without water flow")
 	for pulse in game.electric_pulses:
 		_check(not pulse.visible, "Hydro: stopped generation must not send cosmetic electricity")
 	for window in game.city_windows:

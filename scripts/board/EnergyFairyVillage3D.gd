@@ -3,9 +3,16 @@ class_name EnergyFairyVillage3D
 
 ## 보드 바깥의 빈 월드를 에너지요정 마을로 채우는 경량 로우폴리 3D 배경입니다.
 
+const TURBINE_BLADE = preload("res://assets/models/wind/turbine_blade.glb")
+const FINISH_CRANE = preload("res://assets/models/board/finish_crane.glb")
+
 var animated_rotors: Array[Node3D] = []
 var floating_lights: Array[Node3D] = []
 var elapsed := 0.0
+var crane_jib: Node3D
+var crane_cable: Node3D
+var crane_hook: Node3D
+var crane_rope_length := 0.0
 
 var grass_material: StandardMaterial3D
 var path_material: StandardMaterial3D
@@ -50,22 +57,42 @@ func build_village() -> void:
 	_build_waterways_and_paths()
 	_build_fairy_neighborhoods()
 	_build_renewable_gardens()
+	_build_finish_crane()
 	_build_forest_ring()
 	_build_distant_hills()
 	set_process(true)
 
 func _process(delta: float) -> void:
 	elapsed += delta
+	if crane_jib and crane_jib.is_visible_in_tree():
+		crane_jib.rotation.y = sin(elapsed * 0.39) * 0.14
+		var payout := 0.82 + 0.18 * cos(elapsed * 0.83)
+		crane_cable.scale.y = payout
+		crane_hook.position.y = crane_cable.position.y - crane_rope_length * payout
 	for rotor_index in range(animated_rotors.size()):
 		var rotor := animated_rotors[rotor_index]
 		if is_instance_valid(rotor):
-			rotor.rotation.z += delta * (0.72 + rotor_index * 0.08)
+			rotor.rotation.z -= delta * (0.72 + rotor_index * 0.08)
 	for light_index in range(floating_lights.size()):
 		var light := floating_lights[light_index]
 		if is_instance_valid(light):
 			var base_y := float(light.get_meta("base_y", light.position.y))
 			light.position.y = base_y + sin(elapsed * 1.35 + light_index * 0.83) * 0.18
 			light.rotation.y += delta * 0.34
+
+func _build_finish_crane() -> void:
+	var crane := FINISH_CRANE.instantiate() as Node3D
+	crane.name = "FinishConstructionCrane"
+	var finish := BoardGrid.get_tile_position_3d(BoardGrid.LAST_TILE_INDEX)
+	# The site stands on the plaza beyond the back-left corner of the finish.
+	crane.position = Vector3(finish.x - 1.82, -0.245, finish.z - 1.87)
+	crane.rotation.y = PI - 0.18
+	add_child(crane)
+	_register_scenery(crane, 1.4, 1.35)
+	crane_jib = crane.get_node("Jib")
+	crane_cable = crane_jib.get_node("HoistCable")
+	crane_hook = crane_jib.get_node("HookBlock")
+	crane_rope_length = crane_cable.position.y - crane_hook.position.y
 
 func _create_materials() -> void:
 	grass_material = _material(Color("83aa72"), 0.92)
@@ -188,15 +215,14 @@ func _build_wind_turbine(position_value: Vector3, yaw: float) -> void:
 	var metal := _material(Color("d9ece4"), 0.5)
 	_add_cylinder(turbine, Vector3(0, 2.25, 0), 0.11, 0.24, 4.5, metal, 10)
 	var rotor := Node3D.new()
-	rotor.position = Vector3(0, 4.45, 0.12)
+	rotor.position = Vector3(0, 4.45, 0.25)
+	rotor.rotation.z = yaw * 2.0
 	turbine.add_child(rotor)
 	_add_sphere(rotor, Vector3.ZERO, 0.25, glow_materials[2], 10)
 	for blade_index in range(3):
-		var blade_root := Node3D.new()
-		blade_root.rotation.z = blade_index * TAU / 3.0
-		rotor.add_child(blade_root)
-		var blade := _add_box(blade_root, Vector3(0, 1.02, 0), Vector3(0.22, 1.72, 0.10), metal)
-		blade.rotation.z = -0.10
+		var blade := TURBINE_BLADE.instantiate() as Node3D
+		blade.rotation.z = blade_index * TAU / 3.0
+		rotor.add_child(blade)
 	animated_rotors.append(rotor)
 
 func _build_solar_panel(position_value: Vector3, yaw: float) -> void:

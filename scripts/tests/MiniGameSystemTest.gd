@@ -352,7 +352,7 @@ func _run() -> void:
 			_check(commute.STOP_OFFSETS[1] - commute.STOP_OFFSETS[0] >= 17.0, "정류장 간격이 이전보다 충분히 넓어야 합니다.")
 			_check(commute.energy_per_person(45, commute.SCHOOL_OFFSET) < commute.energy_per_person(10, commute.SCHOOL_OFFSET), "같은 길을 45명이 함께 타면 10명일 때보다 1인당 에너지가 적어야 합니다.")
 			_check(commute.score_for_trip(45, commute.SCHOOL_OFFSET) > commute.score_for_trip(10, commute.SCHOOL_OFFSET) and commute.score_for_trip(45, commute.SCHOOL_OFFSET) < game_manager.MINIGAME_SCORE_LIMIT, "45인승 점수가 더 높지만 한 번에 전체 점수 상한에 닿지 않아야 합니다.")
-			_check(commute.bus.get_child(0).scene_file_path.ends_with("schoolbus.glb") and commute.bus_door_left != null and commute.bus_door_right != null, "오픈소스 GLB 버스에 움직이는 출입문이 있어야 합니다.")
+			_check(commute.bus.get_child(0).scene_file_path == commute.BUS_MODEL.resource_path and commute.bus_door_left != null and commute.bus_door_right != null and commute.wheels.size() == 4, "게임에 적용된 GLB 버스에는 출입문 두 짝과 바퀴 네 개가 있어야 합니다.")
 			_check(str(game_manager.MINIGAME_DEFINITIONS["eco_commute"]["input_hint"]).contains("D 길게 전진 · A 길게 후진 · S 정차"), "버스 조작 안내는 D 전진 가속, A 후진 가속, S 정차를 표시해야 합니다.")
 			var first_stop: Dictionary = (commute.segments[0] as Dictionary)["stops"][0]
 			_check((first_stop["students"] as Array)[0].scene_file_path.ends_with("character-a.glb"), "학생도 코드 형상이 아닌 오픈소스 GLB 에셋이어야 합니다.")
@@ -377,7 +377,7 @@ func _run() -> void:
 			commute.bus_x = commute.STOP_OFFSETS[0]
 			commute.bus_speed = 0.0
 			commute._animate_bus_door(0.5)
-			_check(commute.bus_door_open == 1.0 and commute.bus_door_left.position.x < 0.93, "정류장에 멈추면 버스 문이 실제로 열려야 합니다.")
+			_check(commute.bus_door_open == 1.0 and commute.bus_door_left.position.x < commute.door_closed_left_x and commute.bus_door_right.position.x > commute.door_closed_right_x, "정류장에 멈추면 버스 문이 실제로 열려야 합니다.")
 			commute.bus_speed = 1.0
 			commute._animate_bus_door(0.5)
 			_check(commute.bus_door_open == 0.0, "버스가 다시 출발하면 문이 닫혀야 합니다.")
@@ -427,7 +427,7 @@ func _run() -> void:
 			_check(commute.bus_door_open == 1.0, "학교에 정차하면 버스 문이 열려야 합니다.")
 			commute._animate_school_doors(0.5)
 			var school: Dictionary = commute.segments[0]
-			_check(float(school["school_door_open"]) == 1.0 and (school["school_door_left"] as Node3D).position.x < commute.SCHOOL_OFFSET + commute.SCHOOL_ENTRANCE_OFFSET - 0.13, "학생들이 들어갈 때 학교 문도 열려야 합니다.")
+			_check(float(school["school_door_open"]) == 1.0 and (school["school_door_left"] as Node3D).position.x < -0.38 and (school["school_door_right"] as Node3D).position.x > 0.38, "학생들이 들어갈 때 학교 문도 열려야 합니다.")
 			commute._animate_dropoff_students(0.1)
 			var visible_exits := 0
 			var scheduled_exits := 0
@@ -446,8 +446,8 @@ func _run() -> void:
 				var previous_exit_position := first_node.position
 				commute._animate_dropoff_students(0.02)
 				var walking_direction := first_node.position - previous_exit_position
-				var expected_facing := atan2(-walking_direction.x, -walking_direction.z)
-				_check(walking_direction.length_squared() > 0.0 and first_node.position.z < 1.98 and absf(angle_difference(first_node.rotation.y, expected_facing)) < 0.005, "하차 학생은 실제 학교 입구 이동 방향을 바라보며 걸어가야 합니다.")
+				var facing := first_node.basis.z.normalized()
+				_check(walking_direction.length_squared() > 0.0 and first_node.position.z < commute._door_position().z and facing.dot(walking_direction.normalized()) > cos(deg_to_rad(10.0)), "하차 학생은 학교 입구로 휘어지는 경로의 진행 방향을 바라보며 걸어가야 합니다.")
 			else:
 				_check(false, "하차 중인 첫 학생이 너무 일찍 사라지면 안 됩니다.")
 			commute._animate_dropoff_students(10.0)
@@ -470,14 +470,14 @@ func _run() -> void:
 					first_open = window
 					break
 			heat._animate_heat(0.5)
-			_check(not first_open.is_empty() and (first_open["pane"] as Node3D).rotation.y > 0.0 and (first_open["status"] as Node3D).visible, "열린 창문은 오픈소스 창짝이 회전한 모습으로 보여야 합니다.")
+			_check(not first_open.is_empty() and (first_open["pane"] as Node3D).global_rotation.y < 0.0 and (first_open["status"] as Node3D).visible, "열린 창문은 창짝이 경첩을 중심으로 교실 안쪽으로 회전해야 합니다.")
 			var used_before: float = heat.cooling_used
 			heat._process(1.0)
 			var open_window_use: float = heat.cooling_used - used_before
 			heat.hero_x = float(first_open["x"])
 			heat._try_close()
 			heat._animate_heat(0.5)
-			_check(not bool(first_open["open"]) and is_zero_approx((first_open["pane"] as Node3D).rotation.y) and modal.score > 0, "Space로 창문을 닫으면 창짝이 닫히고 점수를 얻어야 합니다.")
+			_check(not bool(first_open["open"]) and is_zero_approx((first_open["pane"] as Node3D).global_rotation.y) and modal.score > 0, "Space로 창문을 닫으면 창짝이 닫히고 점수를 얻어야 합니다.")
 			_check(heat._open_window_count() == 2, "창문 하나를 닫으면 열린 창문 수가 줄어야 합니다.")
 			var used_after_close: float = heat.cooling_used
 			heat._process(1.0)

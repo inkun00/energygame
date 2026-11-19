@@ -85,6 +85,7 @@ func setup(player_data: Dictionary, round_seed: int) -> void:
 		window["closed"] = true
 		window["since"] = 0.0
 		window["open_amount"] = 0.0
+		(window["hinge"] as Node3D).rotation.y = 0.0
 		_update_window_visual(window)
 	_spawn_wave(0)
 	_update_overlay()
@@ -171,14 +172,15 @@ func _build_window(index: int) -> void:
 	model.scale = Vector3.ONE * 1.15
 	world.add_child(model)
 	VISUAL_STYLE.prepare_imported(model)
-	var window_pane := model.find_child("window", true, false) as Node3D
-	var center_x := x
-	if window_pane is MeshInstance3D:
-		var pane_mesh := window_pane as MeshInstance3D
-		center_x = (pane_mesh.global_transform * pane_mesh.mesh.get_aabb().get_center()).x
-		model.position.x += x - center_x
-		center_x = x
-	var pane_base_position := window_pane.position if window_pane else Vector3.ZERO
+	var window_pane := model.find_child("window", true, false) as MeshInstance3D
+	var bounds := window_pane.get_aabb()
+	model.position.x += x - window_pane.to_global(bounds.get_center()).x
+	# Place the hinge on the left stile, midway through the sash thickness.
+	var hinge := Node3D.new()
+	hinge.name = "SashHinge"
+	window_pane.get_parent().add_child(hinge)
+	hinge.transform = window_pane.transform.translated_local(Vector3(bounds.position.x, 0.0, bounds.get_center().z))
+	window_pane.reparent(hinge)
 	# Keep repeated window cues inside each window's lane and below the AC label.
 	var status := _label3d(world, "열림 · 유입", Vector3(x, 2.72, -0.65), Color("ffb16f"))
 	status.font_size = 32
@@ -188,14 +190,14 @@ func _build_window(index: int) -> void:
 	for particle_index in range(5):
 		var particle := _air_wisp(Vector3(x, 1.74 + float(particle_index) * 0.10, -0.30), hot_air_material, Vector2(0.48, 0.15))
 		particles.append(particle)
-	var reach_marker := _box(world, Vector3(center_x, 0.08, 1.12), Vector3(CLOSE_REACH * 2.0, 0.035, 0.42), Color("88f0b9"), true)
+	var reach_marker := _box(world, Vector3(x, 0.08, 1.12), Vector3(CLOSE_REACH * 2.0, 0.035, 0.42), Color("88f0b9"), true)
 	reach_marker.visible = false
-	var prompt := _label3d(world, "Space 닫기", Vector3(center_x, 2.30, 0.25), Color("b8ffd4"))
+	var prompt := _label3d(world, "Space 닫기", Vector3(x, 2.30, 0.25), Color("b8ffd4"))
 	prompt.font_size = 42
 	prompt.pixel_size = 0.008
 	prompt.outline_size = 5
 	prompt.visible = false
-	windows.append({"x": center_x, "model": model, "pane": window_pane, "pane_base_position": pane_base_position, "status": status, "particles": particles, "reach_marker": reach_marker, "prompt": prompt, "open": false, "closed": true, "since": 0.0, "open_amount": 0.0})
+	windows.append({"x": x, "model": model, "pane": window_pane, "hinge": hinge, "status": status, "particles": particles, "reach_marker": reach_marker, "prompt": prompt, "open": false, "closed": true, "since": 0.0, "open_amount": 0.0})
 
 func _spawn_hero(player_data: Dictionary) -> void:
 	if is_instance_valid(hero):
@@ -352,11 +354,8 @@ func _animate_heat(delta: float) -> void:
 	for window in windows:
 		var target := 1.0 if bool(window["open"]) else 0.0
 		window["open_amount"] = move_toward(float(window["open_amount"]), target, delta * 2.7)
-		var pane := window["pane"] as Node3D
-		if is_instance_valid(pane):
-			var amount := float(window["open_amount"])
-			pane.rotation.y = deg_to_rad(68.0) * amount
-			pane.position = (window["pane_base_position"] as Vector3) + Vector3(-0.13 * amount, 0.0, 0.13 * amount)
+		var amount := smoothstep(0.0, 1.0, float(window["open_amount"]))
+		(window["hinge"] as Node3D).rotation.y = deg_to_rad(-68.0) * amount
 		if not bool(window["open"]):
 			continue
 		var particles: Array = window["particles"]
