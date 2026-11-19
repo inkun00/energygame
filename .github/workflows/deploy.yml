@@ -41,7 +41,10 @@ jobs:
           node-version: 22
 
       - name: Verify room-service authentication and reconnect signaling
-        run: node --test services/room-directory/test/*.test.js
+        working-directory: services/room-directory
+        run: |
+          npm ci
+          node --test test/*.test.js
 
       - name: Verify real peer reconnection, host loss and ranked score delivery
         run: |

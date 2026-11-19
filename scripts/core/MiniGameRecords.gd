@@ -246,7 +246,8 @@ func _send_finish(id: String, item: Dictionary) -> void:
 func _request(method: int, path: String, data: Dictionary = {}) -> Dictionary:
 	var http := HTTPRequest.new()
 	http.process_mode = Node.PROCESS_MODE_ALWAYS
-	http.timeout = 4.0
+	# A full class may start together. Ticket and finish requests run in the background.
+	http.timeout = 20.0 if method == HTTPClient.METHOD_POST else 4.0
 	http.max_redirects = 0
 	http.body_size_limit = 16384
 	add_child(http)

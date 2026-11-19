@@ -36,7 +36,7 @@ WebRTC 테이블은 `schema.sql`에 포함되어 있으며 Worker가 첫 WebRTC 
 
 ## 미니게임 명예의 전당
 
-아홉 종목의 개인 최고점을 기존 D1에 보관합니다. 각 종목은 점수 내림차순으로 10명까지 보여 주고, 동점에는 같은 순위를 줍니다. 10명 밖이어도 본인의 정확한 순위를 별도로 돌려줍니다. 실제 조작을 제출한 첫 0점도 기록됩니다.
+공개 게임의 아홉 종목은 Firebase Cloud Firestore를 사용합니다. 종목별 개인 최고점은 `energygameLeaderboards/{game}/bests/{owner}`에, 시도와 발급 횟수는 `energygameScoreRuntime`에 보관합니다. 각 종목은 점수 내림차순으로 10명까지 보여 주고 동점에는 같은 순위를 줍니다. 10명 밖이어도 본인의 순위를 돌려주며, 실제 조작을 제출한 첫 0점도 기록합니다.
 
 클라이언트는 기기에서 무작위 키를 만들고 서비스 주소별 인증값을 사용합니다. 서버에 남는 식별자는 해시입니다. 공개 별명은 그 해시로 생성하며 학생 이름과 방 코드를 받지 않습니다. 인증값을 잃거나 다른 브라우저 프로필을 사용하면 새 기록으로 시작합니다.
 
@@ -55,9 +55,11 @@ npx wrangler dev --local --ip 127.0.0.1 --port 8787
 
 `http://127.0.0.1:8000`의 웹 게임은 같은 호스트의 8787번 포트를 사용합니다. 네이티브 개발판에서는 `ENERGYGAME_LEADERBOARD_URL=http://127.0.0.1:8787`로 지정할 수 있습니다.
 
-GitHub Pages와 Vercel의 공개 게임은 `network/leaderboard_url`에 설정된 동일한 Vercel 순위 API를 사용합니다. API는 Worker와 같은 SQL·점수 검사 코드를 실행합니다. SQLite 파일은 비공개 Vercel Blob에 저장하며, 쓰기 충돌 시 최신 버전을 읽어 해당 요청을 다시 적용합니다. 방 검색과 4인 연결은 기존 Cloudflare 서비스를 사용합니다.
+GitHub Pages와 Vercel의 공개 게임은 `network/leaderboard_url`에 설정된 동일한 Vercel 순위 API를 사용합니다. API는 Worker와 점수 검사 규칙을 공유합니다. 공개 API가 경기 결과를 검증한 뒤 Firestore 트랜잭션으로 저장합니다. 방 검색과 4인 연결은 Cloudflare 서비스를 사용합니다.
 
-Vercel 배포는 저장소 루트에서 `python tools/stage_vercel_site.py build/web build/production-site`로 웹 빌드와 순위 함수를 모은 뒤, `build/production-site`를 기존 `energygame-minigames-demo` 프로젝트에 배포합니다. 프로젝트의 프로덕션 환경에는 비공개 Blob 저장소가 연결되어 있어야 합니다.
+Vercel 배포는 저장소 루트에서 `python tools/stage_vercel_site.py build/web build/production-site`로 웹 빌드와 순위 함수를 모은 뒤, `build/production-site`를 `energygame-minigames-demo` 프로젝트에 배포합니다. 프로덕션 환경에 `FIREBASE_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_EMAIL`, `GCP_WORKLOAD_IDENTITY_PROVIDER`를 설정합니다. 마지막 값은 `projects/{number}/locations/global/workloadIdentityPools/{pool}/providers/{provider}` 형태입니다. Google Cloud의 Workload Identity Federation은 해당 Vercel 프로젝트의 production 주체만 서비스 계정을 맡을 수 있게 구성합니다. 서비스 계정에는 게임 데이터베이스에 대한 Cloud Datastore User 권한이 필요합니다.
+
+기존 순위를 옮길 때는 내보낸 비공개 SQLite 파일로 `node tools/migrate-scores.mjs --sqlite <파일> --project <프로젝트ID> --apply`를 실행합니다. 도구는 Google Application Default Credentials를 사용합니다. 공개 API 전환 후 이전 저장소의 마지막 스냅샷으로 재실행하고, `--apply`를 `--verify`로 바꿔 검증합니다. 이미 등록된 더 높은 점수와 나중에 시작한 시도는 보존합니다.
 
 ## 연결 범위
 

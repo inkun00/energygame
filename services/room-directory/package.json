@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@vercel/blob": "2.9.0"
+    "@google-cloud/firestore": "9.4.1",
+    "@vercel/oidc": "4.0.9",
+    "google-auth-library": "11.3.4"
   },
   "scripts": {
     "test": "node --test",

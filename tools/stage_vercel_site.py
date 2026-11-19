@@ -15,8 +15,8 @@ def stage(web: Path, output: Path) -> None:
     for source in web.iterdir():
         if source.is_file() and not source.name.startswith(".") and source.suffix != ".import":
             copy2(source, public / source.name)
-    for name in ("package.json", "package-lock.json", "vercel.json", "schema.sql",
-                 "api/records.mjs", "src/scores.js", "src/score-snapshot.js", "src/sqlite-d1.js"):
+    for name in ("package.json", "package-lock.json", "vercel.json",
+                 "api/records.mjs", "src/scores.js", "src/firestore-connection.js", "src/firebase-scores.js"):
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
         copy2(service / name, target)

@@ -1,8 +1,9 @@
 {
   "framework": null,
   "outputDirectory": "public",
+  "regions": ["icn1"],
   "functions": {
-    "api/records.mjs": {"includeFiles": "schema.sql", "maxDuration": 30}
+    "api/records.mjs": {"maxDuration": 30}
   },
   "rewrites": [
     {"source": "/api/scores/:route*", "destination": "/api/records?gamePath=:route*"}
