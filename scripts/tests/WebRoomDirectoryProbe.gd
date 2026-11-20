@@ -7,6 +7,7 @@ var remote_candidates: Array[String] = []
 var online_frames := false
 var heartbeat_peers: Array[int] = []
 var connected_browser_peer := 0
+var ice_configs: Array[Dictionary] = []
 
 func _ready() -> void:
 	set_process(false)
@@ -31,7 +32,12 @@ func _send_directory_request(method: int, path: String, payload: Dictionary, cal
 func respond(call: Dictionary, result: int, status: int, data: Dictionary = {}) -> void:
 	call.callback.call(result, status, PackedStringArray(), JSON.stringify(data).to_utf8_buffer())
 
-func _ensure_browser_connection(_remote_peer_id: int, _create_offer: bool) -> Error:
+func _ensure_browser_connection(remote_peer_id: int, create_offer: bool) -> Error:
+	ice_configs.append({"peer": remote_peer_id, "servers": _browser_ice_servers_for(remote_peer_id)})
+	if create_offer:
+		_web_offer_generation += 1
+		_web_connection_attempts[remote_peer_id] = "probe-%d" % _web_offer_generation
+		_web_peer_generations[remote_peer_id] = _web_offer_generation
 	return OK
 
 func _set_browser_remote_description(remote_peer_id: int, type: String, sdp: String) -> void:
