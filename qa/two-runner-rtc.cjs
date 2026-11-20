@@ -43,6 +43,29 @@ module.exports = async ({ github, context }) => {
     page = await browser.newPage();
     await page.route("https://rtc-check.invalid/", route => route.fulfill({ contentType: "text/html", body: "<title>Owned WebRTC peers</title>" }));
     await page.goto("https://rtc-check.invalid/");
+    await page.evaluate(async () => {
+      const a = new RTCPeerConnection(); const b = new RTCPeerConnection();
+      const echo = a.createDataChannel("reliable", { negotiated: true, ordered: true, id: 1 });
+      const peer = b.createDataChannel("reliable", { negotiated: true, ordered: true, id: 1 });
+      const packets = [];
+      a.onicecandidate = e => { if (e.candidate) b.remoteDescription ? b.addIceCandidate(e.candidate) : packets.push(e.candidate); };
+      b.onicecandidate = e => { if (e.candidate) a.addIceCandidate(e.candidate); };
+      const received = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Same-VM control failed")), 12000);
+        echo.onopen = () => echo.send("test");
+        peer.onmessage = e => peer.send(e.data);
+        echo.onmessage = e => { clearTimeout(timeout); if(e.data === "test") resolve(); else reject(new Error("Unexpected control message")); };
+      });
+      try {
+        await a.setLocalDescription(await a.createOffer());
+        await b.setRemoteDescription(a.localDescription);
+        for (const candidate of packets) await b.addIceCandidate(candidate);
+        await b.setLocalDescription(await b.createAnswer());
+        await a.setRemoteDescription(b.localDescription);
+        await received;
+      } finally { a.close(); b.close(); }
+    });
+    console.log("SAME_VM_BIDIRECTIONAL_CHANNEL_OK", role);
     await page.evaluate(role => {
       window.pc = new RTCPeerConnection({ iceServers: [
         { urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }, { urls: "stun:stun.cloudflare.com:3478" }
@@ -62,7 +85,7 @@ module.exports = async ({ github, context }) => {
       await page.evaluate(async type => {
         await pc.setLocalDescription(type === "offer" ? await pc.createOffer() : await pc.createAnswer());
       }, name);
-      await page.waitForFunction(() => pc.iceGatheringState === "complete", undefined, { timeout: 25000 }).catch(() => {});
+      await page.waitForFunction(() => window.types.has("srflx") || pc.iceGatheringState === "complete", undefined, { timeout: 5000 }).catch(() => {});
       const desc = await page.evaluate(() => pc.localDescription.toJSON());
       const iv = randomBytes(12);
       const cipher = createCipheriv("aes-256-gcm", shared, iv);
@@ -79,6 +102,11 @@ module.exports = async ({ github, context }) => {
     }
     if (role === "host") { await sendDescription("offer"); await receiveDescription("answer"); }
     else { await receiveDescription("offer"); await sendDescription("answer"); }
+    console.log("Public egress comparison:", await page.evaluate(() => {
+      const addresses = description => description.sdp.split(/\r?\n/).filter(line => /^a=candidate:.* typ srflx(?: |$)/.test(line)).map(line => line.split(" ")[4]);
+      const local = addresses(pc.localDescription), remote = addresses(pc.remoteDescription);
+      return !local.length || !remote.length ? "unavailable" : local.some(address => remote.includes(address)) ? "overlap" : "distinct";
+    }));
     await page.waitForFunction(() => window.complete, undefined, { timeout: 45000 });
     const route = await page.evaluate(async () => {
       const stats = await pc.getStats();
