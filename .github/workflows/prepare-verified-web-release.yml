@@ -1,0 +1,100 @@
+name: Prepare verified web release
+on:
+  push:
+    branches: [qa/web-release-prep-20261120]
+permissions:
+  contents: read
+env:
+  GAME_SHA: 21d4f08c811abfcfa4111d68437e67dbbdbc895f
+jobs:
+  worker-connection:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check existing Worker deployment configuration
+        env:
+          TOKEN_CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          ACCOUNT_CONFIGURED: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' || vars.CLOUDFLARE_ACCOUNT_ID != '' }}
+        run: |
+          echo "Worker deployment token configured: $TOKEN_CONFIGURED"
+          echo "Worker account identifier configured: $ACCOUNT_CONFIGURED"
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 21d4f08c811abfcfa4111d68437e67dbbdbc895f
+          lfs: true
+          persist-credentials: false
+      - uses: chickensoft-games/setup-godot@v1
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: true
+      - name: Verify the target, import, and export the Web preset
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GAME_SHA"
+          mkdir -p build/web
+          godot --headless --editor --import 2>&1 | tee "$RUNNER_TEMP/import.log"
+          godot --headless --export-release Web build/web/index.html 2>&1 | tee "$RUNNER_TEMP/export.log"
+          if grep -E 'SCRIPT ERROR|Parse Error|^ERROR:' "$RUNNER_TEMP"/{import,export}.log; then exit 1; fi
+      - name: Verify and zip only the exported game
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, re, zipfile
+          from pathlib import Path
+          web = Path("build/web")
+          files = sorted(p for p in web.iterdir() if p.is_file() and not p.name.startswith(".") and p.suffix != ".import")
+          names = {p.name for p in files}
+          assert {"index.html", "index.js", "index.pck", "index.wasm"} <= names
+          assert (web / "index.pck").read_bytes()[:4] == b"GDPC"
+          assert (web / "index.wasm").read_bytes()[:4] == b"\0asm"
+          html = (web / "index.html").read_text()
+          sizes = json.loads(re.search(r'"fileSizes"\s*:\s*(\{[^}]+\})', html).group(1))
+          assert all((web / name).stat().st_size == size for name, size in sizes.items())
+          assert (web / "index.pck").stat().st_size > 1000000
+          zip_path = Path("energygame-web.zip")
+          with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as out:
+              for f in files:
+                  out.write(f, f.name)
+          with zipfile.ZipFile(zip_path) as saved:
+              assert saved.testzip() is None and set(saved.namelist()) == names
+              assert all(hashlib.sha256(saved.read(f.name)).digest() == hashlib.sha256(f.read_bytes()).digest() for f in files)
+          print(f"{len(files)} game files | {zip_path.stat().st_size} bytes | sha256={hashlib.file_digest(zip_path.open('rb'), 'sha256').hexdigest()}")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: game-web
+          path: energygame-web.zip
+          compression-level: 0
+          retention-days: 3
+  publish:
+    if: ${{ false }}
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: game-web
+      - name: Publish release and verify the asset GitHub serves
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="web-$GAME_SHA"
+          if ! gh release view "$tag" --repo "$GH_REPO" > /dev/null 2>&1; then
+            gh release create "$tag" energygame-web.zip --repo "$GH_REPO" --target "$GAME_SHA" --title "온라인 모험 방 참가 개선" --notes "온라인 모험의 방 참가 과정을 개선한 웹 빌드입니다."
+          fi
+          test "$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq .object.sha)" = "$GAME_SHA"
+          mkdir -p "$RUNNER_TEMP/release-download"
+          gh release download "$tag" --repo "$GH_REPO" --pattern energygame-web.zip --dir "$RUNNER_TEMP/release-download"
+          cmp energygame-web.zip "$RUNNER_TEMP/release-download/energygame-web.zip"
+          sha256sum energygame-web.zip
