@@ -1,0 +1,2211 @@
+extends Node
+
+## 데스크톱은 ENet, 브라우저는 WebRTC를 사용하며 방을 만든 플레이어가 권한 서버가 됩니다.
+
+signal connection_succeeded
+signal connection_failed
+signal server_disconnected
+signal player_connected(peer_id, player_info)
+signal player_disconnected(peer_id)
+signal room_state_changed(players)
+signal game_started_signal(player_configs, duration_seconds)
+signal room_code_created(code)
+signal room_code_lookup_failed(message)
+signal external_room_ready(code)
+signal external_room_failed(message)
+signal room_list_received(rooms)
+signal room_list_failed(message)
+signal recovery_state_changed(state)
+signal session_restored
+signal game_action_rejected(action: String, payload: Dictionary)
+
+const DEFAULT_PORT: int = 8910
+const DISCOVERY_PORT: int = 8911
+const MAX_PLAYERS: int = 4
+const ROOM_CODE_DIGITS := 6
+const DISCOVERY_MAGIC := "energy_fairy_room_v1"
+const DISCOVERY_BROADCAST_INTERVAL := 0.65
+const DISCOVERY_TIMEOUT_SECONDS := 12.0
+const DIRECTORY_HEARTBEAT_SECONDS := 20.0
+const WEB_SIGNAL_POLL_INTERVAL := 0.35
+const WEB_SIGNAL_REPLAY_INTERVAL := 4.0
+const WEB_SIGNAL_REPLAY_LIMIT := 3
+const WEB_HOST_ANSWER_TIMEOUT_SECONDS := 30.0
+const WEB_CHANNEL_OPEN_GRACE_SECONDS := 15.0
+const GAME_CHECKPOINT_INTERVAL_SECONDS := 5.0
+const CHECKPOINTS_PER_FULL_STATE := 12
+const RECONNECT_GRACE_SECONDS := 30.0
+const RECONNECT_ATTEMPT_SECONDS := 6.0
+const CONNECTION_HEARTBEAT_SECONDS := 1.0
+const CONNECTION_SILENCE_SECONDS := 8.0
+const WEB_ICE_SERVERS := [
+	{"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]},
+	{"urls": ["stun:stun.cloudflare.com:3478"]}
+]
+
+var is_online := false
+var is_host := false
+var my_peer_id := 1
+var connected_players: Dictionary = {}
+var game_peer_ids: Array[int] = []
+var shared_board_tiles: Array[Dictionary] = []
+var pending_local_player_info: Dictionary = {}
+var game_has_started := false
+var _game_signals_connected := false
+var room_code := ""
+var room_title := "함께하는 에너지 모험"
+var room_capacity := 4
+var _room_password := ""
+var _join_password := ""
+var _room_list_pending := false
+var pending_room_code := ""
+var _discovery_broadcaster: PacketPeerUDP
+var _discovery_listener: PacketPeerUDP
+var _discovery_broadcast_elapsed := 0.0
+var _discovery_lookup_remaining := 0.0
+var hosted_game_port := DEFAULT_PORT
+var _room_lookup_active := false
+var _directory_lookup_pending := false
+var _external_room_registered := false
+var _directory_heartbeat_remaining := 0.0
+var _host_directory_token := ""
+var _upnp_thread: Thread
+var _upnp_setup_pending := false
+var _upnp_gateway: UPNP
+var _external_host_ip := ""
+var _directory_registration_attempts := 0
+var _web_transport := false
+var _web_ice_servers: Array = WEB_ICE_SERVERS
+var _ice_url_pattern := RegEx.create_from_string(r"^(stun|stuns|turn|turns):([a-z0-9.-]+|\[[a-f0-9:.]+\])(?::([0-9]{1,5}))?(?:\?transport=(udp|tcp))?\z")
+var _web_multiplayer_peer: WebRTCMultiplayerPeer
+var _web_connections: Dictionary = {}
+var _web_remote_description_set: Dictionary = {}
+var _web_pending_candidates: Dictionary = {}
+var _web_signal_poll_remaining := 0.0
+var _web_signal_poll_pending := false
+var _web_processed_signal_id := 0
+var _web_signaling_active := false
+var _web_connect_remaining := 0.0
+var _full_game_snapshot_remaining := 0.0
+var _checkpoints_until_full := 0
+var _reliable_game_state: Dictionary = {}
+var _last_open_market_sync_signature := ""
+var _resume_token := ""
+var _peer_resume_tokens: Dictionary = {}
+var _resume_slots: Dictionary = {}
+var _pending_reconnects: Dictionary = {}
+var _pending_registrations: Dictionary = {}
+var _peer_last_seen: Dictionary = {}
+var _join_address := ""
+var _join_port := DEFAULT_PORT
+var _saved_local_index := -1
+var _reconnecting := false
+var _recovery_failed := false
+var _host_waiting := false
+var _reconnect_deadline := 0
+var _next_reconnect_attempt := 0
+var _last_host_contact := 0
+var _next_heartbeat_ms := 0
+var _last_recovery_tick_ms := 0
+var _heartbeat_probes: Dictionary = {}
+var _last_recovery_seconds := -1
+var _web_connection_attempts: Dictionary = {}
+var _web_peer_generations: Dictionary = {}
+var _web_early_candidates: Dictionary = {}
+var _web_received_deliveries: Dictionary = {}
+var _web_signal_replays: Dictionary = {}
+var _web_retired_attempts: Dictionary = {}
+var _web_offer_generation := 0
+var _browser_room_locked := false
+var _room_lock_pending := false
+var _room_lock_retry_remaining := 0.0
+var _restoration_pending := false
+var _last_game_rankings: Array = []
+var _network_session := 0
+
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	# All game actions go through the host. Relaying client-to-client traffic
+	# also sends peer notifications to already-closing ENet peers during a
+	# simultaneous connection loss; no game feature needs that relay.
+	if multiplayer is SceneMultiplayer:
+		(multiplayer as SceneMultiplayer).server_relay = false
+	multiplayer.peer_connected.connect(_on_peer_connected)
+	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	multiplayer.connected_to_server.connect(_on_connected_to_server)
+	multiplayer.connection_failed.connect(_on_connection_failed)
+	multiplayer.server_disconnected.connect(_on_server_disconnected)
+	_connect_game_signals()
+	set_process(true)
+
+
+func _process(delta: float) -> void:
+	_update_connection_recovery()
+	if _web_transport and is_host and game_has_started and not _browser_room_locked:
+		_room_lock_retry_remaining -= delta
+		if _room_lock_retry_remaining <= 0.0 and not _room_lock_pending:
+			_lock_browser_room()
+	if _web_connect_remaining > 0.0:
+		_web_connect_remaining -= delta
+		if _web_connect_remaining <= 0.0:
+			_fail_browser_guest_connection()
+	if _web_transport and _web_signaling_active:
+		_replay_pending_browser_signals(delta)
+		_web_signal_poll_remaining -= delta
+		if _web_signal_poll_remaining <= 0.0 and not _web_signal_poll_pending:
+			_web_signal_poll_remaining = WEB_SIGNAL_POLL_INTERVAL
+			_poll_browser_signals()
+	if is_online and is_host and not game_has_started and _discovery_broadcaster:
+		_discovery_broadcast_elapsed -= delta
+		if _discovery_broadcast_elapsed <= 0.0:
+			_discovery_broadcast_elapsed = DISCOVERY_BROADCAST_INTERVAL
+			_broadcast_room_announcement()
+	if _discovery_listener:
+		_poll_room_announcements()
+	if _room_lookup_active:
+		_discovery_lookup_remaining -= delta
+		if _discovery_lookup_remaining <= 0.0:
+			if _web_transport:
+				disconnect_network()
+				room_code_lookup_failed.emit("방 참가 요청에 응답이 없습니다. 잠시 후 다시 참가해 주세요.")
+			else:
+				_stop_room_discovery()
+				room_code_lookup_failed.emit("해당 방 코드를 찾지 못했습니다. 코드와 방장 상태를 확인하세요.")
+	if _upnp_setup_pending and _upnp_thread and not _upnp_thread.is_alive():
+		var upnp_result: Dictionary = _upnp_thread.wait_to_finish()
+		_upnp_thread = null
+		_upnp_setup_pending = false
+		_finish_external_room_setup(upnp_result)
+	if _external_room_registered and is_host and not game_has_started and not _web_transport:
+		_directory_heartbeat_remaining -= delta
+		if _directory_heartbeat_remaining <= 0.0:
+			_directory_heartbeat_remaining = DIRECTORY_HEARTBEAT_SECONDS
+			_send_directory_heartbeat()
+	if is_online and is_host and game_has_started and (
+		GameManager.is_game_active or GameManager.open_market_active or GameManager.village_construction_active or bool(GameManager.team_plan.get("active", false)) or not GameManager.energy_trial.is_empty()
+	):
+		_full_game_snapshot_remaining -= delta
+		if _full_game_snapshot_remaining <= 0.0:
+			_full_game_snapshot_remaining = GAME_CHECKPOINT_INTERVAL_SECONDS
+			var checkpoint := _capture_game_checkpoint()
+			if not checkpoint.is_empty():
+				_rpc_apply_full_game_state.rpc(checkpoint)
+
+
+func create_room(port: int = DEFAULT_PORT, player_info: Dictionary = {}, settings: Dictionary = {}) -> Error:
+	if _uses_browser_webrtc():
+		return _create_browser_room(player_info, settings)
+	disconnect_network()
+	_configure_room(settings)
+	var peer := ENetMultiplayerPeer.new()
+	var err := peer.create_server(port, MAX_PLAYERS)
+	if err != OK:
+		return err
+	multiplayer.multiplayer_peer = peer
+	is_online = true
+	is_host = true
+	my_peer_id = multiplayer.get_unique_id()
+	hosted_game_port = port
+	pending_local_player_info = _sanitize_player_info(player_info)
+	if pending_local_player_info.is_empty():
+		pending_local_player_info = _default_player_info("방장")
+	connected_players[my_peer_id] = pending_local_player_info.duplicate(true)
+	room_code = _generate_room_code()
+	_start_room_announcement()
+	_begin_external_room_setup()
+	room_code_created.emit(room_code)
+	room_state_changed.emit(connected_players.duplicate(true))
+	print("[Network] 플레이어 호스트 방 개설 완료 · 코드 %s (UDP %d)" % [room_code, port])
+	return OK
+
+
+func join_room(address: String = "127.0.0.1", port: int = DEFAULT_PORT, player_info: Dictionary = {}, password: String = "") -> Error:
+	if _uses_browser_webrtc():
+		return ERR_UNAVAILABLE
+	disconnect_network()
+	_join_address = address
+	_join_port = port
+	_join_password = password
+	pending_local_player_info = _sanitize_player_info(player_info)
+	if pending_local_player_info.is_empty():
+		pending_local_player_info = _default_player_info("참가자")
+	var peer := ENetMultiplayerPeer.new()
+	var err := peer.create_client(address, port)
+	if err != OK:
+		return err
+	multiplayer.multiplayer_peer = peer
+	is_online = true
+	is_host = false
+	print("[Network] 플레이어 호스트 연결 시도: %s:%d" % [address, port])
+	return OK
+
+
+func join_room_by_code(code: String, player_info: Dictionary = {}, password: String = "") -> Error:
+	var normalized_code := code.strip_edges()
+	if not is_valid_room_code(normalized_code):
+		return ERR_INVALID_PARAMETER
+	if _uses_browser_webrtc():
+		return _join_browser_room(normalized_code, player_info, password)
+	disconnect_network()
+	_join_password = password
+	pending_local_player_info = _sanitize_player_info(player_info)
+	if pending_local_player_info.is_empty():
+		pending_local_player_info = _default_player_info("참가자")
+	pending_room_code = normalized_code
+	_discovery_listener = PacketPeerUDP.new()
+	var error := _discovery_listener.bind(DISCOVERY_PORT, "0.0.0.0")
+	var has_directory := is_external_room_directory_configured()
+	if error != OK:
+		_discovery_listener = null
+	if error != OK and not has_directory:
+		return error
+	_room_lookup_active = true
+	_discovery_lookup_remaining = DISCOVERY_TIMEOUT_SECONDS
+	if has_directory:
+		_lookup_external_room(normalized_code)
+	print("[Network] 6자리 방 코드 검색 중: %s" % pending_room_code)
+	return OK
+
+
+func is_valid_room_code(code: String) -> bool:
+	if code.length() != ROOM_CODE_DIGITS or not code.is_valid_int():
+		return false
+	var number := code.to_int()
+	return number >= 100000 and number <= 999999 and str(number) == code
+
+
+func disconnect_network() -> void:
+	_set_browser_online_frames(false)
+	_network_session += 1
+	_reconnecting = false
+	_recovery_failed = false
+	_host_waiting = false
+	get_tree().paused = false
+	if _external_room_registered or (_web_transport and is_host and not room_code.is_empty()):
+		_unregister_external_room()
+	elif _web_transport and _room_lookup_active and not pending_room_code.is_empty():
+		# The directory may already have reserved a seat even if its response was lost.
+		_leave_pending_web_seat(pending_room_code, _host_directory_token)
+	_stop_room_announcement()
+	_stop_room_discovery()
+	_finish_pending_upnp_before_reset()
+	_remove_upnp_mapping()
+	var active_peer := multiplayer.multiplayer_peer
+	if active_peer and not (active_peer is OfflineMultiplayerPeer):
+		active_peer.close()
+	for connection_variant in _web_connections.values():
+		var connection := connection_variant as WebRTCPeerConnection
+		if connection:
+			connection.close()
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+	is_online = false
+	is_host = false
+	my_peer_id = 1
+	connected_players.clear()
+	game_peer_ids.clear()
+	shared_board_tiles.clear()
+	pending_local_player_info.clear()
+	game_has_started = false
+	room_code = ""
+	room_title = "함께하는 에너지 모험"
+	room_capacity = 4
+	_room_password = ""
+	_join_password = ""
+	pending_room_code = ""
+	hosted_game_port = DEFAULT_PORT
+	_external_room_registered = false
+	_directory_heartbeat_remaining = 0.0
+	_host_directory_token = ""
+	_web_transport = false
+	_web_ice_servers = WEB_ICE_SERVERS
+	_web_multiplayer_peer = null
+	_web_connections.clear()
+	_web_remote_description_set.clear()
+	_web_pending_candidates.clear()
+	_web_signal_poll_remaining = 0.0
+	_web_signal_poll_pending = false
+	_web_processed_signal_id = 0
+	_web_signaling_active = false
+	_web_connect_remaining = 0.0
+	_full_game_snapshot_remaining = 0.0
+	_reset_game_checkpoints()
+	_last_open_market_sync_signature = ""
+	_resume_token = ""
+	_peer_resume_tokens.clear()
+	_resume_slots.clear()
+	_pending_reconnects.clear()
+	_pending_registrations.clear()
+	_peer_last_seen.clear()
+	_web_connection_attempts.clear()
+	_web_peer_generations.clear()
+	_web_early_candidates.clear()
+	_web_received_deliveries.clear()
+	_web_signal_replays.clear()
+	_web_retired_attempts.clear()
+	_web_offer_generation = 0
+	_saved_local_index = -1
+	_join_address = ""
+	_join_port = DEFAULT_PORT
+	_last_host_contact = 0
+	_next_heartbeat_ms = 0
+	_last_recovery_tick_ms = 0
+	_heartbeat_probes.clear()
+	_browser_room_locked = false
+	_room_lock_pending = false
+	_restoration_pending = false
+	_last_game_rankings.clear()
+	recovery_state_changed.emit({"mode": "hidden"})
+
+
+func update_local_player_info(player_info: Dictionary) -> void:
+	pending_local_player_info = _sanitize_player_info(player_info)
+	if not is_online:
+		return
+	if is_host:
+		connected_players[my_peer_id] = pending_local_player_info.duplicate(true)
+		_broadcast_lobby_state()
+	else:
+		_rpc_register_player.rpc_id(1, pending_local_player_info, _join_password)
+
+
+func start_hosted_game(duration_seconds: int) -> bool:
+	if not is_online or not is_host or game_has_started:
+		return false
+	print("[Network] 호스트 게임 구성 시작")
+	var peer_ids: Array[int] = []
+	for peer_id_variant in connected_players.keys():
+		peer_ids.append(int(peer_id_variant))
+	peer_ids.sort()
+	if my_peer_id in peer_ids:
+		peer_ids.erase(my_peer_id)
+		peer_ids.push_front(my_peer_id)
+	peer_ids = peer_ids.slice(0, room_capacity)
+
+	var configs: Array[Dictionary] = []
+	game_peer_ids.clear()
+	for peer_id in peer_ids:
+		var info: Dictionary = connected_players.get(peer_id, _default_player_info("플레이어"))
+		configs.append({
+			"name": str(info.get("name", "플레이어")),
+			"is_ai": false,
+			"char_icon": str(info.get("char_icon", "")),
+			"char_color": info.get("char_color", Color(0.3, 0.8, 0.5))
+		})
+		game_peer_ids.append(peer_id)
+	while game_peer_ids.size() < room_capacity:
+		game_peer_ids.append(0)
+
+	BoardGrid.assign_random_shortcuts()
+	shared_board_tiles.clear()
+	for tile in BoardGrid.TILE_DATA:
+		shared_board_tiles.append((tile as Dictionary).duplicate(true))
+	game_has_started = true
+	for peer_id in _peer_resume_tokens:
+		_resume_slots[_peer_resume_tokens[peer_id]] = game_peer_ids.find(int(peer_id))
+		_peer_last_seen[peer_id] = Time.get_ticks_msec()
+	_full_game_snapshot_remaining = GAME_CHECKPOINT_INTERVAL_SECONDS
+	_reset_game_checkpoints()
+	_last_open_market_sync_signature = ""
+	if _web_transport:
+		_lock_browser_room()
+	elif _external_room_registered:
+		_unregister_external_room()
+	_stop_room_announcement()
+	print("[Network] 공통 게임 시작 전송 · 사람 %d명" % configs.size())
+	# 원격 시작 패킷을 먼저 큐에 넣어 뒤이어 발생하는 첫 턴 상태보다 앞서 도착시킵니다.
+	_rpc_begin_game.rpc(configs, duration_seconds, game_peer_ids, shared_board_tiles, GameManager.learning_grade, QuizDatabase.challenge_enabled, QuizDatabase.extra_reading_time)
+	_rpc_begin_game(configs, duration_seconds, game_peer_ids.duplicate(), shared_board_tiles.duplicate(true), GameManager.learning_grade, QuizDatabase.challenge_enabled, QuizDatabase.extra_reading_time)
+	return true
+
+
+func get_local_player_index() -> int:
+	if not is_online:
+		return 0
+	if _reconnecting or _recovery_failed:
+		return _saved_local_index
+	return game_peer_ids.find(my_peer_id)
+
+
+func get_player_index_for_peer(peer_id: int) -> int:
+	return game_peer_ids.find(peer_id)
+
+
+func is_local_player(player_idx: int) -> bool:
+	return player_idx == get_local_player_index()
+
+
+func get_lan_addresses() -> Array[String]:
+	var addresses: Array[String] = []
+	for address in IP.get_local_addresses():
+		if address.contains(":") or address.begins_with("127.") or address.begins_with("169.254."):
+			continue
+		addresses.append(address)
+	return addresses
+
+
+func _generate_room_code() -> String:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	return "%06d" % rng.randi_range(100000, 999999)
+
+
+func _uses_browser_webrtc() -> bool:
+	return OS.has_feature("web")
+
+
+func _set_browser_online_frames(active: bool) -> void:
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("if (window.setEnergyGameOnlineFrames) window.setEnergyGameOnlineFrames(%s)" % ("true" if active else "false"))
+
+
+func _configure_room(settings: Dictionary) -> void:
+	room_title = str(settings.get("title", "함께하는 에너지 모험")).strip_edges().left(15)
+	room_capacity = clampi(int(settings.get("max_players", 4)), 2, 4)
+	_room_password = str(settings.get("password", ""))
+
+
+func request_room_list() -> void:
+	if _room_list_pending:
+		return
+	_room_list_pending = true
+	if not _send_directory_request(HTTPClient.METHOD_GET, "/webrtc/rooms", {}, _on_room_list_response, false):
+		_room_list_pending = false
+		room_list_failed.emit("방 목록을 가져오지 못했습니다. 새로고침을 눌러 다시 시도하세요.")
+
+
+func _on_room_list_response(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest) -> void:
+	request.queue_free()
+	_room_list_pending = false
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if response_code != 200 or not (parsed is Dictionary) or not (parsed.get("rooms") is Array):
+		room_list_failed.emit("방 목록을 가져오지 못했습니다. 새로고침을 눌러 다시 시도하세요.")
+		return
+	room_list_received.emit(parsed["rooms"])
+
+
+func _create_browser_room(player_info: Dictionary, settings: Dictionary = {}) -> Error:
+	disconnect_network()
+	_configure_room(settings)
+	if not is_external_room_directory_configured():
+		return ERR_UNCONFIGURED
+	_web_transport = true
+	_web_multiplayer_peer = WebRTCMultiplayerPeer.new()
+	var peer_error := _web_multiplayer_peer.create_server()
+	if peer_error != OK:
+		_web_transport = false
+		_web_multiplayer_peer = null
+		return peer_error
+	multiplayer.multiplayer_peer = _web_multiplayer_peer
+	is_online = true
+	is_host = true
+	my_peer_id = 1
+	pending_local_player_info = _sanitize_player_info(player_info)
+	if pending_local_player_info.is_empty():
+		pending_local_player_info = _default_player_info("방장")
+	connected_players[my_peer_id] = pending_local_player_info.duplicate(true)
+	room_code = _generate_room_code()
+	_host_directory_token = Crypto.new().generate_random_bytes(24).hex_encode()
+	_directory_registration_attempts = 0
+	if not _register_browser_room():
+		disconnect_network()
+		return ERR_CANT_CONNECT
+	room_code_created.emit(room_code)
+	room_state_changed.emit(connected_players.duplicate(true))
+	print("[Network] 브라우저 WebRTC 방 생성 중 · 코드 %s" % room_code)
+	return OK
+
+
+func _register_browser_room() -> bool:
+	if not _web_transport or not is_host or room_code.is_empty():
+		return false
+	_directory_registration_attempts += 1
+	var payload := {"code": room_code, "host_token": _host_directory_token, "title": room_title, "max_players": room_capacity, "password": _room_password, "host_name": pending_local_player_info.get("name", "방장")}
+	return _send_directory_request(HTTPClient.METHOD_POST, "/webrtc/rooms", payload,
+		_on_browser_room_registered.bind(room_code, _host_directory_token), false)
+
+
+func _on_browser_room_registered(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest, code: String, token: String) -> void:
+	request.queue_free()
+	if int(request.get_meta("network_session", -1)) != _network_session:
+		if response_code in [200, 201]:
+			_delete_browser_room(code, token)
+		return
+	if not _web_transport or not is_online or not is_host or game_has_started:
+		return
+	if response_code == 200 or response_code == 201:
+		var response := JSON.new()
+		if response.parse(body.get_string_from_utf8()) == OK and response.data is Dictionary:
+			_set_room_ice_servers(response.data)
+		_external_room_registered = true
+		_web_signaling_active = true
+		_set_browser_online_frames(true)
+		_web_signal_poll_remaining = 0.0
+		external_room_ready.emit(room_code)
+		print("[Network] 브라우저 WebRTC 방 등록 완료 · 코드 %s" % room_code)
+		return
+	if response_code == 409 and _directory_registration_attempts < 5:
+		room_code = _generate_room_code()
+		room_code_created.emit(room_code)
+		_register_browser_room()
+		return
+	var detail := _directory_error_message(body, "WebRTC 방 등록에 실패했습니다.")
+	disconnect_network()
+	external_room_failed.emit(detail)
+
+
+func _join_browser_room(code: String, player_info: Dictionary, password: String = "") -> Error:
+	disconnect_network()
+	if not is_external_room_directory_configured():
+		return ERR_UNCONFIGURED
+	_web_transport = true
+	pending_local_player_info = _sanitize_player_info(player_info)
+	if pending_local_player_info.is_empty():
+		pending_local_player_info = _default_player_info("참가자")
+	pending_room_code = code
+	_host_directory_token = Crypto.new().generate_random_bytes(24).hex_encode()
+	_room_lookup_active = true
+	_discovery_lookup_remaining = DISCOVERY_TIMEOUT_SECONDS
+	var payload := {"peer_token": _host_directory_token, "password": password}
+	if not _request_browser_join(code, payload, true):
+		_room_lookup_active = false
+		_web_transport = false
+		_host_directory_token = ""
+		return ERR_CANT_CONNECT
+	print("[Network] 브라우저 WebRTC 방 코드 검색 중: %s" % code)
+	return OK
+
+
+func _request_browser_join(code: String, payload: Dictionary, can_retry: bool) -> bool:
+	return _send_directory_request(HTTPClient.METHOD_POST, "/webrtc/rooms/%s/join" % code.uri_encode(), payload,
+		_on_browser_room_joined.bind(code, payload, can_retry), false)
+
+
+func _leave_pending_web_seat(code: String, token: String) -> void:
+	if not token.is_empty():
+		_send_directory_request(HTTPClient.METHOD_POST, "/webrtc/rooms/%s/leave" % code.uri_encode(), {},
+			_on_directory_room_unregistered, true, token)
+
+
+func _on_browser_room_joined(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest, code: String, payload: Dictionary, can_retry: bool) -> void:
+	request.queue_free()
+	if int(request.get_meta("network_session", -1)) != _network_session:
+		if response_code in [200, 201]:
+			_leave_pending_web_seat(code, str(payload["peer_token"]))
+		return
+	if not _web_transport or not _room_lookup_active:
+		return
+	if _temporary_directory_failure(result, response_code):
+		if can_retry and _request_browser_join(code, payload, false):
+			return
+		disconnect_network()
+		room_code_lookup_failed.emit("방 참가 요청이 지연되었습니다. 잠시 후 다시 참가해 주세요.")
+		return
+	if response_code != 200 and response_code != 201:
+		var detail := _directory_error_message(body, "방을 찾을 수 없거나 참가할 수 없습니다.")
+		_stop_room_discovery()
+		_web_transport = false
+		_host_directory_token = ""
+		room_code_lookup_failed.emit(detail)
+		return
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if not (parsed is Dictionary):
+		disconnect_network()
+		room_code_lookup_failed.emit("방 연결 응답을 읽지 못했습니다.")
+		return
+	var peer_id := int((parsed as Dictionary).get("peer_id", 0))
+	if peer_id < 2 or peer_id > MAX_PLAYERS:
+		disconnect_network()
+		room_code_lookup_failed.emit("방에서 참가자 번호를 배정받지 못했습니다.")
+		return
+	var joined_code := pending_room_code
+	_web_multiplayer_peer = WebRTCMultiplayerPeer.new()
+	var peer_error := _web_multiplayer_peer.create_client(peer_id)
+	if peer_error != OK:
+		disconnect_network()
+		room_code_lookup_failed.emit("브라우저 멀티플레이 연결을 준비하지 못했습니다.")
+		return
+	multiplayer.multiplayer_peer = _web_multiplayer_peer
+	is_online = true
+	is_host = false
+	my_peer_id = peer_id
+	room_code = joined_code
+	room_title = str(parsed.get("title", "에너지 모험"))
+	room_capacity = clampi(int(parsed.get("max_players", 4)), 2, 4)
+	_external_room_registered = true
+	_stop_room_discovery()
+	_web_signaling_active = true
+	_web_signal_poll_remaining = 0.0
+	_set_room_ice_servers(parsed)
+	var connection_error := _ensure_browser_connection(1, true)
+	_web_connect_remaining = WEB_HOST_ANSWER_TIMEOUT_SECONDS
+	if connection_error != OK:
+		disconnect_network()
+		room_code_lookup_failed.emit("방장과의 WebRTC 연결을 시작하지 못했습니다.")
+		return
+	_set_browser_online_frames(true)
+	print("[Network] 브라우저 WebRTC 참가자 배정 · peer=%d" % peer_id)
+
+
+func _set_room_ice_servers(response: Dictionary) -> void:
+	_web_ice_servers = WEB_ICE_SERVERS
+	var supplied = response.get("ice_servers")
+	if not (supplied is Array):
+		return
+	var servers: Array[Dictionary] = []
+	for entry in supplied.slice(0, 8):
+		if not (entry is Dictionary):
+			continue
+		var urls = entry.get("urls")
+		if urls is String:
+			urls = [urls]
+		if not (urls is Array):
+			continue
+		var accepted: Array[String] = []
+		var uses_turn := false
+		for value in urls.slice(0, 8):
+			if not (value is String) or value.length() > 512:
+				continue
+			var url: String = value.to_lower()
+			var parts := _ice_url_pattern.search(url)
+			if not parts:
+				continue
+			var port := parts.get_string(3)
+			if not port.is_empty() and (port.to_int() < 1 or port.to_int() > 65535):
+				continue
+			var relay := parts.get_string(1).begins_with("turn")
+			if not relay and not parts.get_string(4).is_empty():
+				continue
+			uses_turn = uses_turn or relay
+			if not accepted.has(url):
+				accepted.append(url)
+		if accepted.is_empty():
+			continue
+		var server := {"urls": accepted}
+		if uses_turn:
+			var username = entry.get("username")
+			var credential = entry.get("credential")
+			if not (username is String and credential is String):
+				continue
+			if username.is_empty() or credential.is_empty() or username.length() > 2048 or credential.length() > 2048:
+				continue
+			server["username"] = username
+			server["credential"] = credential
+		servers.append(server)
+	if not servers.is_empty():
+		_web_ice_servers = servers
+
+
+func _ensure_browser_connection(remote_peer_id: int, create_offer: bool) -> Error:
+	if not _web_multiplayer_peer:
+		return ERR_UNCONFIGURED
+	if _web_connections.has(remote_peer_id):
+		return OK
+	var connection := WebRTCPeerConnection.new()
+	var initialize_error := connection.initialize({"iceServers": _web_ice_servers})
+	if initialize_error != OK and _web_ice_servers != WEB_ICE_SERVERS:
+		connection.close()
+		connection = WebRTCPeerConnection.new()
+		initialize_error = connection.initialize({"iceServers": WEB_ICE_SERVERS})
+	if initialize_error != OK:
+		return initialize_error
+	connection.session_description_created.connect(_on_web_session_description_created.bind(remote_peer_id, connection))
+	connection.ice_candidate_created.connect(_on_web_ice_candidate_created.bind(remote_peer_id, connection))
+	var add_error := _web_multiplayer_peer.add_peer(connection, remote_peer_id)
+	if add_error != OK:
+		connection.close()
+		return add_error
+	_web_connections[remote_peer_id] = connection
+	if create_offer:
+		_web_connection_attempts[remote_peer_id] = Crypto.new().generate_random_bytes(12).hex_encode()
+		_web_offer_generation += 1
+		_web_peer_generations[remote_peer_id] = _web_offer_generation
+	if not _web_pending_candidates.has(remote_peer_id):
+		_web_pending_candidates[remote_peer_id] = []
+	if create_offer:
+		return connection.create_offer()
+	return OK
+
+
+func _on_web_session_description_created(type: String, sdp: String, remote_peer_id: int, connection: WebRTCPeerConnection) -> void:
+	if _web_connections.get(remote_peer_id) != connection:
+		return
+	if connection.set_local_description(type, sdp) != OK:
+		return
+	_send_browser_signal(remote_peer_id, type, {"sdp": sdp})
+
+
+func _on_web_ice_candidate_created(media: String, index: int, sdp: String, remote_peer_id: int, connection: WebRTCPeerConnection) -> void:
+	if _web_connections.get(remote_peer_id) != connection:
+		return
+	_send_browser_signal(remote_peer_id, "candidate", {"media": media, "index": index, "sdp": sdp})
+
+
+func _send_browser_signal(remote_peer_id: int, signal_type: String, data: Dictionary) -> void:
+	if not _web_transport or room_code.is_empty() or _host_directory_token.is_empty():
+		return
+	var signal_payload := data.duplicate(true)
+	signal_payload["attempt"] = str(_web_connection_attempts.get(remote_peer_id, ""))
+	signal_payload["generation"] = int(_web_peer_generations.get(remote_peer_id, 0))
+	signal_payload["delivery_id"] = Crypto.new().generate_random_bytes(12).hex_encode()
+	var payload := {"to_peer": remote_peer_id, "type": signal_type, "data": signal_payload}
+	# Older directories remove a poll batch before its HTTP response reaches the other browser.
+	if not multiplayer.get_peers().has(remote_peer_id):
+		var replay: Dictionary = _web_signal_replays.get(remote_peer_id, {
+			"description": {}, "candidates": [], "remaining": WEB_SIGNAL_REPLAY_INTERVAL, "repeats": WEB_SIGNAL_REPLAY_LIMIT})
+		if signal_type != "candidate":
+			replay.description = payload
+		elif replay.candidates.size() < 64:
+			replay.candidates.append(payload)
+		_web_signal_replays[remote_peer_id] = replay
+	_post_browser_signal(payload, 2)
+
+
+func _replay_pending_browser_signals(delta: float) -> void:
+	for peer_id in _web_signal_replays.keys():
+		var replay: Dictionary = _web_signal_replays[peer_id]
+		replay.remaining -= delta
+		if replay.remaining > 0.0:
+			continue
+		replay.remaining = WEB_SIGNAL_REPLAY_INTERVAL
+		replay.repeats -= 1
+		if replay.repeats <= 0:
+			_web_signal_replays.erase(peer_id)
+		var signals: Array = replay.candidates.duplicate()
+		if not replay.description.is_empty():
+			signals.push_front(replay.description)
+		for payload in signals:
+			if _web_connection_attempts.get(peer_id) == payload.data.attempt:
+				_post_browser_signal(payload, 0)
+
+
+func _post_browser_signal(payload: Dictionary, retries_left: int) -> void:
+	if not _send_directory_request(HTTPClient.METHOD_POST, "/webrtc/rooms/%s/signals" % room_code.uri_encode(),
+		payload, _on_browser_signal_sent.bind(payload, retries_left), true):
+		_report_signal_failure(payload, PackedByteArray())
+
+
+func _on_browser_signal_sent(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest, payload: Dictionary, retries_left: int) -> void:
+	request.queue_free()
+	if int(request.get_meta("network_session", -1)) != _network_session or not _web_signaling_active:
+		return
+	if _web_connection_attempts.get(payload["to_peer"]) != payload["data"]["attempt"]:
+		return
+	if result == HTTPRequest.RESULT_SUCCESS and response_code >= 200 and response_code < 300:
+		return
+	if _temporary_directory_failure(result, response_code):
+		if retries_left > 0:
+			_post_browser_signal(payload, retries_left - 1)
+	else:
+		_report_signal_failure(payload, body)
+
+
+func _temporary_directory_failure(result: int, response_code: int) -> bool:
+	return result != HTTPRequest.RESULT_SUCCESS or response_code == 0 or response_code in [408, 429] or response_code >= 500
+
+
+func _report_signal_failure(payload: Dictionary, body: PackedByteArray) -> void:
+	# A different ICE candidate can still connect; an undelivered SDP cannot.
+	if payload["type"] == "candidate" or connected_players.has(payload["to_peer"]):
+		return
+	var message := _directory_error_message(body, "방장과 연결 정보를 주고받지 못했습니다. 다시 참가해 주세요.")
+	if not game_has_started:
+		if is_host:
+			external_room_failed.emit(message)
+		else:
+			disconnect_network()
+			room_code_lookup_failed.emit(message)
+
+
+func _poll_browser_signals() -> void:
+	if not _web_signaling_active or room_code.is_empty() or _web_signal_poll_pending:
+		return
+	_web_signal_poll_pending = true
+	var path := "/webrtc/rooms/%s/signals?ack=%d" % [room_code.uri_encode(), _web_processed_signal_id]
+	if not _send_directory_request(HTTPClient.METHOD_GET, path, {}, _on_browser_signals_polled, true):
+		_web_signal_poll_pending = false
+
+
+func _on_browser_signals_polled(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest) -> void:
+	request.queue_free()
+	if int(request.get_meta("network_session", -1)) != _network_session:
+		return
+	_web_signal_poll_pending = false
+	if not _web_transport or not _web_signaling_active:
+		return
+	if response_code == 401 or response_code == 404:
+		_web_signaling_active = false
+		if game_has_started:
+			if _reconnecting:
+				_fail_recovery("게임방이 닫혔거나 연결 시간이 만료되었습니다. 로비에서 다시 만나 주세요.")
+			return
+		if is_host:
+			if multiplayer.get_peers().is_empty():
+				disconnect_network()
+			external_room_failed.emit("브라우저 게임방의 연결 시간이 만료되었습니다. 방을 다시 만들어 주세요.")
+		elif _web_connect_remaining > 0.0:
+			disconnect_network()
+			room_code_lookup_failed.emit("게임방이 닫혔습니다. 방 목록에서 다시 선택해 주세요.")
+		return
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		return
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if not (parsed is Dictionary):
+		return
+	var batch = parsed.get("signals", [])
+	if not (batch is Array):
+		return
+	for incoming in batch:
+		if not (incoming is Dictionary):
+			continue
+		var row_id := int(incoming.get("id", 0))
+		if row_id > 0 and row_id <= _web_processed_signal_id:
+			continue
+		_apply_browser_signal(incoming)
+		if int(request.get_meta("network_session", -1)) != _network_session:
+			return
+		_web_processed_signal_id = maxi(_web_processed_signal_id, row_id)
+
+
+func _apply_browser_signal(signal_data: Dictionary) -> void:
+	var remote_peer_id := int(signal_data.get("from_peer", 0))
+	var signal_type := str(signal_data.get("type", ""))
+	var data := signal_data.get("data", {}) as Dictionary
+	if remote_peer_id < 1 or remote_peer_id > MAX_PLAYERS or remote_peer_id == my_peer_id:
+		return
+	var attempt := str(data.get("attempt", ""))
+	if _web_retired_attempts.has("%d:%s" % [remote_peer_id, attempt]):
+		return
+	var delivery_id := str(data.get("delivery_id", ""))
+	if not delivery_id.is_empty():
+		var delivery_key := "%d:%s:%s" % [remote_peer_id, attempt, delivery_id]
+		if _web_received_deliveries.has(delivery_key):
+			return
+		_web_received_deliveries[delivery_key] = true
+		if _web_received_deliveries.size() > 256:
+			_web_received_deliveries.erase(_web_received_deliveries.keys()[0])
+	var current_attempt := str(_web_connection_attempts.get(remote_peer_id, ""))
+	var generation := int(data.get("generation", 0))
+	var current_generation := int(_web_peer_generations.get(remote_peer_id, -1))
+	# In a lobby the directory can assign a vacated seat to a different browser,
+	# whose generation starts at one. Once play begins only reconnects are allowed.
+	if game_has_started and generation < current_generation:
+		return
+	if signal_type == "offer":
+		if not is_host:
+			return
+		if not current_attempt.is_empty() and attempt == current_attempt:
+			return
+		# Replace the dead data channel when the same browser sends a new offer.
+		if _web_connections.has(remote_peer_id) or not current_attempt.is_empty():
+			if game_has_started and connected_players.has(remote_peer_id):
+				_on_peer_disconnected(remote_peer_id)
+			else:
+				_drop_browser_connection(remote_peer_id)
+		_web_connection_attempts[remote_peer_id] = attempt
+		_web_peer_generations[remote_peer_id] = generation
+		var candidate_key := "%d:%d:%s" % [remote_peer_id, generation, attempt]
+		_web_pending_candidates[remote_peer_id] = _web_early_candidates.get(candidate_key, [])
+		for early_key in _web_early_candidates.keys():
+			if str(early_key).begins_with("%d:" % remote_peer_id):
+				_web_early_candidates.erase(early_key)
+		if _ensure_browser_connection(remote_peer_id, false) != OK:
+			return
+		_set_browser_remote_description(remote_peer_id, "offer", str(data.get("sdp", "")))
+	elif signal_type == "answer":
+		if attempt != current_attempt or bool(_web_remote_description_set.get(remote_peer_id, false)):
+			return
+		_set_browser_remote_description(remote_peer_id, "answer", str(data.get("sdp", "")))
+		if _web_connect_remaining > 0.0 and bool(_web_remote_description_set.get(remote_peer_id, false)):
+			_web_connect_remaining = maxf(_web_connect_remaining, WEB_CHANNEL_OPEN_GRACE_SECONDS)
+	elif signal_type == "candidate":
+		var candidate := {"media": str(data.get("media", "")), "index": int(data.get("index", 0)), "sdp": str(data.get("sdp", ""))}
+		if attempt != current_attempt:
+			# HTTP candidate requests may reach the service before their offer.
+			if is_host and _web_early_candidates.size() < 16:
+				var key := "%d:%d:%s" % [remote_peer_id, generation, attempt]
+				var early: Array = _web_early_candidates.get(key, [])
+				if early.size() < 64:
+					early.append(candidate)
+					_web_early_candidates[key] = early
+			return
+		if bool(_web_remote_description_set.get(remote_peer_id, false)):
+			_add_browser_ice_candidate(remote_peer_id, candidate)
+		else:
+			var pending: Array = _web_pending_candidates.get(remote_peer_id, [])
+			pending.append(candidate)
+			_web_pending_candidates[remote_peer_id] = pending
+
+
+func _drop_browser_connection(peer_id: int) -> void:
+	var connection := _web_connections.get(peer_id) as WebRTCPeerConnection
+	_web_connections.erase(peer_id)
+	_web_remote_description_set.erase(peer_id)
+	_web_pending_candidates.erase(peer_id)
+	if _web_connection_attempts.has(peer_id):
+		_web_retired_attempts["%d:%s" % [peer_id, _web_connection_attempts[peer_id]]] = true
+		if _web_retired_attempts.size() > 64:
+			_web_retired_attempts.erase(_web_retired_attempts.keys()[0])
+	_web_connection_attempts.erase(peer_id)
+	_web_signal_replays.erase(peer_id)
+	if not game_has_started:
+		_web_peer_generations.erase(peer_id)
+	if connection:
+		connection.close()
+	if _web_multiplayer_peer and _web_multiplayer_peer.has_peer(peer_id):
+		_web_multiplayer_peer.remove_peer(peer_id)
+
+
+func _lock_browser_room() -> void:
+	_room_lock_retry_remaining = 5.0
+	_room_lock_pending = true
+	if not _send_directory_request(HTTPClient.METHOD_POST, "/webrtc/rooms/%s/start" % room_code.uri_encode(), {}, _on_browser_room_locked, true):
+		_room_lock_pending = false
+
+
+func _on_browser_room_locked(_result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray, request: HTTPRequest) -> void:
+	request.queue_free()
+	if int(request.get_meta("network_session", -1)) != _network_session:
+		return
+	_room_lock_pending = false
+	if _web_transport and is_host and game_has_started:
+		_browser_room_locked = response_code == 200
+
+
+func _set_browser_remote_description(remote_peer_id: int, type: String, sdp: String) -> void:
+	var connection := _web_connections.get(remote_peer_id) as WebRTCPeerConnection
+	if not connection or sdp.is_empty():
+		return
+	if connection.set_remote_description(type, sdp) != OK:
+		return
+	_web_remote_description_set[remote_peer_id] = true
+	var pending: Array = _web_pending_candidates.get(remote_peer_id, [])
+	for candidate_variant in pending:
+		_add_browser_ice_candidate(remote_peer_id, candidate_variant as Dictionary)
+	_web_pending_candidates[remote_peer_id] = []
+
+
+func _add_browser_ice_candidate(remote_peer_id: int, candidate: Dictionary) -> void:
+	var connection := _web_connections.get(remote_peer_id) as WebRTCPeerConnection
+	if not connection:
+		return
+	connection.add_ice_candidate(str(candidate.get("media", "")), int(candidate.get("index", 0)), str(candidate.get("sdp", "")))
+
+
+func _start_room_announcement() -> void:
+	_stop_room_announcement()
+	_discovery_broadcaster = PacketPeerUDP.new()
+	_discovery_broadcaster.set_broadcast_enabled(true)
+	_discovery_broadcaster.set_dest_address("255.255.255.255", DISCOVERY_PORT)
+	_discovery_broadcast_elapsed = 0.0
+
+
+func _stop_room_announcement() -> void:
+	if _discovery_broadcaster:
+		_discovery_broadcaster.close()
+	_discovery_broadcaster = null
+
+
+func _broadcast_room_announcement() -> void:
+	if not _discovery_broadcaster or room_code.is_empty():
+		return
+	var host_info: Dictionary = connected_players.get(my_peer_id, {})
+	var announcement := {
+		"magic": DISCOVERY_MAGIC,
+		"code": room_code,
+		"port": hosted_game_port,
+		"host_name": str(host_info.get("name", "방장"))
+	}
+	_discovery_broadcaster.put_packet(JSON.stringify(announcement).to_utf8_buffer())
+
+
+func _poll_room_announcements() -> void:
+	while _discovery_listener and _discovery_listener.get_available_packet_count() > 0:
+		var packet := _discovery_listener.get_packet()
+		var sender_ip := _discovery_listener.get_packet_ip()
+		var parsed = JSON.parse_string(packet.get_string_from_utf8())
+		if not (parsed is Dictionary):
+			continue
+		var announcement := parsed as Dictionary
+		if str(announcement.get("magic", "")) != DISCOVERY_MAGIC or str(announcement.get("code", "")) != pending_room_code:
+			continue
+		var game_port := int(announcement.get("port", DEFAULT_PORT))
+		var local_info := pending_local_player_info.duplicate(true)
+		print("[Network] 방 코드 일치 · %s:%d에 자동 연결" % [sender_ip, game_port])
+		_stop_room_discovery()
+		var error := join_room(sender_ip, game_port, local_info, _join_password)
+		if error != OK:
+			room_code_lookup_failed.emit("게임방 연결을 시작하지 못했습니다.")
+		return
+
+
+func _stop_room_discovery() -> void:
+	if _discovery_listener:
+		_discovery_listener.close()
+	_discovery_listener = null
+	_discovery_lookup_remaining = 0.0
+	_room_lookup_active = false
+	_directory_lookup_pending = false
+
+
+func is_external_room_directory_configured() -> bool:
+	return not _room_directory_url().is_empty()
+
+
+func _room_directory_url() -> String:
+	var environment_url := OS.get_environment("ENERGYGAME_ROOM_DIRECTORY_URL").strip_edges()
+	if not environment_url.is_empty():
+		return environment_url.trim_suffix("/")
+	return str(ProjectSettings.get_setting("network/room_directory_url", "")).strip_edges().trim_suffix("/")
+
+
+func _begin_external_room_setup() -> void:
+	if not is_external_room_directory_configured():
+		return
+	_host_directory_token = Crypto.new().generate_random_bytes(24).hex_encode()
+	_directory_registration_attempts = 0
+	_upnp_setup_pending = true
+	_upnp_thread = Thread.new()
+	var error := _upnp_thread.start(_configure_upnp.bind(hosted_game_port))
+	if error != OK:
+		_upnp_setup_pending = false
+		_upnp_thread = null
+		external_room_failed.emit("공유기 자동 연결을 시작하지 못했습니다. 같은 네트워크 접속은 계속 사용할 수 있습니다.")
+
+
+func _configure_upnp(port: int) -> Dictionary:
+	var upnp := UPNP.new()
+	var discover_error := upnp.discover(2500, 2, "InternetGatewayDevice")
+	if discover_error != UPNP.UPNP_RESULT_SUCCESS:
+		return {"error": discover_error, "message": "UPnP 공유기를 찾지 못했습니다."}
+	var gateway := upnp.get_gateway()
+	if gateway == null or not gateway.is_valid_gateway():
+		return {"error": UPNP.UPNP_RESULT_NO_GATEWAY, "message": "인터넷 게이트웨이를 확인할 수 없습니다."}
+	# 이전 비정상 종료로 같은 매핑이 남은 경우를 대비해 이 게임 포트만 정리합니다.
+	upnp.delete_port_mapping(port, "UDP")
+	var mapping_error := upnp.add_port_mapping(port, port, "Energy Fairy Kingdom", "UDP", 0)
+	if mapping_error != UPNP.UPNP_RESULT_SUCCESS:
+		return {"error": mapping_error, "message": "공유기에서 게임 포트를 열 수 없습니다."}
+	var external_ip := upnp.query_external_address().strip_edges()
+	if external_ip.is_empty():
+		upnp.delete_port_mapping(port, "UDP")
+		return {"error": UPNP.UPNP_RESULT_INVALID_RESPONSE, "message": "공인 주소를 확인할 수 없습니다."}
+	return {"error": UPNP.UPNP_RESULT_SUCCESS, "upnp": upnp, "external_ip": external_ip}
+
+
+func _finish_external_room_setup(result: Dictionary) -> void:
+	if not is_online or not is_host or game_has_started:
+		var unused_upnp := result.get("upnp") as UPNP
+		if unused_upnp:
+			unused_upnp.delete_port_mapping(hosted_game_port, "UDP")
+		return
+	if int(result.get("error", FAILED)) != UPNP.UPNP_RESULT_SUCCESS:
+		external_room_failed.emit("%s 다른 네트워크에서는 공유기 설정을 확인해야 하며, 같은 네트워크 접속은 가능합니다." % str(result.get("message", "외부 연결 준비에 실패했습니다.")))
+		return
+	_upnp_gateway = result.get("upnp") as UPNP
+	_external_host_ip = str(result.get("external_ip", ""))
+	_register_external_room()
+
+
+func _register_external_room() -> void:
+	if not is_online or not is_host or room_code.is_empty() or _external_host_ip.is_empty():
+		return
+	_directory_registration_attempts += 1
+	var payload := {
+		"code": room_code,
+		"port": hosted_game_port,
+		"host_token": _host_directory_token,
+		"public_ip": _external_host_ip
+	}
+	if not _send_directory_request(HTTPClient.METHOD_POST, "/rooms", payload, _on_directory_room_registered, false):
+		external_room_failed.emit("방 코드 연결 서버에 접속하지 못했습니다. 같은 네트워크 접속은 계속 사용할 수 있습니다.")
+
+
+func _on_directory_room_registered(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest) -> void:
+	request.queue_free()
+	if not is_online or not is_host or game_has_started:
+		return
+	if response_code == 200 or response_code == 201:
+		_external_room_registered = true
+		_directory_heartbeat_remaining = DIRECTORY_HEARTBEAT_SECONDS
+		external_room_ready.emit(room_code)
+		print("[Network] 외부 방 코드 등록 완료 · %s -> %s:%d" % [room_code, _external_host_ip, hosted_game_port])
+		return
+	if response_code == 409 and _directory_registration_attempts < 5:
+		room_code = _generate_room_code()
+		room_code_created.emit(room_code)
+		_discovery_broadcast_elapsed = 0.0
+		_register_external_room()
+		return
+	var detail := _directory_error_message(body, "방 코드 연결 서버가 등록을 거절했습니다.")
+	external_room_failed.emit("%s 같은 네트워크 접속은 계속 사용할 수 있습니다." % detail)
+
+
+func _lookup_external_room(code: String) -> void:
+	if _directory_lookup_pending:
+		return
+	_directory_lookup_pending = true
+	if not _send_directory_request(HTTPClient.METHOD_GET, "/rooms/%s" % code.uri_encode(), {}, _on_directory_room_lookup, false):
+		_directory_lookup_pending = false
+
+
+func _on_directory_room_lookup(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest) -> void:
+	request.queue_free()
+	_directory_lookup_pending = false
+	if not _room_lookup_active or response_code != 200:
+		return
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if not (parsed is Dictionary):
+		return
+	var endpoint := parsed as Dictionary
+	var host_address := str(endpoint.get("host", "")).strip_edges()
+	var game_port := int(endpoint.get("port", DEFAULT_PORT))
+	if host_address.is_empty() or game_port < 1 or game_port > 65535:
+		return
+	_connect_to_room_endpoint(host_address, game_port)
+
+
+func _connect_to_room_endpoint(host_address: String, port: int) -> void:
+	if not _room_lookup_active:
+		return
+	var local_info := pending_local_player_info.duplicate(true)
+	print("[Network] 외부 방 코드 일치 · %s:%d에 자동 연결" % [host_address, port])
+	_stop_room_discovery()
+	var error := join_room(host_address, port, local_info, _join_password)
+	if error != OK:
+		room_code_lookup_failed.emit("게임방 연결을 시작하지 못했습니다.")
+
+
+func _send_directory_heartbeat() -> void:
+	if not _external_room_registered or room_code.is_empty():
+		return
+	_send_directory_request(HTTPClient.METHOD_PUT, "/rooms/%s/heartbeat" % room_code.uri_encode(), {}, _on_directory_heartbeat_completed, true)
+
+
+func _on_directory_heartbeat_completed(_result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray, request: HTTPRequest) -> void:
+	request.queue_free()
+	if response_code == 404 and is_online and is_host and not game_has_started:
+		_external_room_registered = false
+		_register_external_room()
+
+
+func _unregister_external_room() -> void:
+	if room_code.is_empty() or not is_external_room_directory_configured():
+		_external_room_registered = false
+		return
+	if _web_transport:
+		_web_signaling_active = false
+		if is_host:
+			_delete_browser_room(room_code, _host_directory_token)
+		else:
+			_send_directory_request(HTTPClient.METHOD_POST, "/webrtc/rooms/%s/leave" % room_code.uri_encode(), {}, _on_directory_room_unregistered, true)
+	else:
+		_send_directory_request(HTTPClient.METHOD_DELETE, "/rooms/%s" % room_code.uri_encode(), {}, _on_directory_room_unregistered, true)
+	_external_room_registered = false
+
+
+func _delete_browser_room(code: String, token: String) -> void:
+	_send_directory_request(HTTPClient.METHOD_DELETE, "/webrtc/rooms/%s" % code.uri_encode(), {},
+		_on_directory_room_unregistered, true, token)
+
+
+func _on_directory_room_unregistered(_result: int, _response_code: int, _headers: PackedStringArray, _body: PackedByteArray, request: HTTPRequest) -> void:
+	request.queue_free()
+
+
+func _send_directory_request(method: int, path: String, payload: Dictionary, callback: Callable, authenticated: bool, token_override: String = "") -> bool:
+	var base_url := _room_directory_url()
+	if base_url.is_empty():
+		return false
+	var request := HTTPRequest.new()
+	request.set_meta("network_session", _network_session)
+	request.timeout = 5.0
+	add_child(request)
+	request.request_completed.connect(callback.bind(request), CONNECT_ONE_SHOT)
+	var headers := PackedStringArray(["Content-Type: application/json", "Accept: application/json"])
+	var token := _host_directory_token if token_override.is_empty() else token_override
+	if authenticated and not token.is_empty():
+		headers.append("Authorization: Bearer %s" % token)
+	var body := "" if payload.is_empty() else JSON.stringify(payload)
+	var error := request.request(base_url + path, headers, method, body)
+	if error != OK:
+		request.queue_free()
+		return false
+	return true
+
+
+func _directory_error_message(body: PackedByteArray, fallback: String) -> String:
+	if body.is_empty():
+		return fallback
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if parsed is Dictionary:
+		var message := str((parsed as Dictionary).get("error", "")).strip_edges()
+		if not message.is_empty():
+			return message
+	return fallback
+
+
+func _remove_upnp_mapping() -> void:
+	if _upnp_gateway:
+		_upnp_gateway.delete_port_mapping(hosted_game_port, "UDP")
+	_upnp_gateway = null
+	_external_host_ip = ""
+
+
+func _finish_pending_upnp_before_reset() -> void:
+	if not _upnp_setup_pending or not _upnp_thread:
+		return
+	var result: Dictionary = _upnp_thread.wait_to_finish()
+	_upnp_thread = null
+	_upnp_setup_pending = false
+	var pending_gateway := result.get("upnp") as UPNP
+	if pending_gateway:
+		pending_gateway.delete_port_mapping(hosted_game_port, "UDP")
+
+
+func _exit_tree() -> void:
+	_finish_pending_upnp_before_reset()
+	_remove_upnp_mapping()
+
+
+## Recovery keeps the same scene and player slot. Credentials never enter public snapshots.
+@rpc("authority", "call_remote", "reliable")
+func _rpc_session_credentials(token: String) -> void:
+	if not is_host:
+		_resume_token = token
+
+
+func _update_connection_recovery() -> void:
+	if not is_online:
+		return
+	var now := Time.get_ticks_msec()
+	if is_host:
+		for peer_id in _pending_registrations.keys():
+			if now >= int(_pending_registrations[peer_id]):
+				_pending_registrations.erase(peer_id)
+				multiplayer.multiplayer_peer.disconnect_peer(int(peer_id))
+	if not game_has_started:
+		return
+	# Loading the board or resuming a suspended tab can block our own poll.
+	# Give a remote peer a fresh opportunity to answer after that local gap.
+	if _last_recovery_tick_ms > 0 and now - _last_recovery_tick_ms >= int(CONNECTION_SILENCE_SECONDS * 1000):
+		_heartbeat_probes.clear()
+	_last_recovery_tick_ms = now
+	if is_host:
+		for peer_id in _peer_last_seen.keys():
+			if _connection_is_unresponsive(int(peer_id), int(_peer_last_seen[peer_id]), now):
+				multiplayer.multiplayer_peer.disconnect_peer(int(peer_id))
+				if _peer_last_seen.has(peer_id):
+					_on_peer_disconnected(int(peer_id))
+		for player_idx in _pending_reconnects.keys():
+			if now >= int(_pending_reconnects[player_idx]):
+				_expire_returning_player(int(player_idx))
+		var seconds := _recovery_seconds_left()
+		if seconds != _last_recovery_seconds:
+			_publish_recovery_state()
+	else:
+		if _recovery_failed:
+			return
+		if _reconnecting:
+			if now >= _reconnect_deadline:
+				_fail_recovery("30초 동안 방장과 다시 연결하지 못했습니다. 인터넷 연결이나 방장 상태를 확인해 주세요.")
+				return
+			var seconds := ceili(float(_reconnect_deadline - now) / 1000.0)
+			if seconds != _last_recovery_seconds:
+				_last_recovery_seconds = seconds
+				recovery_state_changed.emit({"mode": "reconnecting", "remaining": seconds})
+			if now >= _next_reconnect_attempt:
+				_attempt_reconnect()
+		elif _connection_is_unresponsive(1, _last_host_contact, now):
+			_begin_reconnect()
+		elif _heartbeat_due(now) and 1 in multiplayer.get_peers():
+			_send_connection_heartbeat(1)
+
+
+func _heartbeat_due(now: int) -> bool:
+	if now < _next_heartbeat_ms:
+		return false
+	_next_heartbeat_ms = now + int(CONNECTION_HEARTBEAT_SECONDS * 1000)
+	return true
+
+
+func _connection_is_unresponsive(peer_id: int, last_seen: int, now: int) -> bool:
+	var silence_ms := int(CONNECTION_SILENCE_SECONDS * 1000)
+	if now - last_seen <= silence_ms:
+		_heartbeat_probes.erase(peer_id)
+		return false
+	if not _heartbeat_probes.has(peer_id):
+		_heartbeat_probes[peer_id] = now
+		_send_connection_heartbeat(peer_id)
+		return false
+	# A connected WebRTC transport can queue this reliable message while the
+	# other browser is rendering its first board frame. A genuine transport
+	# disconnect still raises peer_disconnected immediately.
+	var probe_window_ms := int(RECONNECT_GRACE_SECONDS * 1000) if _browser_peer_is_connected(peer_id) else silence_ms
+	return now - int(_heartbeat_probes[peer_id]) >= probe_window_ms
+
+
+func _browser_peer_is_connected(peer_id: int) -> bool:
+	var connection := _web_connections.get(peer_id) as WebRTCPeerConnection
+	return _web_transport and connection != null and connection.get_connection_state() == WebRTCPeerConnection.STATE_CONNECTED
+
+
+func _send_connection_heartbeat(peer_id: int) -> void:
+	_rpc_connection_heartbeat.rpc_id(peer_id)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_connection_heartbeat() -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if not is_host:
+		if sender == 1:
+			_last_host_contact = Time.get_ticks_msec()
+			_send_connection_heartbeat(1)
+		return
+	if not connected_players.has(sender):
+		return
+	_peer_last_seen[sender] = Time.get_ticks_msec()
+	_rpc_connection_alive.rpc_id(sender)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_connection_alive() -> void:
+	_last_host_contact = Time.get_ticks_msec()
+
+
+func _begin_reconnect() -> void:
+	if _reconnecting or _recovery_failed or not is_online or is_host:
+		return
+	_saved_local_index = game_peer_ids.find(my_peer_id)
+	_reconnecting = true
+	_host_waiting = true
+	_restoration_pending = false
+	_reconnect_deadline = Time.get_ticks_msec() + int(RECONNECT_GRACE_SECONDS * 1000)
+	_next_reconnect_attempt = Time.get_ticks_msec() + 350
+	_last_recovery_seconds = -1
+	get_tree().paused = true
+	_close_client_transport()
+	recovery_state_changed.emit({"mode": "reconnecting", "remaining": int(RECONNECT_GRACE_SECONDS)})
+	if _resume_token.is_empty():
+		_fail_recovery("참가 정보를 복구하지 못했습니다. 로비에서 다시 참가해 주세요.")
+
+
+func _close_client_transport() -> void:
+	var old_peer := multiplayer.multiplayer_peer
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+	if old_peer and not (old_peer is OfflineMultiplayerPeer):
+		old_peer.close()
+	for connection_variant in _web_connections.values():
+		(connection_variant as WebRTCPeerConnection).close()
+	_web_multiplayer_peer = null
+	_web_connections.clear()
+	_web_pending_candidates.clear()
+	_web_remote_description_set.clear()
+	_web_connection_attempts.clear()
+	_web_signal_replays.clear()
+
+
+func _attempt_reconnect() -> void:
+	_close_client_transport()
+	_next_reconnect_attempt = Time.get_ticks_msec() + int(RECONNECT_ATTEMPT_SECONDS * 1000)
+	if _web_transport:
+		_web_multiplayer_peer = WebRTCMultiplayerPeer.new()
+		if _web_multiplayer_peer.create_client(my_peer_id) != OK:
+			return
+		multiplayer.multiplayer_peer = _web_multiplayer_peer
+		_web_signaling_active = true
+		_ensure_browser_connection(1, true)
+	else:
+		var peer := ENetMultiplayerPeer.new()
+		if peer.create_client(_join_address, _join_port) == OK:
+			multiplayer.multiplayer_peer = peer
+
+
+func _fail_recovery(message: String) -> void:
+	_reconnecting = false
+	_recovery_failed = true
+	get_tree().paused = true
+	_close_client_transport()
+	_web_signaling_active = false
+	recovery_state_changed.emit({"mode": "failed", "message": message})
+
+
+func _accept_returning_player(sender_id: int, token: String) -> void:
+	var player_idx := int(_resume_slots.get(token, -1))
+	if token.is_empty() or player_idx < 0 or not _pending_reconnects.has(player_idx) or Time.get_ticks_msec() >= int(_pending_reconnects[player_idx]):
+		_rpc_rejoin_rejected.rpc_id(sender_id)
+		return
+	var old_peer_id := game_peer_ids[player_idx]
+	_peer_resume_tokens.erase(old_peer_id)
+	_peer_last_seen.erase(old_peer_id)
+	game_peer_ids[player_idx] = sender_id
+	_peer_resume_tokens[sender_id] = token
+	_pending_registrations.erase(sender_id)
+	_peer_last_seen[sender_id] = Time.get_ticks_msec()
+	connected_players[sender_id] = _sanitize_player_info(GameManager.players[player_idx])
+	_rpc_sync_game_peers.rpc(game_peer_ids)
+	_reset_game_checkpoints()
+	_rpc_restore_session.rpc_id(sender_id, _capture_game_state(), game_peer_ids)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_rejoin_rejected() -> void:
+	if not is_host:
+		_fail_recovery("이 게임의 재접속 시간이 끝났습니다. 빈자리는 AI가 이어서 플레이합니다.")
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_sync_game_peers(peer_ids: Array) -> void:
+	game_peer_ids.assign(peer_ids)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_restore_session(snapshot: Dictionary, peer_ids: Array) -> void:
+	if is_host or not _reconnecting:
+		return
+	game_peer_ids.assign(peer_ids)
+	_saved_local_index = game_peer_ids.find(my_peer_id)
+	GameManager.apply_network_state(snapshot, "", [])
+	_last_game_rankings = (snapshot.get("last_game_rankings", []) as Array).duplicate(true)
+	_reconnecting = false
+	_recovery_failed = false
+	_host_waiting = true
+	_restoration_pending = true
+	_last_host_contact = Time.get_ticks_msec()
+	_rpc_confirm_restored.rpc_id(1)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_confirm_restored() -> void:
+	if not is_host:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	var player_idx := game_peer_ids.find(sender)
+	if not connected_players.has(sender) or not _pending_reconnects.has(player_idx):
+		return
+	_pending_reconnects.erase(player_idx)
+	_publish_recovery_state()
+	GameManager.status_message_posted.emit("%s님이 원래 자리로 돌아왔습니다." % GameManager.players[player_idx]["name"])
+
+
+func _expire_returning_player(player_idx: int) -> void:
+	_pending_reconnects.erase(player_idx)
+	var old_peer := game_peer_ids[player_idx]
+	if old_peer in multiplayer.get_peers():
+		_rpc_rejoin_rejected.rpc_id(old_peer)
+	_resume_slots.erase(_peer_resume_tokens.get(old_peer, ""))
+	_peer_resume_tokens.erase(old_peer)
+	_peer_last_seen.erase(old_peer)
+	connected_players.erase(old_peer)
+	game_peer_ids[player_idx] = 0
+	_rpc_sync_game_peers.rpc(game_peer_ids)
+	GameManager.take_over_disconnected_player(player_idx)
+	_publish_recovery_state()
+
+
+func _recovery_seconds_left() -> int:
+	var remaining := 0
+	for deadline in _pending_reconnects.values():
+		remaining = maxi(remaining, ceili(float(int(deadline) - Time.get_ticks_msec()) / 1000.0))
+	return remaining
+
+
+func _publish_recovery_state() -> void:
+	if not is_online or not is_host or not game_has_started:
+		return
+	var names: Array[String] = []
+	for player_idx in _pending_reconnects:
+		names.append(str(GameManager.players[int(player_idx)]["name"]))
+	var state := {"mode": "waiting" if not names.is_empty() else "hidden", "names": names, "remaining": _recovery_seconds_left()}
+	_last_recovery_seconds = int(state["remaining"])
+	_rpc_recovery_state.rpc(state)
+	_apply_recovery_state(state)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_recovery_state(state: Dictionary) -> void:
+	if not is_host:
+		_apply_recovery_state(state)
+
+
+func _apply_recovery_state(state: Dictionary) -> void:
+	_host_waiting = str(state.get("mode", "hidden")) == "waiting"
+	get_tree().paused = _host_waiting or _reconnecting or _recovery_failed
+	if not _reconnecting and not _recovery_failed:
+		recovery_state_changed.emit(state)
+		if not _host_waiting and _restoration_pending:
+			_restoration_pending = false
+			session_restored.emit()
+			if not _last_game_rankings.is_empty():
+				GameManager.game_over.emit(_last_game_rankings.duplicate(true))
+
+
+func request_roll_dice(player_idx: int) -> void:
+	_request_game_action("roll_dice", {"player_idx": player_idx})
+
+
+func request_quiz_answer(player_idx: int, choice: String) -> void:
+	_request_game_action("quiz_answer", {"player_idx": player_idx, "choice": choice, "turn": GameManager.total_turns, "quiz_id": GameManager.active_quiz_data.get("id", "")})
+
+func _matches_quiz_turn(payload: Dictionary) -> bool:
+	return int(payload.get("turn", -1)) == GameManager.total_turns and str(payload.get("quiz_id", "")) == str(GameManager.active_quiz_data.get("id", "")) and not GameManager.active_quiz_data.is_empty()
+
+
+func request_spectator_guess(target_idx: int, choice: String) -> void:
+	_request_game_action("spectator_guess", {"target_idx": target_idx, "choice": choice, "turn": GameManager.total_turns, "quiz_id": GameManager.active_quiz_data.get("id", "")})
+
+
+func request_special_skill(player_idx: int, target_index: int) -> void:
+	_request_game_action("special_skill", {"player_idx": player_idx, "target_index": target_index})
+
+
+func request_lap_reward(player_idx: int, item_id: String) -> void:
+	_request_game_action("lap_reward", {"player_idx": player_idx, "item_id": item_id})
+
+
+func request_build_project(project_index: int, player_idx: int, map_position: Vector2) -> void:
+	_request_game_action("build_project", {"project_index": project_index, "player_idx": player_idx, "map_position": map_position})
+
+
+func request_open_market_offer(player_idx: int, offer: Dictionary) -> void:
+	_request_game_action("open_market_offer", {"player_idx": player_idx, "offer": offer.duplicate(true)})
+
+
+func request_open_market_take(player_idx: int, item_id: String) -> void:
+	_request_game_action("open_market_take", {"player_idx": player_idx, "item_id": item_id})
+
+
+func request_minigame_ready(player_idx: int, round_id: int) -> void:
+	_request_game_action("minigame_ready", {"player_idx": player_idx, "round_id": round_id})
+
+func request_adventure_ready(player_idx: int) -> void:
+	_request_game_action("adventure_ready", {"player_idx": player_idx})
+
+
+func request_minigame_score(player_idx: int, score: int, learning_stats: Dictionary = {}, round_id: int = -1) -> void:
+	_request_game_action("minigame_score", {"player_idx": player_idx, "round_id": round_id, "score": score, "stats": learning_stats.duplicate(true)})
+
+
+func request_evaluate_village() -> void:
+	_request_game_action("evaluate_village", {"player_idx": get_local_player_index()})
+
+
+func _request_game_action(action: String, payload: Dictionary) -> void:
+	if not is_online or get_tree().paused:
+		return
+	if is_host:
+		_handle_game_action(my_peer_id, action, payload)
+	else:
+		_rpc_request_game_action.rpc_id(1, action, payload)
+
+
+func _on_peer_connected(id: int) -> void:
+	_web_signal_replays.erase(id)
+	print("[Network] 플레이어 연결: %d" % id)
+	if is_host:
+		_pending_registrations[id] = Time.get_ticks_msec() + 5000
+
+
+func _on_peer_disconnected(id: int) -> void:
+	print("[Network] 플레이어 연결 종료: %d" % id)
+	var was_registered := connected_players.has(id)
+	connected_players.erase(id)
+	_drop_browser_connection(id)
+	_pending_registrations.erase(id)
+	_peer_last_seen.erase(id)
+	_heartbeat_probes.erase(id)
+	player_disconnected.emit(id)
+	if is_host:
+		if was_registered:
+			_broadcast_lobby_state.call_deferred()
+		var player_idx := get_player_index_for_peer(id)
+		if game_has_started and player_idx >= 0 and player_idx < GameManager.players.size():
+			if not _pending_reconnects.has(player_idx):
+				_pending_reconnects[player_idx] = Time.get_ticks_msec() + int(RECONNECT_GRACE_SECONDS * 1000)
+			# Finish this poll's disconnects before broadcasting to surviving peers.
+			get_tree().paused = true
+			_publish_recovery_state.call_deferred()
+		elif not game_has_started:
+			_peer_resume_tokens.erase(id)
+
+
+func _on_connected_to_server() -> void:
+	_web_signal_replays.erase(1)
+	_web_connect_remaining = 0.0
+	my_peer_id = multiplayer.get_unique_id()
+	_last_host_contact = Time.get_ticks_msec()
+	print("[Network] 플레이어 호스트 접속 성공: %d" % my_peer_id)
+	# ENet 연결 신호가 온 직후 한 프레임 뒤 등록해 호스트의 peer_connected 처리가
+	# 끝나기 전에 첫 RPC가 유실되는 환경에서도 안정적으로 입장합니다.
+	call_deferred("_send_pending_registration")
+	if not _reconnecting:
+		connection_succeeded.emit()
+
+
+func _send_pending_registration() -> void:
+	if is_online and not is_host:
+		_rpc_register_player.rpc_id(1, pending_local_player_info, _join_password, _resume_token)
+
+
+func _on_connection_failed() -> void:
+	print("[Network] 플레이어 호스트 접속 실패")
+	if _reconnecting or _recovery_failed:
+		return
+	if _web_connect_remaining > 0.0:
+		_fail_browser_guest_connection()
+		return
+	connection_failed.emit()
+	disconnect_network()
+
+
+func _fail_browser_guest_connection() -> void:
+	var detail := "방은 찾았지만 방장의 응답을 받지 못했습니다. 방장이 게임 탭을 열어 둔 상태에서 다시 참가해 주세요."
+	if bool(_web_remote_description_set.get(1, false)):
+		detail = "방장이 응답했지만 두 기기를 직접 연결하지 못했습니다. 두 기기를 같은 Wi-Fi에 연결하거나 다른 네트워크에서 다시 참가해 주세요."
+	disconnect_network()
+	room_code_lookup_failed.emit(detail)
+
+
+func _on_server_disconnected() -> void:
+	print("[Network] 방장과의 연결이 끊어졌습니다.")
+	if _web_connect_remaining > 0.0:
+		_fail_browser_guest_connection()
+		return
+	if game_has_started and not is_host:
+		_begin_reconnect()
+		return
+	server_disconnected.emit()
+	disconnect_network()
+
+
+@rpc("any_peer", "reliable")
+func _rpc_register_player(info: Dictionary, password: String = "", resume_token: String = "") -> void:
+	if not is_host or not multiplayer.is_server():
+		return
+	var sender_id := multiplayer.get_remote_sender_id()
+	print("[Network] 참가자 등록 요청: %d" % sender_id)
+	if sender_id <= 0:
+		return
+	if game_has_started:
+		_accept_returning_player(sender_id, resume_token)
+		return
+	if not _web_transport and not _room_password.is_empty() and password != _room_password:
+		multiplayer.multiplayer_peer.disconnect_peer(sender_id)
+		return
+	if not connected_players.has(sender_id) and connected_players.size() >= room_capacity:
+		multiplayer.multiplayer_peer.disconnect_peer(sender_id)
+		return
+	connected_players[sender_id] = _sanitize_player_info(info)
+	_pending_registrations.erase(sender_id)
+	_peer_last_seen[sender_id] = Time.get_ticks_msec()
+	if not _peer_resume_tokens.has(sender_id):
+		_peer_resume_tokens[sender_id] = Crypto.new().generate_random_bytes(32).hex_encode()
+	_rpc_session_credentials.rpc_id(sender_id, _peer_resume_tokens[sender_id])
+	print("[Network] 로비 인원: %d/%d" % [connected_players.size(), MAX_PLAYERS])
+	player_connected.emit(sender_id, connected_players[sender_id])
+	_broadcast_lobby_state()
+
+
+@rpc("authority", "call_local", "reliable")
+func _rpc_sync_lobby(players_data: Dictionary, title: String = "에너지 모험", capacity: int = 4) -> void:
+	room_title = title
+	room_capacity = clampi(capacity, 2, 4)
+	connected_players = players_data.duplicate(true)
+	room_state_changed.emit(connected_players.duplicate(true))
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_begin_game(configs: Array, duration_seconds: int, peer_ids: Array, board_tiles: Array, grade: int = 5, challenge: bool = false, extra_reading: bool = false) -> void:
+	print("[Network] 공통 게임 시작 수신 · peer=%d" % multiplayer.get_unique_id())
+	game_has_started = true
+	GameManager.set_learning_grade(grade)
+	QuizDatabase.configure_challenge(challenge)
+	QuizDatabase.extra_reading_time = extra_reading
+	room_capacity = clampi(peer_ids.size(), 2, 4)
+	_last_host_contact = Time.get_ticks_msec()
+	var received_peer_ids := peer_ids.duplicate()
+	var received_board_tiles := board_tiles.duplicate(true)
+	game_peer_ids.clear()
+	for peer_id in received_peer_ids:
+		game_peer_ids.append(int(peer_id))
+	_saved_local_index = game_peer_ids.find(my_peer_id)
+	shared_board_tiles.clear()
+	for tile in received_board_tiles:
+		shared_board_tiles.append((tile as Dictionary).duplicate(true))
+	var typed_configs: Array[Dictionary] = []
+	for config in configs:
+		typed_configs.append((config as Dictionary).duplicate(true))
+	game_started_signal.emit(typed_configs, duration_seconds)
+
+
+@rpc("any_peer", "reliable")
+func _rpc_request_game_action(action: String, payload: Dictionary) -> void:
+	if not multiplayer.is_server() or not game_has_started:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if connected_players.has(sender):
+		_peer_last_seen[sender] = Time.get_ticks_msec()
+	_handle_game_action(sender, action, payload)
+
+
+func _handle_game_action(sender_peer_id: int, action: String, payload: Dictionary) -> void:
+	if not is_host or not game_has_started or get_tree().paused:
+		return
+	var player_idx := get_player_index_for_peer(sender_peer_id)
+	if player_idx < 0 or player_idx >= GameManager.players.size():
+		return
+	match action:
+		"quiz_component", "quiz_review", "team_project", "team_confirm", "trial_mode", "trial_finish":
+			if typeof(payload.get("player_idx")) != TYPE_INT or payload["player_idx"] != player_idx:
+				return
+			match action:
+				"quiz_component":
+					if typeof(payload.get("token")) == TYPE_INT and typeof(payload.get("item_id")) == TYPE_STRING:
+						GameManager.choose_quiz_component(player_idx, payload["item_id"], payload["token"])
+				"quiz_review":
+					GameManager.finish_quiz_review(player_idx)
+				"team_project":
+					if typeof(payload.get("project_idx")) == TYPE_INT:
+						GameManager.select_team_project(player_idx, payload["project_idx"])
+				"team_confirm":
+					GameManager.confirm_team_plan(player_idx)
+				"trial_mode":
+					if typeof(payload.get("mode")) == TYPE_STRING:
+						GameManager.set_energy_trial_mode(player_idx, payload["mode"])
+				"trial_finish":
+					var remove_project: Variant = payload.get("remove_project", -1)
+					var support_project: Variant = payload.get("support_project", -1)
+					var attempt: Variant = payload.get("attempt", GameManager.energy_trial_retries)
+					if typeof(payload.get("retry")) == TYPE_BOOL and typeof(remove_project) == TYPE_INT and typeof(support_project) == TYPE_INT and typeof(attempt) == TYPE_INT and attempt == GameManager.energy_trial_retries:
+						GameManager.finish_energy_trial(player_idx, payload["retry"], remove_project, support_project)
+		"adventure_ready":
+			if int(payload.get("player_idx", -1)) == player_idx:
+				GameManager.confirm_adventure_ready(player_idx)
+		"roll_dice":
+			if int(payload.get("player_idx", -1)) == player_idx:
+				GameManager.execute_roll_dice(player_idx)
+		"quiz_answer":
+			if not _matches_quiz_turn(payload): return
+			if int(payload.get("player_idx", -1)) == player_idx and GameManager.active_quiz_player_idx == player_idx:
+				var choice := str(payload.get("choice", ""))
+				if choice.is_empty() or choice in GameManager.active_quiz_data.get("options", []):
+					GameManager.on_network_quiz_resolved(player_idx, choice == str(GameManager.active_quiz_data.get("answer", "")), choice)
+		"spectator_guess":
+			if not _matches_quiz_turn(payload): return
+			GameManager.submit_spectator_quiz_guess(player_idx, int(payload.get("target_idx", -1)), str(payload.get("choice", "")))
+		"special_skill":
+			if int(payload.get("player_idx", -1)) == player_idx:
+				GameManager.use_special_skill(player_idx, int(payload.get("target_index", -1)))
+		"lap_reward":
+			if int(payload.get("player_idx", -1)) == player_idx:
+				GameManager.claim_lap_reward(player_idx, str(payload.get("item_id", "")))
+		"build_project":
+			if int(payload.get("player_idx", -1)) == player_idx:
+				var project_index := int(payload.get("project_index", -1))
+				if not GameManager.build_village_project(project_index, player_idx, payload.get("map_position", Vector2(-1, -1))):
+					var rejected := {"project_index": project_index}
+					if sender_peer_id == my_peer_id:
+						game_action_rejected.emit(action, rejected)
+					else:
+						_rpc_game_action_rejected.rpc_id(sender_peer_id, action, rejected)
+		"open_market_offer":
+			if int(payload.get("player_idx", -1)) == player_idx:
+				GameManager.submit_open_market_offer(player_idx, payload.get("offer", {}))
+		"open_market_take":
+			if int(payload.get("player_idx", -1)) == player_idx:
+				GameManager.take_open_market_item(player_idx, str(payload.get("item_id", "")))
+		"minigame_ready":
+			if int(payload.get("player_idx", -1)) == player_idx:
+				GameManager.start_minigame_action(player_idx, int(payload.get("round_id", -1)))
+		"minigame_score":
+			if typeof(payload.get("player_idx")) == TYPE_INT and payload["player_idx"] == player_idx:
+				GameManager.submit_network_minigame_score(player_idx, payload.get("score"), payload.get("stats"), payload.get("round_id"))
+		"evaluate_village":
+			if int(payload.get("player_idx", -1)) == player_idx:
+				GameManager.finish_village_construction(player_idx)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_game_action_rejected(action: String, payload: Dictionary) -> void:
+	game_action_rejected.emit(action, payload)
+
+
+func _broadcast_lobby_state() -> void:
+	if is_host:
+		_rpc_sync_lobby.rpc(connected_players, room_title, room_capacity)
+
+
+func _connect_game_signals() -> void:
+	if _game_signals_connected:
+		return
+	_game_signals_connected = true
+	GameManager.component_choice_changed.connect(func(state): _broadcast_game_event("component_choice_changed", [state]))
+	GameManager.team_plan_changed.connect(func(state): _broadcast_game_event("team_plan_changed", [state]))
+	GameManager.energy_trial_changed.connect(func(state): _broadcast_game_event("energy_trial_changed", [state]))
+	GameManager.adventure_preparation_changed.connect(func(state): _broadcast_game_event("adventure_preparation_changed", [state]))
+	GameManager.turn_changed.connect(func(idx): _broadcast_game_event("turn_changed", [idx]))
+	GameManager.player_moved.connect(func(idx, from_tile, to_tile): _broadcast_game_event("player_moved", [idx, from_tile, to_tile]))
+	GameManager.player_state_changed.connect(func(idx): _broadcast_game_event("player_state_changed", [idx]))
+	GameManager.dice_rolled.connect(func(idx, value): _broadcast_game_event("dice_rolled", [idx, value]))
+	GameManager.dice_input_time_changed.connect(func(idx, seconds): _broadcast_game_event("dice_input_time_changed", [idx, seconds]))
+	GameManager.quiz_requested.connect(func(idx, quiz): _broadcast_game_event("quiz_requested", [idx, quiz]))
+	GameManager.quiz_response_window_changed.connect(func(): _broadcast_game_event("quiz_response_window_changed", []))
+	GameManager.quiz_resolved.connect(func(idx, correct): _broadcast_game_event("quiz_resolved", [idx, correct]))
+	GameManager.spectator_quiz_bonus_resolved.connect(func(observer, target, correct, score): _broadcast_game_event("spectator_quiz_bonus_resolved", [observer, target, correct, score]))
+	GameManager.game_over.connect(func(rankings): _broadcast_game_event("game_over", [rankings]))
+	GameManager.status_message_posted.connect(func(message): _broadcast_game_event("status_message_posted", [message]))
+	GameManager.kingdom_progress_changed.connect(func(built, total, health): _broadcast_game_event("kingdom_progress_changed", [built, total, health]))
+	GameManager.player_inventory_changed.connect(func(idx, inventory): _broadcast_game_event("player_inventory_changed", [idx, inventory]))
+	GameManager.tile_item_collected.connect(func(tile_idx, player_idx, item_id): _broadcast_game_event("tile_item_collected", [tile_idx, player_idx, item_id]))
+	GameManager.special_skill_activated.connect(func(player_idx, target_idx, skill): _broadcast_game_event("special_skill_activated", [player_idx, target_idx, skill]))
+	GameManager.special_skill_completed.connect(func(player_idx): _broadcast_game_event("special_skill_completed", [player_idx]))
+	GameManager.village_construction_started.connect(func(inventories): _broadcast_game_event("village_construction_started", [inventories]))
+	GameManager.village_construction_changed.connect(func(inventories, built, health): _broadcast_game_event("village_construction_changed", [inventories, built, health]))
+	GameManager.game_time_changed.connect(func(remaining, total): _broadcast_game_event("game_time_changed", [remaining, total]))
+	GameManager.lap_completed.connect(func(idx, lap, rank, reward): _broadcast_game_event("lap_completed", [idx, lap, rank, reward]))
+	GameManager.lap_reward_requested.connect(func(idx, rank, reward): _broadcast_game_event("lap_reward_requested", [idx, rank, reward]))
+	GameManager.lap_reward_completed.connect(func(idx, items): _broadcast_game_event("lap_reward_completed", [idx, items]))
+	GameManager.open_market_state_changed.connect(func(state): _broadcast_game_event("open_market_state_changed", [state]))
+	GameManager.minigame_started.connect(func(game_data): _broadcast_game_event("minigame_started", [game_data]))
+	GameManager.minigame_submission_changed.connect(func(state): _broadcast_game_event("minigame_submission_changed", [state]))
+	GameManager.minigame_finished.connect(func(results): _broadcast_game_event("minigame_finished", [results]))
+
+
+func _broadcast_game_event(event_name: String, event_args: Array) -> void:
+	if not is_online or not is_host or not game_has_started:
+		return
+	if event_name == "game_over" and not event_args.is_empty():
+		_last_game_rankings = (event_args[0] as Array).duplicate(true)
+	if event_name == "game_time_changed" or event_name == "dice_input_time_changed":
+		_send_time_event(event_name, event_args)
+		return
+	if event_name == "open_market_state_changed":
+		var market_state: Dictionary = event_args[0] if not event_args.is_empty() else {}
+		var market_signature := var_to_str([
+			market_state.get("active", false),
+			market_state.get("phase", 0),
+			market_state.get("submitted_players", {}),
+			market_state.get("stock", {}),
+			market_state.get("allowances", {}),
+			market_state.get("taken_counts", {})
+		])
+		if market_signature == _last_open_market_sync_signature:
+			_send_time_event(event_name, event_args)
+			return
+		_last_open_market_sync_signature = market_signature
+	var values := _capture_game_state_patch(event_name, event_args)
+	_rpc_apply_game_patch.rpc(_changed_reliable_values(values), event_name, event_args)
+
+
+func _send_time_event(event_name: String, event_args: Array) -> void:
+	_rpc_apply_time_event.rpc(_capture_unreliable_time_patch(event_name, event_args), event_name, event_args)
+
+
+func _capture_unreliable_time_patch(event_name: String, event_args: Array) -> Dictionary:
+	var patch := _capture_time_patch(event_name, event_args)
+	# Unreliable ticks can be lost or can change a value back before the next checkpoint.
+	for key in patch:
+		_reliable_game_state.erase(key)
+	return patch
+
+
+func _reset_game_checkpoints() -> void:
+	_checkpoints_until_full = 0
+	_reliable_game_state.clear()
+
+
+func _capture_game_checkpoint() -> Dictionary:
+	var state := _capture_game_state()
+	if _checkpoints_until_full == 0:
+		_checkpoints_until_full = CHECKPOINTS_PER_FULL_STATE - 1
+		_reliable_game_state = state.duplicate(true)
+		return state
+	_checkpoints_until_full -= 1
+	return _changed_reliable_values(state)
+
+
+func _changed_reliable_values(values: Dictionary) -> Dictionary:
+	var changed: Dictionary = {}
+	for key in values:
+		var value: Variant = values[key]
+		if key == "player_updates":
+			var known_players: Array = _reliable_game_state.get("players", [])
+			var updates: Dictionary = {}
+			for index: int in value:
+				if index < 0 or index >= known_players.size():
+					updates[index] = value[index]
+				elif known_players[index] != value[index]:
+					updates[index] = value[index]
+					known_players[index] = value[index]
+			if not updates.is_empty():
+				changed[key] = updates
+		elif key == "collected_item_update":
+			# The event merges individual tiles; the next checkpoint reconciles the entire map.
+			_reliable_game_state.erase("collected_item_tiles")
+			changed[key] = value
+		elif not _reliable_game_state.has(key) or _reliable_game_state[key] != value:
+			changed[key] = value
+			# Capture helpers already detach arrays and dictionaries from GameManager.
+			_reliable_game_state[key] = value
+	return changed
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_apply_game_patch(patch: Dictionary, event_name: String, event_args: Array) -> void:
+	if is_host:
+		return
+	_last_host_contact = Time.get_ticks_msec()
+	GameManager.apply_network_patch(patch, event_name, event_args)
+
+
+@rpc("authority", "call_remote", "unreliable_ordered")
+func _rpc_apply_time_event(patch: Dictionary, event_name: String, event_args: Array) -> void:
+	if is_host:
+		return
+	_last_host_contact = Time.get_ticks_msec()
+	GameManager.apply_network_patch(patch, event_name, event_args)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_apply_full_game_state(snapshot: Dictionary) -> void:
+	if is_host:
+		return
+	_last_host_contact = Time.get_ticks_msec()
+	GameManager.apply_network_state(snapshot, "", [])
+
+
+func _capture_time_patch(event_name: String, event_args: Array) -> Dictionary:
+	match event_name:
+		"game_time_changed":
+			return {
+				"game_time_remaining": float(event_args[0]) if event_args.size() >= 1 else GameManager.game_time_remaining,
+				"game_duration_seconds": int(event_args[1]) if event_args.size() >= 2 else GameManager.game_duration_seconds,
+				"active_quiz_time_remaining": GameManager.active_quiz_time_remaining
+			}
+		"dice_input_time_changed":
+			return {
+				"dice_input_time_remaining": float(event_args[1]) if event_args.size() >= 2 else GameManager.dice_input_time_remaining
+			}
+		"open_market_state_changed":
+			return {
+				"open_market_time_remaining": float((event_args[0] as Dictionary).get("time_remaining", GameManager.open_market_time_remaining)) if not event_args.is_empty() else GameManager.open_market_time_remaining
+			}
+	return {}
+
+
+func _capture_game_state_patch(event_name: String, event_args: Array) -> Dictionary:
+	var patch := {
+		"current_state": int(GameManager.current_state),
+		"current_turn_idx": GameManager.current_turn_idx,
+		"total_turns": GameManager.total_turns,
+		"is_game_active": GameManager.is_game_active,
+		"adventure_waiting_for_start": GameManager.adventure_waiting_for_start,
+		"adventure_ready_players": GameManager.adventure_ready_players.duplicate(true)
+	}
+	match event_name:
+		"component_choice_changed", "team_plan_changed", "energy_trial_changed":
+			_add_learning_state(patch)
+			patch["active_quiz_data"] = GameManager.active_quiz_data.duplicate(true)
+			patch["active_quiz_player_idx"] = GameManager.active_quiz_player_idx
+			patch["pending_lap_reward"] = GameManager.pending_lap_reward.duplicate(true)
+			patch["village_construction_active"] = GameManager.village_construction_active
+		"turn_changed":
+			patch["special_skill_used_this_turn"] = GameManager.special_skill_used_this_turn
+			patch["dice_input_time_remaining"] = GameManager.dice_input_time_remaining
+			patch["active_quiz_data"] = GameManager.active_quiz_data.duplicate(true)
+			patch["active_quiz_player_idx"] = GameManager.active_quiz_player_idx
+			patch["active_spectator_quiz_attempts"] = GameManager.active_spectator_quiz_attempts.duplicate(true)
+			patch["pending_lap_reward"] = GameManager.pending_lap_reward.duplicate(true)
+			_add_minigame_state(patch)
+		"player_moved", "player_state_changed", "player_inventory_changed":
+			_add_player_update(patch, int(event_args[0]) if not event_args.is_empty() else -1)
+			patch["pending_lap_reward"] = GameManager.pending_lap_reward.duplicate(true)
+		"quiz_requested", "quiz_response_window_changed":
+			patch["quiz_collecting_peers"] = GameManager.quiz_collecting_peers
+			patch["active_quiz_data"] = GameManager.active_quiz_data.duplicate(true)
+			patch["active_quiz_player_idx"] = GameManager.active_quiz_player_idx
+			patch["active_quiz_time_remaining"] = GameManager.active_quiz_time_remaining
+			patch["active_spectator_quiz_attempts"] = GameManager.active_spectator_quiz_attempts.duplicate(true)
+		"quiz_resolved":
+			patch["quiz_collecting_peers"] = false
+			patch["last_quiz_choice"] = GameManager.last_quiz_choice
+			_add_player_update(patch, int(event_args[0]) if not event_args.is_empty() else -1)
+			patch["active_quiz_data"] = GameManager.active_quiz_data.duplicate(true)
+			patch["active_quiz_player_idx"] = GameManager.active_quiz_player_idx
+			patch["active_spectator_quiz_attempts"] = GameManager.active_spectator_quiz_attempts.duplicate(true)
+		"spectator_quiz_bonus_resolved":
+			_add_player_update(patch, int(event_args[0]) if not event_args.is_empty() else -1)
+			patch["active_spectator_quiz_attempts"] = GameManager.active_spectator_quiz_attempts.duplicate(true)
+		"kingdom_progress_changed":
+			_add_kingdom_state(patch)
+		"tile_item_collected":
+			if event_args.size() >= 2:
+				patch["collected_item_update"] = {int(event_args[0]): int(event_args[1])}
+		"special_skill_activated", "special_skill_completed":
+			_add_player_update(patch, int(event_args[0]) if not event_args.is_empty() else -1)
+			patch["special_skill_used_this_turn"] = GameManager.special_skill_used_this_turn
+		"lap_completed", "lap_reward_requested", "lap_reward_completed":
+			_add_player_update(patch, int(event_args[0]) if not event_args.is_empty() else -1)
+			patch["lap_finish_orders"] = GameManager.lap_finish_orders.duplicate(true)
+			patch["pending_lap_reward"] = GameManager.pending_lap_reward.duplicate(true)
+		"open_market_state_changed":
+			_add_open_market_state(patch)
+		"minigame_started", "minigame_submission_changed":
+			_add_minigame_state(patch)
+		"minigame_finished":
+			patch["team_parts"] = GameManager.team_parts.duplicate(true)
+			patch["players"] = GameManager.players.duplicate(true)
+			_add_minigame_state(patch)
+		"village_construction_started", "village_construction_changed":
+			_add_learning_state(patch)
+			patch["village_finished_players"] = GameManager.village_finished_players.duplicate(true)
+			patch["players"] = GameManager.players.duplicate(true)
+			_add_kingdom_state(patch)
+			patch["village_construction_active"] = GameManager.village_construction_active
+			patch["village_ai_construction_running"] = GameManager.village_ai_construction_running
+			patch["built_project_ids"] = GameManager.built_project_ids.duplicate()
+			patch["built_project_placements"] = GameManager.built_project_placements.duplicate(true)
+			patch["built_project_owners"] = GameManager.built_project_owners.duplicate(true)
+		"game_over":
+			_add_learning_state(patch)
+			patch["players"] = GameManager.players.duplicate(true)
+			_add_kingdom_state(patch)
+			patch["village_construction_active"] = GameManager.village_construction_active
+			patch["village_ai_construction_running"] = GameManager.village_ai_construction_running
+	return patch
+
+func request_learning_action(action: String, payload: Dictionary) -> void:
+	if action in ["quiz_component", "quiz_review", "team_project", "team_confirm", "trial_mode", "trial_finish"]:
+		_request_game_action(action, payload)
+
+func _add_learning_state(patch: Dictionary) -> void:
+	patch["team_parts"] = GameManager.team_parts.duplicate(true)
+	patch["component_choices"] = GameManager.component_choices.duplicate(true)
+	patch["component_choice_serial"] = GameManager.component_choice_serial
+	patch["team_plan"] = GameManager.team_plan.duplicate(true)
+	patch["energy_trial"] = GameManager.energy_trial.duplicate(true)
+	patch["energy_trial_retries"] = GameManager.energy_trial_retries
+	patch["previous_energy_trial"] = GameManager.previous_energy_trial.duplicate(true)
+
+
+func _add_player_update(patch: Dictionary, player_idx: int) -> void:
+	if player_idx < 0 or player_idx >= GameManager.players.size():
+		return
+	var player_updates: Dictionary = patch.get("player_updates", {})
+	player_updates[player_idx] = GameManager.players[player_idx].duplicate(true)
+	patch["player_updates"] = player_updates
+
+
+func _add_kingdom_state(patch: Dictionary) -> void:
+	patch["projects_built"] = GameManager.projects_built
+	patch["kingdom_health"] = GameManager.kingdom_health
+	patch["kingdom_recovered"] = GameManager.kingdom_recovered
+	patch["team_quiz_correct"] = GameManager.team_quiz_correct
+
+
+func _add_open_market_state(patch: Dictionary) -> void:
+	patch["open_market_active"] = GameManager.open_market_active
+	patch["open_market_phase"] = int(GameManager.open_market_phase)
+	patch["open_market_time_remaining"] = GameManager.open_market_time_remaining
+	patch["open_market_submitted_players"] = GameManager.open_market_submitted_players.duplicate(true)
+	patch["open_market_stock"] = GameManager.open_market_stock.duplicate(true)
+	patch["open_market_take_allowances"] = GameManager.open_market_take_allowances.duplicate(true)
+	patch["open_market_taken_counts"] = GameManager.open_market_taken_counts.duplicate(true)
+
+
+func _add_minigame_state(patch: Dictionary) -> void:
+	patch["active_minigame"] = GameManager.active_minigame.duplicate(true)
+	patch["minigame_scores"] = GameManager.minigame_scores.duplicate(true)
+	patch["minigame_time_remaining"] = GameManager.minigame_time_remaining
+	patch["minigame_waiting_for_start"] = GameManager.minigame_waiting_for_start
+	patch["minigame_guide_timeout"] = GameManager.minigame_guide_timeout
+	patch["minigame_ready_players"] = GameManager.minigame_ready_players.duplicate(true)
+	patch["minigame_countdown_remaining"] = GameManager.minigame_countdown_remaining
+	patch["minigame_trigger_player_idx"] = GameManager.minigame_trigger_player_idx
+	patch["minigame_round_count"] = GameManager.minigame_round_count
+	patch["completed_minigame_ids"] = GameManager.completed_minigame_ids.duplicate()
+
+
+func _capture_game_state() -> Dictionary:
+	return {
+		"component_choices": GameManager.component_choices.duplicate(true),
+		"component_choice_serial": GameManager.component_choice_serial,
+		"team_plan": GameManager.team_plan.duplicate(true),
+		"energy_trial": GameManager.energy_trial.duplicate(true),
+		"energy_trial_retries": GameManager.energy_trial_retries,
+		"previous_energy_trial": GameManager.previous_energy_trial.duplicate(true),
+		"last_game_rankings": _last_game_rankings.duplicate(true),
+		"players": GameManager.players.duplicate(true),
+		"current_state": int(GameManager.current_state),
+		"current_turn_idx": GameManager.current_turn_idx,
+		"total_turns": GameManager.total_turns,
+		"is_game_active": GameManager.is_game_active,
+		"adventure_waiting_for_start": GameManager.adventure_waiting_for_start,
+		"adventure_ready_players": GameManager.adventure_ready_players.duplicate(true),
+		"active_quiz_data": GameManager.active_quiz_data.duplicate(true),
+		"active_quiz_player_idx": GameManager.active_quiz_player_idx,
+		"active_quiz_time_remaining": GameManager.active_quiz_time_remaining,
+		"last_quiz_choice": GameManager.last_quiz_choice,
+		"learning_grade": GameManager.learning_grade,
+		"quiz_challenge": QuizDatabase.challenge_enabled,
+		"extra_reading_time": QuizDatabase.extra_reading_time,
+		"active_spectator_quiz_attempts": GameManager.active_spectator_quiz_attempts.duplicate(true),
+		"quiz_collecting_peers": GameManager.quiz_collecting_peers,
+		"team_parts": GameManager.team_parts.duplicate(true),
+		"projects_built": GameManager.projects_built,
+		"kingdom_health": GameManager.kingdom_health,
+		"kingdom_recovered": GameManager.kingdom_recovered,
+		"team_quiz_correct": GameManager.team_quiz_correct,
+		"village_construction_active": GameManager.village_construction_active,
+		"village_finished_players": GameManager.village_finished_players.duplicate(true),
+		"built_project_ids": GameManager.built_project_ids.duplicate(),
+		"built_project_placements": GameManager.built_project_placements.duplicate(true),
+		"built_project_owners": GameManager.built_project_owners.duplicate(true),
+		"collected_item_tiles": GameManager.collected_item_tiles.duplicate(true),
+		"special_skill_used_this_turn": GameManager.special_skill_used_this_turn,
+		"game_duration_seconds": GameManager.game_duration_seconds,
+		"game_time_remaining": GameManager.game_time_remaining,
+		"lap_finish_orders": GameManager.lap_finish_orders.duplicate(true),
+		"pending_lap_reward": GameManager.pending_lap_reward.duplicate(true),
+		"dice_input_time_remaining": GameManager.dice_input_time_remaining,
+		"village_ai_construction_running": GameManager.village_ai_construction_running,
+		"open_market_active": GameManager.open_market_active,
+		"open_market_phase": int(GameManager.open_market_phase),
+		"open_market_time_remaining": GameManager.open_market_time_remaining,
+		"open_market_submitted_players": GameManager.open_market_submitted_players.duplicate(true),
+		"open_market_stock": GameManager.open_market_stock.duplicate(true),
+		"open_market_take_allowances": GameManager.open_market_take_allowances.duplicate(true),
+		"open_market_taken_counts": GameManager.open_market_taken_counts.duplicate(true),
+		"active_minigame": GameManager.active_minigame.duplicate(true),
+		"minigame_scores": GameManager.minigame_scores.duplicate(true),
+		"minigame_time_remaining": GameManager.minigame_time_remaining,
+		"minigame_waiting_for_start": GameManager.minigame_waiting_for_start,
+		"minigame_guide_timeout": GameManager.minigame_guide_timeout,
+		"minigame_ready_players": GameManager.minigame_ready_players.duplicate(true),
+		"minigame_countdown_remaining": GameManager.minigame_countdown_remaining,
+		"minigame_trigger_player_idx": GameManager.minigame_trigger_player_idx,
+		"minigame_round_count": GameManager.minigame_round_count,
+		"completed_minigame_ids": GameManager.completed_minigame_ids.duplicate()
+	}
+
+
+func _sanitize_player_info(info: Dictionary) -> Dictionary:
+	if info.is_empty():
+		return {}
+	var clean_name := str(info.get("name", "플레이어")).strip_edges()
+	if clean_name.is_empty():
+		clean_name = "플레이어"
+	clean_name = clean_name.left(6)
+	return {
+		"name": clean_name,
+		"char_icon": str(info.get("char_icon", "res://assets/characters/eco_roster/captain_eco.webp")),
+		"char_color": info.get("char_color", Color(0.3, 0.8, 0.5))
+	}
+
+
+func _default_player_info(player_name: String) -> Dictionary:
+	return {
+		"name": player_name,
+		"char_icon": "res://assets/characters/eco_roster/captain_eco.webp",
+		"char_color": Color(0.3, 0.8, 0.5)
+	}

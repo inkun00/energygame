@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   isolated:
-    if: "!contains(github.event.head_commit.message, 'Live smoke') && !contains(github.event.head_commit.message, '[open room]') && !contains(github.event.head_commit.message, '[worker probe]')"
+    if: "!contains(github.event.head_commit.message, 'Live smoke') && !contains(github.event.head_commit.message, '[open room]') && !contains(github.event.head_commit.message, '[worker probe]') && !contains(github.event.head_commit.message, '[candidate]')"
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -137,6 +137,72 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: own-open-room
+          path: qa-pictures/*.png
+          if-no-files-found: ignore
+          retention-days: 1
+
+  candidate-export:
+    if: "contains(github.event.head_commit.message, '[candidate]')"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: tests
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 7b4beb257af6f2ebf75dd07fd80cad2485d76688
+          path: game
+          lfs: true
+          persist-credentials: false
+      - uses: chickensoft-games/setup-godot@v1
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: true
+      - name: Export candidate game using its production scene
+        run: |
+          cp tests/qa/candidate-network.gd game/scripts/network/NetworkManager.gd
+          mkdir -p "$RUNNER_TEMP/candidate"
+          godot --headless --editor --path game --import > "$RUNNER_TEMP/import.log" 2>&1
+          godot --headless --path game --export-release Web "$RUNNER_TEMP/candidate/index.html" > "$RUNNER_TEMP/export.log" 2>&1
+          if grep -E 'SCRIPT ERROR|Parse Error' "$RUNNER_TEMP/import.log" "$RUNNER_TEMP/export.log"; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qa-candidate-web-export
+          path: ${{ runner.temp }}/candidate/
+          retention-days: 1
+  candidate-browser:
+    needs: candidate-export
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [open, private]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: qa-candidate-web-export
+          path: ${{ runner.temp }}/candidate
+      - name: Open the candidate Godot game in real Chromium clients
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qa" playwright@1.55.0
+          google-chrome --version
+          python -m http.server 8173 --bind 127.0.0.1 --directory "$RUNNER_TEMP/candidate" > "$RUNNER_TEMP/server.log" 2>&1 &
+          QA_APP_URL='http://127.0.0.1:8173' NODE_PATH="$RUNNER_TEMP/qa/node_modules" node "qa/after-${{ matrix.mode }}.cjs"
+      - name: Save own-room screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ matrix.mode }}-screens
           path: qa-pictures/*.png
           if-no-files-found: ignore
           retention-days: 1
