@@ -58,6 +58,11 @@ func _run() -> void:
 	main.queue_free()
 	await process_frame
 	await process_frame
+	# Movement cues can still be owned by the audio mixer on a fast test run.
+	for voice in root.get_node("AudioManager").voices:
+		voice.stop()
+		voice.stream = null
+	await create_timer(0.15).timeout
 	DirAccess.remove_absolute(records.profile_path)
 	if failures.is_empty():
 		print("[PASS] Arcade navigation, nine leaderboards, result, replay, lobby and re-entry")
