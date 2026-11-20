@@ -65,7 +65,7 @@ npx wrangler dev --local --ip 127.0.0.1 --port 8787
 
 GitHub Pages와 Vercel의 공개 게임은 `network/leaderboard_url`에 설정된 동일한 Vercel 순위 API를 사용합니다. API는 Worker와 점수 검사 규칙을 공유합니다. 공개 API가 경기 결과를 검증한 뒤 Firestore 트랜잭션으로 저장합니다.
 
-Vercel 배포는 저장소 루트에서 `python tools/stage_vercel_site.py build/web build/production-site`로 웹 빌드와 방 연결·순위 함수를 모은 뒤, `build/production-site`를 `energygame-minigames-demo` 프로젝트에 배포합니다. 프로덕션 환경에 `FIREBASE_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_EMAIL`, `GCP_WORKLOAD_IDENTITY_PROVIDER`를 설정합니다. 마지막 값은 `projects/{number}/locations/global/workloadIdentityPools/{pool}/providers/{provider}` 형태입니다. Google Cloud의 Workload Identity Federation은 해당 Vercel 프로젝트의 production 주체만 서비스 계정을 맡을 수 있게 구성합니다. 서비스 계정에는 게임 데이터베이스에 대한 Cloud Datastore User 권한이 필요합니다.
+Vercel 프로젝트 `energygame-minigames-demo`의 Root Directory는 `services/room-directory`입니다. 저장소 루트에서 `python tools/stage_vercel_site.py build/web build/production-site/services/room-directory`를 실행한 뒤, 상위 폴더인 `build/production-site`를 기존 Vercel 프로젝트에 연결해 배포합니다. 프로덕션 환경에 `FIREBASE_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_EMAIL`, `GCP_WORKLOAD_IDENTITY_PROVIDER`를 설정합니다. 마지막 값은 `projects/{number}/locations/global/workloadIdentityPools/{pool}/providers/{provider}` 형태입니다. Google Cloud의 Workload Identity Federation은 해당 Vercel 프로젝트의 production 주체만 서비스 계정을 맡을 수 있게 구성합니다. 서비스 계정에는 게임 데이터베이스에 대한 Cloud Datastore User 권한이 필요합니다.
 
 기존 순위를 옮길 때는 내보낸 비공개 SQLite 파일로 `node tools/migrate-scores.mjs --sqlite <파일> --project <프로젝트ID> --apply`를 실행합니다. 도구는 Google Application Default Credentials를 사용합니다. 공개 API 전환 후 이전 저장소의 마지막 스냅샷으로 재실행하고, `--apply`를 `--verify`로 바꿔 검증합니다. 이미 등록된 더 높은 점수와 나중에 시작한 시도는 보존합니다.
 
