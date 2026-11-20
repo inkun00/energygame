@@ -59,9 +59,111 @@ func _run() -> void:
 		return
 	network_manager.is_online = false
 
+	if not _verify_checkpoints(network_manager, game_manager):
+		return
+	for seats in range(1, 5):
+		if not _measure_session(network_manager, game_manager, seats):
+			return
+
 	print("[PASS] Network payload · full=%d timer=%d base=%d player=%d bytes" % [full_bytes, timer_bytes, base_event_bytes, player_event_bytes])
 	game_manager.stop_game()
 	quit(0)
+
+
+func _verify_checkpoints(network: Node, game: Node) -> bool:
+	network._reset_game_checkpoints()
+	var first: Dictionary = network._capture_game_checkpoint()
+	if first != network._capture_game_state() or not network._capture_game_checkpoint().is_empty():
+		_fail("A fresh checkpoint must be complete, then a stationary game must send no checkpoint.")
+		return false
+	game.players[0].energy += 1
+	var event: Dictionary = network._capture_game_state_patch("player_state_changed", [0])
+	var delta: Dictionary = network._changed_reliable_values(event)
+	if not delta.get("player_updates", {}).has(0) or not network._changed_reliable_values(event).is_empty():
+		_fail("A changed player must arrive exactly once without discarding the event.")
+		return false
+	if not network._capture_game_checkpoint().is_empty():
+		_fail("An already delivered player update must not resend the full roster.")
+		return false
+	var clock_before: float = game.game_time_remaining
+	network._capture_unreliable_time_patch("game_time_changed", [int(clock_before) - 1, 300])
+	var lost_tick_repair: Dictionary = network._capture_game_checkpoint()
+	if lost_tick_repair.get("game_time_remaining", -1.0) != clock_before:
+		_fail("Dropped or reordered countdown packets must be corrected reliably.")
+		return false
+	game.team_parts["test"] = 2
+	var repair: Dictionary = network._capture_game_checkpoint()
+	if repair.keys() != ["team_parts"] or repair.team_parts != game.team_parts:
+		_fail("A change with no event must reach the next five-second checkpoint.")
+		return false
+	game.team_parts.erase("test")
+	network._reset_game_checkpoints()
+	if network._capture_game_checkpoint() != network._capture_game_state():
+		_fail("A new game or a returning seat must have a full checkpoint.")
+		return false
+	for _tick in range(network.CHECKPOINTS_PER_FULL_STATE - 1):
+		if not network._capture_game_checkpoint().is_empty():
+			_fail("Stable intermediate checkpoints must stay empty.")
+			return false
+	if network._capture_game_checkpoint() != network._capture_game_state():
+		_fail("Long-running games must periodically send complete state.")
+		return false
+	return true
+
+
+func _measure_session(network: Node, game: Node, seats: int) -> bool:
+	var configs: Array[Dictionary] = []
+	for player in range(seats):
+		configs.append({"name": "Player %d" % player, "is_ai": false})
+	seed(1741)
+	game.setup_game(configs, 300)
+	network._reset_game_checkpoints()
+	var totals := {"before": 0, "after": 0}
+	var ticks := func(remaining: int, duration: int):
+		var args := [remaining, duration]
+		var patch: Dictionary = network._capture_unreliable_time_patch("game_time_changed", args)
+		var size := var_to_bytes([patch, "game_time_changed", args]).size()
+		totals.before += size
+		totals.after += size
+	var state_event := func(value: Variant, event: String):
+		var args := [value]
+		var values: Dictionary = network._capture_game_state_patch(event, args)
+		totals.before += var_to_bytes([values, event, args]).size()
+		totals.after += var_to_bytes([network._changed_reliable_values(values), event, args]).size()
+	var guide_event := state_event.bind("minigame_submission_changed")
+	var started_event := state_event.bind("minigame_started")
+	var message_event := state_event.bind("status_message_posted")
+	game.game_time_changed.connect(ticks)
+	game.minigame_submission_changed.connect(guide_event)
+	game.minigame_started.connect(started_event)
+	game.status_message_posted.connect(message_event)
+	# One minute: 30 board clock ticks, then a solar minigame with ready and play phases.
+	for second in range(1, 61):
+		if second <= 30:
+			game.game_time_remaining = 300 - second
+			game.game_time_changed.emit(300 - second, 300)
+		else:
+			if second == 31:
+				game._start_minigame(0, "solar_align")
+			if second == 46:
+				for player in range(seats):
+					game.start_minigame_action(player, game.minigame_round_count)
+			game._update_minigame(1.0)
+		if second % 5 == 0:
+			totals.before += var_to_bytes([network._capture_game_state()]).size()
+			var checkpoint: Dictionary = network._capture_game_checkpoint()
+			if not checkpoint.is_empty():
+				totals.after += var_to_bytes([checkpoint]).size()
+	game.game_time_changed.disconnect(ticks)
+	game.minigame_submission_changed.disconnect(guide_event)
+	game.minigame_started.disconnect(started_event)
+	game.status_message_posted.disconnect(message_event)
+	var guests := seats - 1
+	print("[DATA] seats=%d seconds=60 state_arguments_before=%d state_arguments_after=%d" % [seats, guests * int(totals.before), guests * int(totals.after)])
+	if int(totals.after) * 100 > int(totals.before) * 65:
+		_fail("The shared workload should save at least 35 percent of state argument bytes.")
+		return false
+	return true
 
 
 func _fail(message: String) -> void:

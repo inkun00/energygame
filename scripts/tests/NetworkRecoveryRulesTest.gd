@@ -97,7 +97,11 @@ func _test_browser_directory() -> void:
 	var checks_before := failures.size()
 	var probe: Node = load("res://scripts/tests/WebRoomDirectoryProbe.gd").new()
 	root.add_child(probe)
+	_test_connection_heartbeats(probe)
 	_test_guest_connection_deadlines()
+	var relay := {"urls": ["turn:relay.example:3478?transport=udp", "turns:relay.example:443?transport=tcp"],
+		"username": "test-session", "credential": "temporary-example"}
+	var provisioned := [{"urls": ["stun:relay.example:3478"]}, relay]
 	probe._create_browser_room({})
 	var old_registration: Dictionary = probe.sent.back()
 	probe.disconnect_network()
@@ -108,9 +112,12 @@ func _test_browser_directory() -> void:
 	probe.respond(old_registration, HTTPRequest.RESULT_SUCCESS, 201)
 	_expect(probe.sent.back().path == "/webrtc/rooms/" + old_registration.payload.code and probe.sent.back().token == old_registration.payload.host_token,
 		"a room registered after cancellation is deleted with its original host credential")
-	probe.respond(active_registration, HTTPRequest.RESULT_SUCCESS, 201)
+	probe.respond(active_registration, HTTPRequest.RESULT_SUCCESS, 201, {"ice_servers": [
+		{"urls": "stun:relay.example:3478", "credential": "ignored-on-stun"}, relay]})
 	_expect(probe._web_signaling_active and probe.online_frames, "new host keeps signaling after a previous room's late registration")
+	_expect(probe._web_ice_servers == provisioned, "host uses admitted relay credentials and a normalized STUN URL")
 	probe.disconnect_network()
+	_expect(probe._web_ice_servers == probe.WEB_ICE_SERVERS, "departing host drops session relay credentials")
 	_expect(not probe.online_frames, "background online frames stop on disconnect")
 	probe.sent.clear()
 	probe._join_browser_room("234567", {}, "classroom")
@@ -122,17 +129,28 @@ func _test_browser_directory() -> void:
 	_expect(probe.sent.back().path == "/webrtc/rooms/234567/leave", "cancel releases the pending seat")
 	probe._join_browser_room("345678", {}, "")
 	var new_admission: Dictionary = probe.sent.back()
-	probe.respond(retried, HTTPRequest.RESULT_SUCCESS, 201, {"peer_id": 2})
+	probe.respond(retried, HTTPRequest.RESULT_SUCCESS, 201, {"peer_id": 2, "ice_servers": provisioned})
 	_expect(probe.sent.back().path == "/webrtc/rooms/234567/leave" and probe.sent.back().token == admission.payload.peer_token,
 		"a late admission releases only the old room's reservation")
 	_expect(probe._room_lookup_active and probe.pending_room_code == "345678", "late admission preserves the new join")
+	_expect(probe._web_ice_servers == probe.WEB_ICE_SERVERS, "late admission cannot install a previous seat's relay credentials")
 	var call_count: int = probe.sent.size()
 	probe.respond(new_admission, HTTPRequest.RESULT_SUCCESS, 403, {"error": "wrong password"})
 	_expect(probe.sent.size() == call_count and not probe._room_lookup_active, "invalid password ends the lookup immediately")
 	probe._join_browser_room("345678", {}, "")
-	probe.respond(probe.sent.back(), HTTPRequest.RESULT_SUCCESS, 201, {"peer_id": 2})
+	probe.respond(probe.sent.back(), HTTPRequest.RESULT_SUCCESS, 201, {"peer_id": 2, "ice_servers": provisioned})
 	_expect(probe.online_frames and probe._web_signaling_active, "admitted guest keeps signaling in a background tab")
+	_expect(probe._web_ice_servers == provisioned, "guest receives its session relay configuration")
+	probe._close_client_transport()
+	_expect(probe._web_ice_servers == provisioned, "reopening the guest transport retains its current session credentials")
+	_expect(not JSON.stringify(probe._capture_game_state()).contains("temporary-example"), "game snapshots omit relay credentials")
 	probe.disconnect_network()
+	probe._set_room_ice_servers({"ice_servers": [
+		{"urls": "https://wrong.example"}, {"urls": "turn:relay.example:65536", "username": "a", "credential": "b"},
+		{"urls": "turn:relay.example"}, {"urls": "stun:relay.example?transport=tcp"},
+		{"urls": ["turn:relay.example", 42], "username": {}, "credential": "b"},
+		{"urls": "turn:relay.example", "username": "a", "credential": "x".repeat(2049)}]})
+	_expect(probe._web_ice_servers == probe.WEB_ICE_SERVERS, "invalid relay data preserves the default ICE configuration")
 
 	probe._web_transport = true
 	probe._web_signaling_active = true
@@ -172,6 +190,26 @@ func _test_browser_directory() -> void:
 	probe.queue_free()
 	if failures.size() == checks_before:
 		print("[PASS] Browser admission, seat reuse, delayed responses, lost SDP/ICE batches, retries and acknowledgement")
+
+
+func _test_connection_heartbeats(probe: Node) -> void:
+	_expect(probe._heartbeat_due(1000) and not probe._heartbeat_due(1400), "send one heartbeat per wall-clock interval")
+	_expect(probe._heartbeat_due(6500) and not probe._heartbeat_due(6501), "a slow board frame sends one heartbeat without a burst")
+	var timeout_ms := int(probe.CONNECTION_SILENCE_SECONDS * 1000)
+	var overdue := 1000 + timeout_ms + 1
+	_expect(not probe._connection_is_unresponsive(2, 1000, overdue), "a quiet connection is challenged before it is closed")
+	_expect(probe.heartbeat_peers == [2], "send the reliable challenge only to the quiet peer")
+	_expect(not probe._connection_is_unresponsive(2, overdue + 30, overdue + 40), "an answer clears the outstanding challenge")
+	var later := overdue + timeout_ms + 100
+	_expect(not probe._connection_is_unresponsive(2, overdue + 30, later), "a later silence starts a new challenge")
+	_expect(probe._connection_is_unresponsive(2, overdue + 30, later + timeout_ms), "a peer that ignores a full challenge enters recovery")
+	probe._heartbeat_probes.clear()
+	probe.connected_browser_peer = 2
+	_expect(not probe._connection_is_unresponsive(2, 1000, overdue), "an open data channel still verifies its peer")
+	_expect(not probe._connection_is_unresponsive(2, 1000, overdue + 19000), "a connected browser can finish a long first board frame")
+	_expect(probe._connection_is_unresponsive(2, 1000, overdue + int(probe.RECONNECT_GRACE_SECONDS * 1000)), "a browser that never answers the challenge still enters recovery")
+	probe.connected_browser_peer = 0
+	probe._heartbeat_probes.clear()
 
 
 func _test_guest_connection_deadlines() -> void:

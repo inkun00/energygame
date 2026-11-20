@@ -32,7 +32,8 @@ const WEB_SIGNAL_REPLAY_INTERVAL := 4.0
 const WEB_SIGNAL_REPLAY_LIMIT := 3
 const WEB_HOST_ANSWER_TIMEOUT_SECONDS := 30.0
 const WEB_CHANNEL_OPEN_GRACE_SECONDS := 15.0
-const FULL_GAME_SNAPSHOT_INTERVAL_SECONDS := 5.0
+const GAME_CHECKPOINT_INTERVAL_SECONDS := 5.0
+const CHECKPOINTS_PER_FULL_STATE := 12
 const RECONNECT_GRACE_SECONDS := 30.0
 const RECONNECT_ATTEMPT_SECONDS := 6.0
 const CONNECTION_HEARTBEAT_SECONDS := 1.0
@@ -74,6 +75,8 @@ var _upnp_gateway: UPNP
 var _external_host_ip := ""
 var _directory_registration_attempts := 0
 var _web_transport := false
+var _web_ice_servers: Array = WEB_ICE_SERVERS
+var _ice_url_pattern := RegEx.create_from_string(r"^(stun|stuns|turn|turns):([a-z0-9.-]+|\[[a-f0-9:.]+\])(?::([0-9]{1,5}))?(?:\?transport=(udp|tcp))?\z")
 var _web_multiplayer_peer: WebRTCMultiplayerPeer
 var _web_connections: Dictionary = {}
 var _web_remote_description_set: Dictionary = {}
@@ -84,6 +87,8 @@ var _web_processed_signal_id := 0
 var _web_signaling_active := false
 var _web_connect_remaining := 0.0
 var _full_game_snapshot_remaining := 0.0
+var _checkpoints_until_full := 0
+var _reliable_game_state: Dictionary = {}
 var _last_open_market_sync_signature := ""
 var _resume_token := ""
 var _peer_resume_tokens: Dictionary = {}
@@ -100,7 +105,9 @@ var _host_waiting := false
 var _reconnect_deadline := 0
 var _next_reconnect_attempt := 0
 var _last_host_contact := 0
-var _heartbeat_remaining := 0.0
+var _next_heartbeat_ms := 0
+var _last_recovery_tick_ms := 0
+var _heartbeat_probes: Dictionary = {}
 var _last_recovery_seconds := -1
 var _web_connection_attempts: Dictionary = {}
 var _web_peer_generations: Dictionary = {}
@@ -134,7 +141,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	_update_connection_recovery(delta)
+	_update_connection_recovery()
 	if _web_transport and is_host and game_has_started and not _browser_room_locked:
 		_room_lock_retry_remaining -= delta
 		if _room_lock_retry_remaining <= 0.0 and not _room_lock_pending:
@@ -180,8 +187,10 @@ func _process(delta: float) -> void:
 	):
 		_full_game_snapshot_remaining -= delta
 		if _full_game_snapshot_remaining <= 0.0:
-			_full_game_snapshot_remaining = FULL_GAME_SNAPSHOT_INTERVAL_SECONDS
-			_rpc_apply_full_game_state.rpc(_capture_game_state())
+			_full_game_snapshot_remaining = GAME_CHECKPOINT_INTERVAL_SECONDS
+			var checkpoint := _capture_game_checkpoint()
+			if not checkpoint.is_empty():
+				_rpc_apply_full_game_state.rpc(checkpoint)
 
 
 func create_room(port: int = DEFAULT_PORT, player_info: Dictionary = {}, settings: Dictionary = {}) -> Error:
@@ -309,6 +318,7 @@ func disconnect_network() -> void:
 	_directory_heartbeat_remaining = 0.0
 	_host_directory_token = ""
 	_web_transport = false
+	_web_ice_servers = WEB_ICE_SERVERS
 	_web_multiplayer_peer = null
 	_web_connections.clear()
 	_web_remote_description_set.clear()
@@ -319,6 +329,7 @@ func disconnect_network() -> void:
 	_web_signaling_active = false
 	_web_connect_remaining = 0.0
 	_full_game_snapshot_remaining = 0.0
+	_reset_game_checkpoints()
 	_last_open_market_sync_signature = ""
 	_resume_token = ""
 	_peer_resume_tokens.clear()
@@ -337,6 +348,9 @@ func disconnect_network() -> void:
 	_join_address = ""
 	_join_port = DEFAULT_PORT
 	_last_host_contact = 0
+	_next_heartbeat_ms = 0
+	_last_recovery_tick_ms = 0
+	_heartbeat_probes.clear()
 	_browser_room_locked = false
 	_room_lock_pending = false
 	_restoration_pending = false
@@ -390,7 +404,8 @@ func start_hosted_game(duration_seconds: int) -> bool:
 	for peer_id in _peer_resume_tokens:
 		_resume_slots[_peer_resume_tokens[peer_id]] = game_peer_ids.find(int(peer_id))
 		_peer_last_seen[peer_id] = Time.get_ticks_msec()
-	_full_game_snapshot_remaining = FULL_GAME_SNAPSHOT_INTERVAL_SECONDS
+	_full_game_snapshot_remaining = GAME_CHECKPOINT_INTERVAL_SECONDS
+	_reset_game_checkpoints()
 	_last_open_market_sync_signature = ""
 	if _web_transport:
 		_lock_browser_room()
@@ -519,6 +534,9 @@ func _on_browser_room_registered(_result: int, response_code: int, _headers: Pac
 	if not _web_transport or not is_online or not is_host or game_has_started:
 		return
 	if response_code == 200 or response_code == 201:
+		var response := JSON.new()
+		if response.parse(body.get_string_from_utf8()) == OK and response.data is Dictionary:
+			_set_room_ice_servers(response.data)
 		_external_room_registered = true
 		_web_signaling_active = true
 		_set_browser_online_frames(true)
@@ -618,6 +636,7 @@ func _on_browser_room_joined(result: int, response_code: int, _headers: PackedSt
 	_stop_room_discovery()
 	_web_signaling_active = true
 	_web_signal_poll_remaining = 0.0
+	_set_room_ice_servers(parsed)
 	var connection_error := _ensure_browser_connection(1, true)
 	_web_connect_remaining = WEB_HOST_ANSWER_TIMEOUT_SECONDS
 	if connection_error != OK:
@@ -628,13 +647,66 @@ func _on_browser_room_joined(result: int, response_code: int, _headers: PackedSt
 	print("[Network] 브라우저 WebRTC 참가자 배정 · peer=%d" % peer_id)
 
 
+func _set_room_ice_servers(response: Dictionary) -> void:
+	_web_ice_servers = WEB_ICE_SERVERS
+	var supplied = response.get("ice_servers")
+	if not (supplied is Array):
+		return
+	var servers: Array[Dictionary] = []
+	for entry in supplied.slice(0, 8):
+		if not (entry is Dictionary):
+			continue
+		var urls = entry.get("urls")
+		if urls is String:
+			urls = [urls]
+		if not (urls is Array):
+			continue
+		var accepted: Array[String] = []
+		var uses_turn := false
+		for value in urls.slice(0, 8):
+			if not (value is String) or value.length() > 512:
+				continue
+			var url: String = value.to_lower()
+			var parts := _ice_url_pattern.search(url)
+			if not parts:
+				continue
+			var port := parts.get_string(3)
+			if not port.is_empty() and (port.to_int() < 1 or port.to_int() > 65535):
+				continue
+			var relay := parts.get_string(1).begins_with("turn")
+			if not relay and not parts.get_string(4).is_empty():
+				continue
+			uses_turn = uses_turn or relay
+			if not accepted.has(url):
+				accepted.append(url)
+		if accepted.is_empty():
+			continue
+		var server := {"urls": accepted}
+		if uses_turn:
+			var username = entry.get("username")
+			var credential = entry.get("credential")
+			if not (username is String and credential is String):
+				continue
+			if username.is_empty() or credential.is_empty() or username.length() > 2048 or credential.length() > 2048:
+				continue
+			server["username"] = username
+			server["credential"] = credential
+		servers.append(server)
+	if not servers.is_empty():
+		_web_ice_servers = servers
+
+
 func _ensure_browser_connection(remote_peer_id: int, create_offer: bool) -> Error:
 	if not _web_multiplayer_peer:
 		return ERR_UNCONFIGURED
 	if _web_connections.has(remote_peer_id):
 		return OK
 	var connection := WebRTCPeerConnection.new()
-	var initialize_error := connection.initialize({"iceServers": WEB_ICE_SERVERS})
+	var initialize_error := connection.initialize({"iceServers": _web_ice_servers})
+	if initialize_error != OK and _web_ice_servers != WEB_ICE_SERVERS:
+		connection.close()
+		connection = WebRTCPeerConnection.new()
+		initialize_error = connection.initialize({"iceServers": WEB_ICE_SERVERS})
 	if initialize_error != OK:
 		return initialize_error
 	connection.session_description_created.connect(_on_web_session_description_created.bind(remote_peer_id, connection))
@@ -1203,7 +1275,7 @@ func _rpc_session_credentials(token: String) -> void:
 		_resume_token = token
 
 
-func _update_connection_recovery(delta: float) -> void:
+func _update_connection_recovery() -> void:
 	if not is_online:
 		return
 	var now := Time.get_ticks_msec()
@@ -1214,12 +1286,17 @@ func _update_connection_recovery(delta: float) -> void:
 				multiplayer.multiplayer_peer.disconnect_peer(int(peer_id))
 	if not game_has_started:
 		return
+	# Loading the board or resuming a suspended tab can block our own poll.
+	# Give a remote peer a fresh opportunity to answer after that local gap.
+	if _last_recovery_tick_ms > 0 and now - _last_recovery_tick_ms >= int(CONNECTION_SILENCE_SECONDS * 1000):
+		_heartbeat_probes.clear()
+	_last_recovery_tick_ms = now
 	if is_host:
 		for peer_id in _peer_last_seen.keys():
-			if now - int(_peer_last_seen[peer_id]) > int(CONNECTION_SILENCE_SECONDS * 1000):
-				# A cable pull can leave the transport apparently connected for a long time.
+			if _connection_is_unresponsive(int(peer_id), int(_peer_last_seen[peer_id]), now):
 				multiplayer.multiplayer_peer.disconnect_peer(int(peer_id))
-				_on_peer_disconnected(int(peer_id))
+				if _peer_last_seen.has(peer_id):
+					_on_peer_disconnected(int(peer_id))
 		for player_idx in _pending_reconnects.keys():
 			if now >= int(_pending_reconnects[player_idx]):
 				_expire_returning_player(int(player_idx))
@@ -1239,26 +1316,59 @@ func _update_connection_recovery(delta: float) -> void:
 				recovery_state_changed.emit({"mode": "reconnecting", "remaining": seconds})
 			if now >= _next_reconnect_attempt:
 				_attempt_reconnect()
-		elif now - _last_host_contact > int(CONNECTION_SILENCE_SECONDS * 1000):
+		elif _connection_is_unresponsive(1, _last_host_contact, now):
 			_begin_reconnect()
-		_heartbeat_remaining -= delta
-		if _heartbeat_remaining <= 0.0 and 1 in multiplayer.get_peers():
-			_heartbeat_remaining = CONNECTION_HEARTBEAT_SECONDS
-			_rpc_connection_heartbeat.rpc_id(1)
+		elif _heartbeat_due(now) and 1 in multiplayer.get_peers():
+			_send_connection_heartbeat(1)
 
 
-@rpc("any_peer", "call_remote", "unreliable_ordered")
+func _heartbeat_due(now: int) -> bool:
+	if now < _next_heartbeat_ms:
+		return false
+	_next_heartbeat_ms = now + int(CONNECTION_HEARTBEAT_SECONDS * 1000)
+	return true
+
+
+func _connection_is_unresponsive(peer_id: int, last_seen: int, now: int) -> bool:
+	var silence_ms := int(CONNECTION_SILENCE_SECONDS * 1000)
+	if now - last_seen <= silence_ms:
+		_heartbeat_probes.erase(peer_id)
+		return false
+	if not _heartbeat_probes.has(peer_id):
+		_heartbeat_probes[peer_id] = now
+		_send_connection_heartbeat(peer_id)
+		return false
+	# A connected WebRTC transport can queue this reliable message while the
+	# other browser is rendering its first board frame. A genuine transport
+	# disconnect still raises peer_disconnected immediately.
+	var probe_window_ms := int(RECONNECT_GRACE_SECONDS * 1000) if _browser_peer_is_connected(peer_id) else silence_ms
+	return now - int(_heartbeat_probes[peer_id]) >= probe_window_ms
+
+
+func _browser_peer_is_connected(peer_id: int) -> bool:
+	var connection := _web_connections.get(peer_id) as WebRTCPeerConnection
+	return _web_transport and connection != null and connection.get_connection_state() == WebRTCPeerConnection.STATE_CONNECTED
+
+
+func _send_connection_heartbeat(peer_id: int) -> void:
+	_rpc_connection_heartbeat.rpc_id(peer_id)
+
+
+@rpc("any_peer", "call_remote", "reliable")
 func _rpc_connection_heartbeat() -> void:
-	if not is_host:
-		return
 	var sender := multiplayer.get_remote_sender_id()
+	if not is_host:
+		if sender == 1:
+			_last_host_contact = Time.get_ticks_msec()
+			_send_connection_heartbeat(1)
+		return
 	if not connected_players.has(sender):
 		return
 	_peer_last_seen[sender] = Time.get_ticks_msec()
 	_rpc_connection_alive.rpc_id(sender)
 
 
-@rpc("authority", "call_remote", "unreliable_ordered")
+@rpc("authority", "call_remote", "reliable")
 func _rpc_connection_alive() -> void:
 	_last_host_contact = Time.get_ticks_msec()
 
@@ -1334,6 +1444,7 @@ func _accept_returning_player(sender_id: int, token: String) -> void:
 	_peer_last_seen[sender_id] = Time.get_ticks_msec()
 	connected_players[sender_id] = _sanitize_player_info(GameManager.players[player_idx])
 	_rpc_sync_game_peers.rpc(game_peer_ids)
+	_reset_game_checkpoints()
 	_rpc_restore_session.rpc_id(sender_id, _capture_game_state(), game_peer_ids)
 
 
@@ -1502,6 +1613,7 @@ func _on_peer_disconnected(id: int) -> void:
 	_drop_browser_connection(id)
 	_pending_registrations.erase(id)
 	_peer_last_seen.erase(id)
+	_heartbeat_probes.erase(id)
 	player_disconnected.emit(id)
 	if is_host:
 		if was_registered:
@@ -1630,7 +1742,10 @@ func _rpc_begin_game(configs: Array, duration_seconds: int, peer_ids: Array, boa
 func _rpc_request_game_action(action: String, payload: Dictionary) -> void:
 	if not multiplayer.is_server() or not game_has_started:
 		return
-	_handle_game_action(multiplayer.get_remote_sender_id(), action, payload)
+	var sender := multiplayer.get_remote_sender_id()
+	if connected_players.has(sender):
+		_peer_last_seen[sender] = Time.get_ticks_msec()
+	_handle_game_action(sender, action, payload)
 
 
 func _handle_game_action(sender_peer_id: int, action: String, payload: Dictionary) -> void:
@@ -1762,7 +1877,7 @@ func _broadcast_game_event(event_name: String, event_args: Array) -> void:
 	if event_name == "game_over" and not event_args.is_empty():
 		_last_game_rankings = (event_args[0] as Array).duplicate(true)
 	if event_name == "game_time_changed" or event_name == "dice_input_time_changed":
-		_rpc_apply_time_event.rpc(_capture_time_patch(event_name, event_args), event_name, event_args)
+		_send_time_event(event_name, event_args)
 		return
 	if event_name == "open_market_state_changed":
 		var market_state: Dictionary = event_args[0] if not event_args.is_empty() else {}
@@ -1775,16 +1890,71 @@ func _broadcast_game_event(event_name: String, event_args: Array) -> void:
 			market_state.get("taken_counts", {})
 		])
 		if market_signature == _last_open_market_sync_signature:
-			_rpc_apply_time_event.rpc(_capture_time_patch(event_name, event_args), event_name, event_args)
+			_send_time_event(event_name, event_args)
 			return
 		_last_open_market_sync_signature = market_signature
-	_rpc_apply_game_patch.rpc(_capture_game_state_patch(event_name, event_args), event_name, event_args)
+	var values := _capture_game_state_patch(event_name, event_args)
+	_rpc_apply_game_patch.rpc(_changed_reliable_values(values), event_name, event_args)
+
+
+func _send_time_event(event_name: String, event_args: Array) -> void:
+	_rpc_apply_time_event.rpc(_capture_unreliable_time_patch(event_name, event_args), event_name, event_args)
+
+
+func _capture_unreliable_time_patch(event_name: String, event_args: Array) -> Dictionary:
+	var patch := _capture_time_patch(event_name, event_args)
+	# Unreliable ticks can be lost or can change a value back before the next checkpoint.
+	for key in patch:
+		_reliable_game_state.erase(key)
+	return patch
+
+
+func _reset_game_checkpoints() -> void:
+	_checkpoints_until_full = 0
+	_reliable_game_state.clear()
+
+
+func _capture_game_checkpoint() -> Dictionary:
+	var state := _capture_game_state()
+	if _checkpoints_until_full == 0:
+		_checkpoints_until_full = CHECKPOINTS_PER_FULL_STATE - 1
+		_reliable_game_state = state.duplicate(true)
+		return state
+	_checkpoints_until_full -= 1
+	return _changed_reliable_values(state)
+
+
+func _changed_reliable_values(values: Dictionary) -> Dictionary:
+	var changed: Dictionary = {}
+	for key in values:
+		var value: Variant = values[key]
+		if key == "player_updates":
+			var known_players: Array = _reliable_game_state.get("players", [])
+			var updates: Dictionary = {}
+			for index: int in value:
+				if index < 0 or index >= known_players.size():
+					updates[index] = value[index]
+				elif known_players[index] != value[index]:
+					updates[index] = value[index]
+					known_players[index] = value[index]
+			if not updates.is_empty():
+				changed[key] = updates
+		elif key == "collected_item_update":
+			# The event merges individual tiles; the next checkpoint reconciles the entire map.
+			_reliable_game_state.erase("collected_item_tiles")
+			changed[key] = value
+		elif not _reliable_game_state.has(key) or _reliable_game_state[key] != value:
+			changed[key] = value
+			# Capture helpers already detach arrays and dictionaries from GameManager.
+			_reliable_game_state[key] = value
+	return changed
 
 
 @rpc("authority", "call_remote", "reliable")
 func _rpc_apply_game_patch(patch: Dictionary, event_name: String, event_args: Array) -> void:
 	if is_host:
 		return
+	_last_host_contact = Time.get_ticks_msec()
 	GameManager.apply_network_patch(patch, event_name, event_args)
 
 
@@ -1792,6 +1962,7 @@ func _rpc_apply_game_patch(patch: Dictionary, event_name: String, event_args: Ar
 func _rpc_apply_time_event(patch: Dictionary, event_name: String, event_args: Array) -> void:
 	if is_host:
 		return
+	_last_host_contact = Time.get_ticks_msec()
 	GameManager.apply_network_patch(patch, event_name, event_args)
 
 
@@ -1799,6 +1970,7 @@ func _rpc_apply_time_event(patch: Dictionary, event_name: String, event_args: Ar
 func _rpc_apply_full_game_state(snapshot: Dictionary) -> void:
 	if is_host:
 		return
+	_last_host_contact = Time.get_ticks_msec()
 	GameManager.apply_network_state(snapshot, "", [])
 
 

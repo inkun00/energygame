@@ -100,6 +100,17 @@ func setup(player_data: Dictionary, game_seed: int) -> void:
 	_update_carried_source()
 	running = true
 
+func tutorial_demo_step(demo_time: float) -> Dictionary:
+	if item_step >= 4:
+		return {"keys": [], "hint": "햇빛과 바람처럼 다시 얻는 에너지원과, 쓰면 줄어드는 연료를 나눴어요.", "done": demo_time >= 12.5}
+	if returning_to_center:
+		return {"keys": [], "hint": "물건을 내려놓았어요. 손을 떼면 캐릭터가 가운데로 돌아와요."}
+	if demo_time < 1.8 + 2.8 * item_step:
+		return {"keys": [], "hint": str(current_source["reason"])}
+	var renewable := int(current_source["kind"]) == 0
+	return {"keys": [KEY_A if renewable else KEY_D],
+		"hint": "%s → %s 통에 닿을 때까지 이동해요." % [current_source["name"], "왼쪽 ‘다시 얻는 곳’" if renewable else "오른쪽 ‘꺼내 쓰는 곳’"]}
+
 func set_running(value: bool) -> void:
 	running = value
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if value else SubViewport.UPDATE_DISABLED

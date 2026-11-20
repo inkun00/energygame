@@ -1,4 +1,5 @@
 import { scoresRoute } from "./scores.js";
+import { admissionIceServers } from "./turn.js";
 
 const ROOM_TTL_SECONDS = 90;
 const WEBRTC_ROOM_TTL_SECONDS = 120;
@@ -82,6 +83,12 @@ async function ensureWebRtcSchema(env) {
   )`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS webrtc_started_rooms (
     code TEXT PRIMARY KEY REFERENCES webrtc_rooms(code) ON DELETE CASCADE
+  )`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS webrtc_turn_grants (
+    code TEXT NOT NULL, peer_id INTEGER NOT NULL, token_hash TEXT NOT NULL,
+    key_id TEXT NOT NULL, claim TEXT NOT NULL, usable_until INTEGER NOT NULL, servers TEXT,
+    PRIMARY KEY (code, peer_id),
+    FOREIGN KEY (code, peer_id) REFERENCES webrtc_peers(code, peer_id) ON DELETE CASCADE
   )`).run();
   schemaReady.add(env.DB);
 }
@@ -254,7 +261,8 @@ async function createWebRtcRoom(request, env) {
   } catch {
     return json({ error: "이미 사용 중인 방 코드입니다." }, 409);
   }
-  return json({ code: payload.code, peer_id: 1, expires_at: expiresAt }, 201);
+  const ice = await admissionIceServers(env, payload.code, 1, tokenHash);
+  return json({ code: payload.code, peer_id: 1, expires_at: expiresAt, ...ice }, 201);
 }
 
 async function joinWebRtcRoom(request, env, code) {
@@ -314,7 +322,8 @@ async function joinWebRtcRoom(request, env, code) {
   await env.DB.prepare(
     "UPDATE webrtc_peers SET expires_at = MAX(expires_at, ?1) WHERE code = ?2 AND peer_id = ?3 AND token_hash = ?4"
   ).bind(expiresAt, code, peerId, tokenHash).run();
-  return json({ code, peer_id: peerId, host_peer_id: 1, expires_at: expiresAt,
+  const ice = await admissionIceServers(env, code, peerId, tokenHash);
+  return json({ code, peer_id: peerId, host_peer_id: 1, expires_at: expiresAt, ...ice,
     title: settings?.title || "에너지 모험", max_players: settings?.max_players || 4 }, 201);
 }
 

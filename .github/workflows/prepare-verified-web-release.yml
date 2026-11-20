@@ -5,7 +5,7 @@ on:
 permissions:
   contents: read
 env:
-  GAME_SHA: 7b4beb257af6f2ebf75dd07fd80cad2485d76688
+  GAME_SHA: 14531bf8d38b958335de8c47ff49c2a96d9eef71
 jobs:
   worker-connection:
     runs-on: ubuntu-24.04
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 7b4beb257af6f2ebf75dd07fd80cad2485d76688
+          ref: 14531bf8d38b958335de8c47ff49c2a96d9eef71
           lfs: true
           persist-credentials: false
       - uses: chickensoft-games/setup-godot@v1
@@ -41,6 +41,25 @@ jobs:
           godot --headless --editor --import 2>&1 | tee "$RUNNER_TEMP/import.log"
           godot --headless --export-release Web build/web/index.html 2>&1 | tee "$RUNNER_TEMP/export.log"
           if grep -E 'SCRIPT ERROR|Parse Error|^ERROR:' "$RUNNER_TEMP"/{import,export}.log; then exit 1; fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify Worker & browser runtime unit tests before packaging
+        working-directory: services/room-directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          node --test test/*.test.js
+          node --test ../../scripts/tests/WebRoomFrames.test.mjs
+      - name: Verify offline network negotiation rules
+        shell: bash
+        run: |
+          set -euo pipefail
+          for regression in NetworkRecoveryRulesTest NetworkPayloadSmokeTest AllMiniGamePracticeTest; do
+            godot --headless --path . --script "scripts/tests/$regression.gd" 2>&1 | tee "$RUNNER_TEMP/$regression.log"
+            if grep -E 'SCRIPT ERROR|Parse Error|\[FAIL\]|^ERROR:' "$RUNNER_TEMP/$regression.log"; then exit 1; fi
+          done
       - name: Verify and zip only the exported game
         shell: bash
         run: |
@@ -92,10 +111,10 @@ jobs:
           set -euo pipefail
           tag="web-$GAME_SHA"
           gh api --header 'Accept: application/vnd.github.raw+json' "repos/$GH_REPO/contents/release-prep/worker.mjs?ref=$GITHUB_SHA" > worker.mjs
-          echo "399b0725d48a4588a302f6eb429cce0041a3af330c85382a887f9b7495a01a5b  worker.mjs" | sha256sum -c -
+          echo "09d3e1ca08fe98c6bc3d1c85bf3a79e191e80b9ffedea298ee1c05b8a8aa1aee  worker.mjs" | sha256sum -c -
           node --check worker.mjs
           if ! gh release view "$tag" --repo "$GH_REPO" > /dev/null 2>&1; then
-            gh release create "$tag" energygame-web.zip worker.mjs --repo "$GH_REPO" --target "$GAME_SHA" --title "온라인 모험 방 참가 개선" --notes "온라인 모험의 방 참가 과정을 개선한 웹 빌드입니다."
+            gh release create "$tag" energygame-web.zip worker.mjs --repo "$GH_REPO" --target "$GAME_SHA" --title "온라인 모험 중계와 미니게임 시범" --notes "온라인 모험에 TURN 중계와 전송량 절감을 적용하고, 아홉 미니게임에 조작 시범을 추가했습니다."
           fi
           test "$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq .object.sha)" = "$GAME_SHA"
           mkdir -p "$RUNNER_TEMP/release-download"
@@ -131,7 +150,7 @@ jobs:
               try:
                   html = fetch("?release=" + sha + "&check=" + str(attempt))
                   if html == expected_html:
-                      digest = hashlib.sha256(fetch("index.pck?release=" + sha)).hexdigest()
+                      digest = hashlib.sha256(fetch("index.pck?release=" + sha + "&check=" + str(attempt))).hexdigest()
                       if digest == expected_pck:
                           board = json.loads(fetch("api/scores/solar_align"))
                           assert board["game_id"] == "solar_align" and isinstance(board["entries"], list)

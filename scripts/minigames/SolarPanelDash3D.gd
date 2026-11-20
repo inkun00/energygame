@@ -116,6 +116,41 @@ func set_running(value: bool) -> void:
 	if is_instance_valid(hero) and hero.has_method("_set_avatar_animation_state"):
 		hero.call("_set_avatar_animation_state", value)
 
+
+func setup_tutorial_demo() -> void:
+	# Place the first two targets and the obstacle between them in the left lane.
+	var lanes := [0, 0, 2, 1]
+	for index in range(mini(lanes.size(), panel_gates.size())):
+		panel_gates[index].correct_lane = lanes[index]
+		_update_panel_gate_for_sun(panel_gates[index])
+	if not terrain_obstacles.is_empty():
+		(terrain_obstacles[0].node as Node3D).position.x = LANES[0]
+
+
+func tutorial_demo_step(demo_time: float) -> Dictionary:
+	var keys: Array[int] = []
+	var hint := "A로 왼쪽 길에 들어가 햇빛을 정면으로 받는 패널을 통과해요."
+	if demo_time >= 1.45 and demo_time < 2.65:
+		hint = "장애물이 가까워지면 Space로 뛰어넘어요."
+	elif demo_time >= 2.65 and demo_time < 3.8:
+		hint = "다음 패널은 오른쪽이에요. D로 길을 바꿔요."
+	elif demo_time >= 3.8:
+		hint = "해가 움직여도 빛이 정면으로 닿는 패널을 따라가요."
+	var offset := LANES[_correct_lane_for_current_sun()] - hero_body.position.x
+	if demo_time >= 0.45 and absf(offset) > 0.15:
+		keys.append(KEY_A if offset < 0.0 else KEY_D)
+	for record in terrain_obstacles:
+		var obstacle := record.node as Node3D
+		if record.resolved or absf(obstacle.position.x - hero_body.position.x) > 0.85:
+			continue
+		var ahead := hero_body.position.z - obstacle.position.z
+		if ahead > 1.2 and ahead < 3.4:
+			keys.append(KEY_SPACE)
+			break
+	if demo_time >= 7.2:
+		return {"keys": [], "hint": "햇빛을 정면으로 받은 패널을 통과하면 전기가 만들어져요.", "done": true}
+	return {"keys": keys, "hint": hint}
+
 func _build_viewport() -> void:
 	viewport = SubViewport.new()
 	viewport.name = "SolarDashViewport"

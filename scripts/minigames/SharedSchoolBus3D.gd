@@ -134,6 +134,26 @@ func setup(_player_data: Dictionary, game_seed: int) -> void:
 	running = true
 	finish_animation_active = false
 
+func tutorial_demo_step(demo_time: float) -> Dictionary:
+	if delivered_total > 0:
+		return {"keys": [], "hint": "같은 길을 %d명이 함께 타니 한 사람당 쓰는 에너지가 줄었어요." % delivered_total,
+			"done": dropped_students.is_empty()}
+	if demo_time < 1.4:
+		return {"keys": [], "hint": "정류장에 학생들이 기다려요. 표시 안에 멈춘 뒤 문을 열어 봐요."}
+	if not boarding_students.is_empty():
+		return {"keys": [], "hint": "학생들이 문으로 걸어와요. 모두 탈 때까지 기다려요."}
+	var going_to_school := passengers > 0
+	var destination := SCHOOL_OFFSET if going_to_school else float(STOP_OFFSETS[0])
+	var gap := destination - bus_x
+	var reach := SCHOOL_REACH if going_to_school else PICKUP_REACH
+	if absf(gap) <= reach and absf(bus_speed) <= STOP_SPEED_LIMIT:
+		if going_to_school:
+			return {"keys": [KEY_S], "hint": "학교 표시 안에 멈추면 학생들이 내려요."}
+		return {"keys": [KEY_SPACE], "hint": "버스가 멈췄어요. 탑승 키로 기다리는 학생들을 태워요."}
+	if gap <= bus_speed * bus_speed / (2.0 * BRAKE) + 0.4 or absf(gap) <= reach:
+		return {"keys": [KEY_S], "hint": "%s 표시가 가까워졌어요. 브레이크를 눌러 멈춰요." % ("학교" if going_to_school else "정류장")}
+	return {"keys": [KEY_D], "hint": "학생들을 태우고 학교까지 함께 달려요." if going_to_school else "오른쪽으로 출발해 첫 정류장까지 달려요."}
+
 func set_running(value: bool) -> void:
 	running = value
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if value or (finish_animation_active and has_pending_finish_animation()) else SubViewport.UPDATE_DISABLED

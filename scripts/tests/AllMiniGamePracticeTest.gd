@@ -135,6 +135,7 @@ func _run() -> void:
 		gm._update_minigame(46.0)
 		_check(gm.active_minigame["phase"] == "ready", id + ": offline practice can finish without a surprise automatic start")
 		var arcade: Node = modal._current_arcade()
+		var practice_baseline := _snapshot(id, arcade)
 		_check(not modal.practice_plan.progress(arcade)["complete"], id + ": waiting alone does not complete practice")
 		_exercise(id, arcade)
 		_check(modal.practice_plan.progress(arcade)["complete"], id + ": actual actions complete the coached mission")
@@ -144,6 +145,7 @@ func _run() -> void:
 		_check(not modal.practice_active and modal.is_guide_open(), id + ": completion returns to guide")
 		_check(_snapshot(id, modal._current_arcade()) == baseline, id + ": every round restores the original seed and simulation state")
 		_check(gm.local_minigame_practice_round_id == -1, id + ": finishing releases the offline ready timer")
+		await _check_demonstration(id, baseline, practice_baseline)
 		modal._start_practice()
 		modal._process(modal.PRACTICE.seconds_for(id))
 		_check(not modal.practice_active and modal.is_guide_open() and modal.score == 0 and _snapshot(id, modal._current_arcade()) == baseline, id + ": unfinished practice times out cleanly without readiness or scores")
@@ -170,13 +172,53 @@ func _run() -> void:
 	gm.minigame_guide_timeout = 0.1
 	network.is_online = true
 	network.is_host = true
-	gm.set_local_minigame_practice(987, true)
+	modal._on_minigame_started(gm.active_minigame)
+	modal.guide_demo_button.pressed.emit()
+	_check(modal.demonstration.visible, "online guests can watch a local demonstration")
 	_check(gm.local_minigame_practice_round_id == -1, "online practice cannot suspend readiness")
 	gm._update_minigame(0.2)
 	_check(gm.active_minigame["phase"] == "countdown", "online ready deadline still starts the shared countdown")
+	modal._on_submission_changed(gm.get_minigame_state())
+	_check(not modal.practice_active and not modal.demonstration.visible, "the authoritative countdown closes the local demonstration")
 	network.is_online = false
 	gm.stop_game()
 	modal.queue_free()
 	await process_frame
 	print("AllMiniGamePractice: %d failures" % failures.size())
 	quit(0 if failures.is_empty() else 1)
+
+func _check_demonstration(id: String, baseline: Array, practice_baseline: Array) -> void:
+	modal.guide_demo_button.pressed.emit()
+	_check(modal.practice_active and modal.demonstration.visible and not modal.touch_controls.visible, id + ": guide opens a private demonstration")
+	_check(modal.demonstration.get_child_count() == INPUT.ACTION_KEYS[id].size(), id + ": all available controls are shown in the demonstration")
+	var arcade: Node = modal._current_arcade()
+	var cues: Dictionary = {}
+	var seen_keys: Dictionary = {}
+	var outcomes: Array = []
+	arcade.arcade_event.connect(func(_points, success, message, _counts): if success: outcomes.append(message))
+	INPUT.set_touch(KEY_A, true)
+	Input.action_press("ui_left")
+	var step := 1.0 / 60.0
+	for frame in range(3600):
+		if id == "solar_align":
+			await physics_frame
+		modal._process(step)
+		if id == "solar_align":
+			modal._physics_process(step)
+		cues[modal.demonstration.hint] = true
+		seen_keys.merge(modal.demonstration._light_until)
+		if modal.demonstration.finished or modal.practice_completed_at >= 0:
+			break
+	INPUT.release_all()
+	Input.action_release("ui_left")
+	_check(modal.demonstration.finished and not outcomes.is_empty(), id + ": real inputs show a successful outcome before timeout")
+	_check(cues.size() >= 2 and not seen_keys.is_empty(), id + ": tutorial explains the sequence and highlights its actual inputs")
+	_check(modal.score == 0 and modal.attempts == 0 and gm.minigame_scores.is_empty() and gm.minigame_ready_players.is_empty(), id + ": no demonstration submits points or readiness")
+	modal.demo_replay_button.pressed.emit()
+	_check(modal.demonstration.visible and not modal.demonstration.finished and modal.simulation_elapsed == 0.0, id + ": replay resets the same demonstration")
+	modal.demo_practice_button.pressed.emit()
+	_check(modal.practice_active and not modal.demonstration.visible and _snapshot(id, modal._current_arcade()) == practice_baseline, id + ": direct practice starts from its original state")
+	modal._finish_practice()
+	modal.guide_demo_button.pressed.emit()
+	modal.practice_end_button.pressed.emit()
+	_check(modal.is_guide_open() and _snapshot(id, modal._current_arcade()) == baseline, id + ": skip returns to the guide and restores the competitive scene")

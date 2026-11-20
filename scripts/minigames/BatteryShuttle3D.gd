@@ -106,6 +106,19 @@ func setup(player_data: Dictionary, round_seed: int) -> void:
 	_update_visuals()
 	running = true
 
+func tutorial_demo_step(demo_time: float) -> Dictionary:
+	if cargo == 0 and hero_x >= CITY_X - STATION_REACH:
+		return {"keys": [], "hint": "구름이 끼어도 저장해 둔 전기로 도시의 불을 켰어요.", "done": demo_time >= 9.0}
+	if demo_time < 1.5:
+		return {"keys": [], "hint": "해가 떠 있는 동안 태양광 발전소에서 남는 전기를 받아요."}
+	if cargo == 1:
+		return {"keys": [KEY_D], "hint": "받은 전기를 가운데 배터리까지 운반해 한 칸 저장해요."}
+	if cargo == 2:
+		return {"keys": [KEY_D], "hint": "구름이 꼈어요. 배터리에서 꺼낸 전기를 오른쪽 도시까지 가져가요."}
+	if battery_units > 0:
+		return {"keys": [], "hint": "배터리에 한 칸이 찼어요. 가운데에서 구름이 낄 때까지 기다려요."}
+	return {"keys": [KEY_A], "hint": "왼쪽 태양광 발전소에 닿으면 남는 전기를 받을 수 있어요."}
+
 func set_running(value: bool) -> void:
 	running = value
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if value else SubViewport.UPDATE_DISABLED
