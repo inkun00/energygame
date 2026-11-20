@@ -1,0 +1,29 @@
+name: Two-runner WebRTC transport check
+on:
+  push:
+    branches: [qa/two-runner-rtc-20261120]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  peer:
+    name: Browser on individual VM (${{ matrix.role }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [host, guest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install diagnostic dependencies
+        run: npm install --prefix "$RUNNER_TEMP/rtc-deps" --no-audit --no-fund playwright-core@1.55.0 @actions/artifact@2.3.2
+      - name: Exchange encrypted session descriptions and verify the data channel
+        uses: actions/github-script@v7
+        env:
+          ROLE: ${{ matrix.role }}
+        with:
+          script: |
+            await require('./qa/two-runner-rtc.cjs')({ github, context });
