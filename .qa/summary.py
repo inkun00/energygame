@@ -36,3 +36,21 @@ for game in ['solar_align','eco_commute']:
         if b>a:
             print('[STEADY_MINIGAME]',game,'seconds',round(b-a,3),'UDP',json.dumps(info(subset)),'extra_20min_projection',round(tx+max(0,1200-elapsed)*sum(p[3] for p in subset)/(b-a)))
 print('[MODEL] 20min repeating this QA action mix, UDP payload bytes',round(tx*1200/elapsed))
+
+boardbytes=boardcount=board_dur=0
+for f in Path('.godot/four-player-online').glob('*.log'):
+    s=f.read_text()
+    for m in re.finditer(r'\[BOARD_WINDOW\] begin (\d+) ([\d.]+)',s):
+        end=re.search(r'\[BOARD_WINDOW\] end '+m[1]+r' ([\d.]+)',s[m.end():])
+        if not end: continue
+        a,b=float(m[2])+.5,float(end[1])-.5
+        subset=[r for r in rows if a<=r[0]<b]
+        n=sum(r[3] for r in subset)
+        print('[BOARD_SEAT_WINDOW]',m[1],round(b-a,2),'seconds',n,'bytes',len(subset),'datagrams')
+        boardbytes+=n
+        boardcount+=len(subset)
+        board_dur+=(b-a)
+if board_dur < 40: raise SystemExit('Missing representative steady board windows on all four seats')
+print('[BOARD_MEASURED]', boardbytes, 'payload bytes over', round(board_dur,3), 'seconds')
+print('[BOARD_MODEL_20MIN] extra board time at measured quiet-board rate',round(tx + max(0,1200-elapsed)*boardbytes/board_dur), 'UDP payload bytes')
+print('[BOARD_MODEL_20MIN] IPv4+UDP header-inclusive bytes',round(tx+28*len(rows)+max(0,1200-elapsed)*(boardbytes+28*boardcount)/board_dur))

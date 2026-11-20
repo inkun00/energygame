@@ -1,4 +1,4 @@
-name: Measure four-seat end-to-end game traffic
+name: Measure four-seat traffic with 12-second board turns
 on:
   push:
     branches: [qa/measure-four-seat-20261120]
