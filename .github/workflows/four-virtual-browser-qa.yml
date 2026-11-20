@@ -75,3 +75,21 @@ jobs:
           "$RUNNER_TEMP/qa/node_modules/.bin/playwright" install --with-deps chromium
       - name: Exercise deployed client with a private room and four browsers
         run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node qa/production.cjs
+      - name: Read the private test screens
+        if: always()
+        run: |
+          if [ -d qa-pictures ]; then
+            sudo apt-get install -y tesseract-ocr-kor >/dev/null
+            for picture in qa-pictures/*.png; do
+              echo "QA screenshot $(basename "$picture")"
+              tesseract "$picture" stdout -l kor+eng 2>/dev/null | sed -E 's/[0-9]{6}/[room]/g'
+            done
+          fi
+      - name: Save the private test screens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: private-room-screens
+          path: qa-pictures/*.png
+          if-no-files-found: ignore
+          retention-days: 1
