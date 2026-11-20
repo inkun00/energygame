@@ -74,7 +74,7 @@ module.exports = async ({ github, context }) => {
       const urls = server.urls.filter(url => url === "turns:turn.cloudflare.com:443?transport=tcp");
       if (urls.length) results.push({ urls, username: server.username, credential: server.credential });
     }
-    if (!results.length) throw new Error("Authenticated room admission did not issue TLS 443 TURN credentials");
+    console.log("ADMISSION_ICE_SHAPE", role, JSON.stringify({ field: Array.isArray(data.ice_servers) ? "array" : typeof data.ice_servers, tls443: results.length, entries: (Array.isArray(data.ice_servers) ? data.ice_servers : []).map(server => ({ turnUris: (Array.isArray(server?.urls) ? server.urls : []).filter(url => typeof url === "string" && /^turns?:/.test(url)).length, username: typeof server?.username === "string", credential: typeof server?.credential === "string" })) }));
     return results;
   }
   async function reserve() {
@@ -88,6 +88,10 @@ module.exports = async ({ github, context }) => {
         ownsRoom = true;
         const ice = permittedRelayServers(r.data);
         await publish("private-invitation", encrypt({ code, password }));
+        if (!ice.length) {
+          await receive("guest-admission-checked");
+          throw new Error("Production host admission did not include a usable TLS 443 grant");
+        }
         return ice;
       }
       throw new Error("Temporary private room code unavailable");
@@ -98,7 +102,10 @@ module.exports = async ({ github, context }) => {
     admittedGuest = true;
     const r = await request("POST", "/" + code + "/join", { password: invitation.password, peer_token: token }, false);
     if (r.data.peer_id !== 2) throw new Error("Unexpected private room seat");
-    return permittedRelayServers(r.data);
+    const ice = permittedRelayServers(r.data);
+    await publish("guest-admission-checked", Buffer.from("checked"));
+    if (!ice.length) throw new Error("Production guest admission did not include a usable TLS 443 grant");
+    return ice;
   }
   async function pollDescription(type) {
     const until = Date.now() + 65000;
