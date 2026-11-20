@@ -74,6 +74,17 @@ module.exports = async ({ github, context }) => {
       const urls = server.urls.filter(url => url === "turns:turn.cloudflare.com:443?transport=tcp");
       if (urls.length) results.push({ urls, username: server.username, credential: server.credential });
     }
+    const status = data.relay_status;
+    if (status && typeof status === "object") {
+      const known = new Set(["storage_claim", "storage_save", "bindings_absent", "upstream_http", "upstream_timeout", "upstream_fetch", "upstream_shape", "save_or_empty", "issued"]);
+      const stage = known.has(status.stage) ? status.stage : "unrecognized";
+      const code = Number(status.code);
+      const summary = { stage };
+      if (Number.isInteger(code) && code >= 100 && code <= 599) summary.code = code;
+      if (typeof status.id32 === "boolean") summary.id32 = status.id32;
+      if (typeof status.token64 === "boolean") summary.token64 = status.token64;
+      console.log("ISSUER_STATUS", role, JSON.stringify(summary));
+    }
     console.log("ADMISSION_ICE_SHAPE", role, JSON.stringify({ field: Array.isArray(data.ice_servers) ? "array" : typeof data.ice_servers, tls443: results.length, entries: (Array.isArray(data.ice_servers) ? data.ice_servers : []).map(server => ({ turnUris: (Array.isArray(server?.urls) ? server.urls : []).filter(url => typeof url === "string" && /^turns?:/.test(url)).length, username: typeof server?.username === "string", credential: typeof server?.credential === "string" })) }));
     return results;
   }
