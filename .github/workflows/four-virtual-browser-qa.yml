@@ -73,6 +73,8 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/qa" playwright@1.55.0
           "$RUNNER_TEMP/qa/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Install text recognition for rendered game controls
+        run: sudo apt-get install -y tesseract-ocr tesseract-ocr-kor >/dev/null
       - name: Exercise deployed client with a private room and four browsers
         run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node qa/production.cjs
       - name: Read the private test screens
@@ -82,6 +84,7 @@ jobs:
             sudo apt-get install -y tesseract-ocr-kor >/dev/null
             for picture in qa-pictures/*.png; do
               echo "QA screenshot $(basename "$picture")"
+              tesseract "$picture" stdout -l kor+eng tsv 2>/dev/null | awk -F'\t' '$12=="참가" || $12=="취소" || $12=="준비" {print "button position", $7,$8,$9,$10,$12}'
               tesseract "$picture" stdout -l kor+eng 2>/dev/null | sed -E 's/[0-9]{6}/[room]/g'
             done
           fi
@@ -93,3 +96,39 @@ jobs:
           path: qa-pictures/*.png
           if-no-files-found: ignore
           retention-days: 1
+
+  worker:
+    if: "contains(github.event.head_commit.message, '[worker probe]')"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Identify public integration checks on the game commit
+        continue-on-error: true
+        run: |
+          curl --silent --fail 'https://api.github.com/repos/inkun00/energygame/commits/7b4beb257af6f2ebf75dd07fd80cad2485d76688/check-runs' | jq -r '.check_runs[] | [.app.slug, .name, .conclusion] | @tsv'
+      - name: Verify live signaling delivery with a private four-player room
+        run: node qa/worker-production-probe.cjs
+
+  open-room:
+    if: "contains(github.event.head_commit.message, '[open room]')"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Start two independent Chromium clients
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qa" playwright@1.55.0
+          "$RUNNER_TEMP/qa/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Join own open room and verify a shared die
+        run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node qa/open.cjs
