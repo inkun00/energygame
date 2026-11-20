@@ -30,7 +30,9 @@ async function baseline(){
 async function observeRTC(){
   const base=window.RTCPeerConnection; if(!base)return;
   window.qaTransport={peers:[],dice:[],boards:[]};
-  const state=window.qaTransport;const decoder=new TextDecoder('latin1');
+  const state=window.qaTransport;state.dcStats={};state.frameTime={max:0,previous:performance.now()};
+  function frame(t){state.frameTime.max=Math.max(state.frameTime.max,t-state.frameTime.previous);state.frameTime.previous=t;window.requestAnimationFrame(frame);}window.requestAnimationFrame(frame);
+  const bump=(key)=>{const now=Math.round(performance.now()),b=state.dcStats[key] ||= {n:0,last:0,maxGap:0};if(b.last)b.maxGap=Math.max(b.maxGap,now-b.last);b.n++;b.last=now;};const decoder=new TextDecoder('latin1');
   async function inspect(data,direction){
     try{
       const b=data instanceof Blob?new Uint8Array(await data.arrayBuffer()):ArrayBuffer.isView(data)?new Uint8Array(data.buffer,data.byteOffset,data.byteLength):new Uint8Array(data);
@@ -41,8 +43,8 @@ async function observeRTC(){
     }catch{}
   }
   const watched=new WeakSet();
-  function watch(dc){if(watched.has(dc))return;watched.add(dc);dc.addEventListener('message',ev=>inspect(ev.data,'in'));}
-  const orig=RTCDataChannel.prototype.send; RTCDataChannel.prototype.send=function(data){const result=orig.call(this,data);inspect(data,'out');return result;};
+  function watch(dc){if(watched.has(dc))return;watched.add(dc);dc.addEventListener('message',ev=>{bump('receive-'+dc.label);inspect(ev.data,'in');});dc.addEventListener('close',()=>console.log('QA peer channel closure',dc.label,JSON.stringify({stats:state.dcStats,frame:state.frameTime.max,time:performance.now()})));}
+  const orig=RTCDataChannel.prototype.send; RTCDataChannel.prototype.send=function(data){const result=orig.call(this,data);bump('send-'+this.label);inspect(data,'out');return result;};
   window.RTCPeerConnection=class extends base{
     constructor(...args){super(...args);state.peers.push(this);this.addEventListener('datachannel',e=>watch(e.channel));}
     createDataChannel(...args){const c=super.createDataChannel(...args);watch(c);return c;}
@@ -113,7 +115,7 @@ async function run(){
         const route=new URL(r.url()).pathname.replace(/\/\d{6}\b/,'/ROOM');const key=r.request().method()+' '+route+' '+r.status();
         if(!statuses.has(key)){statuses.set(key,1);log('signaling response',{player:i+1,method:r.request().method(),path:route,status:r.status()});}});
       page.on('requestfailed',r=>{if(r.url().startsWith(directory+'/webrtc/'))log('signaling transport error',{player:i+1,path:new URL(r.url()).pathname.replace(/\/\d{6}\b/,'/ROOM'),error:r.failure()?.errorText});});
-      page.on('console',m=>{const text=m.text();if(text.includes('[Network]')){log('engine',{player:i+1,message:redacted(text).slice(0,135)});const a=text.match(/참가자 배정.*peer=(\d+)/);if(a)registered.set(i,Number(a[1]));const p=text.match(/로비 인원[^0-9]*(\d+)\//);if(i===0&&p)lobbyCount=Number(p[1]);}if(text.includes('공통 게임 시작 수신'))gameStarted.add(i);if(text.includes('SCRIPT ERROR')||text.includes('Parse Error'))problems.add('Godot runtime error on player '+(i+1));});
+      page.on('console',m=>{const text=m.text();if(text.includes('QA peer channel closure'))log('data channel closing',{player:i+1,detail:text});if(text.includes('[Network]')){log('engine',{player:i+1,message:redacted(text).slice(0,135)});const a=text.match(/참가자 배정.*peer=(\d+)/);if(a)registered.set(i,Number(a[1]));const p=text.match(/로비 인원[^0-9]*(\d+)\//);if(i===0&&p)lobbyCount=Number(p[1]);}if(text.includes('공통 게임 시작 수신'))gameStarted.add(i);if(text.includes('SCRIPT ERROR')||text.includes('Parse Error'))problems.add('Godot runtime error on player '+(i+1));});
       page.on('pageerror',()=>problems.add('Browser runtime exception on player '+(i+1)));
       await page.goto(site+'/',{waitUntil:'domcontentloaded',timeout:65000});
       await page.waitForFunction(()=>document.querySelector('#canvas')&&!document.querySelector('#loading'),null,{timeout:105000});
@@ -137,7 +139,7 @@ async function run(){
     const read=()=>Promise.all(clients.map(p=>p.evaluate(()=>({boards:window.qaTransport.boards,dice:window.qaTransport.dice}))));
     await until(async()=>{const m=await read();return gameStarted.size===2 || (m[0].boards.includes('out')&&m.slice(1).every(q=>q.boards.includes('in')))},'both participants receive board start');
     log('both clients receive board start',{engineAcknowledgements:gameStarted.size});await delay(2300);
-    stage='ready and roll';await Promise.all(clients.map(p=>tap(p,'ready')));await delay(2000);await Promise.all(clients.map(p=>tap(p,'dismissGuide')));await delay(700);
+    stage='ready and roll';log('data channels at board',{diagnostics:await Promise.all(clients.map(p=>p.evaluate(()=>({dc:window.qaTransport.dcStats,frame:window.qaTransport.frameTime.max}))))});await Promise.all(clients.map(p=>tap(p,'ready')));await delay(2000);await Promise.all(clients.map(p=>tap(p,'dismissGuide')));await delay(700);
     // Only the player with turn authority can roll. All other clicks are ignored by the client.
     for(const p of clients){await tap(p,'dice');if((await read())[0].dice.length)break;}
     await until(async()=>{const m=await read();const hashes=m[0].dice.filter(x=>x.direction==='out').map(x=>x.hash);return hashes.some(h=>m.slice(1).every(q=>q.dice.some(x=>x.direction==='in' && x.hash===h)))},'same authoritative dice event at all guests',37000);
