@@ -37,6 +37,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GAME_SHA"
           mkdir -p build/web
+          godot --headless --editor --import > "$RUNNER_TEMP/first-import.log" 2>&1
           godot --headless --editor --import 2>&1 | tee "$RUNNER_TEMP/import.log"
           godot --headless --export-release Web build/web/index.html 2>&1 | tee "$RUNNER_TEMP/export.log"
           if grep -E 'SCRIPT ERROR|Parse Error|^ERROR:' "$RUNNER_TEMP"/{import,export}.log; then exit 1; fi
