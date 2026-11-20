@@ -212,7 +212,7 @@ async function authorizeWebRtcPeer(request, env, code) {
   const peer = await env.DB.prepare(
     "SELECT peer_id FROM webrtc_peers WHERE code = ?1 AND token_hash = ?2 AND expires_at > ?3"
   ).bind(code, tokenHash, now).first();
-  return peer ? { peerId: Number(peer.peer_id), now } : null;
+  return peer ? { peerId: Number(peer.peer_id), now, tokenHash } : null;
 }
 
 async function createWebRtcRoom(request, env) {
@@ -362,26 +362,39 @@ async function pollWebRtcSignals(request, env, code) {
   if (!isValidRoomCode(code)) return json({ error: "방 코드 형식이 올바르지 않습니다." }, 400);
   const peer = await authorizeWebRtcPeer(request, env, code);
   if (!peer) return json({ error: "신호 수신 권한이 없거나 방이 만료되었습니다." }, 401);
+  const cursor = new URL(request.url).searchParams.get("ack");
+  if (cursor !== null && (!/^(0|[1-9]\d*)$/.test(cursor) || !Number.isSafeInteger(Number(cursor)))) {
+    return json({ error: "신호 수신 번호가 올바르지 않습니다." }, 400);
+  }
   const expiresAt = peer.now + WEBRTC_ROOM_TTL_SECONDS;
   await env.DB.prepare(
-    "UPDATE webrtc_peers SET expires_at = ?1 WHERE code = ?2 AND peer_id = ?3"
-  ).bind(expiresAt, code, peer.peerId).run();
+    "UPDATE webrtc_peers SET expires_at = MAX(expires_at, ?1) WHERE code = ?2 AND peer_id = ?3 AND token_hash = ?4"
+  ).bind(expiresAt, code, peer.peerId, peer.tokenHash).run();
   if (peer.peerId === 1) {
     await env.DB.prepare(
-      "UPDATE webrtc_rooms SET expires_at = ?1, updated_at = ?2 WHERE code = ?3"
-    ).bind(expiresAt, peer.now, code).run();
+      "UPDATE webrtc_rooms SET expires_at = MAX(expires_at, ?1), updated_at = MAX(updated_at, ?2) WHERE code = ?3 AND host_token_hash = ?4"
+    ).bind(expiresAt, peer.now, code, peer.tokenHash).run();
   }
 
-  const result = await env.DB.prepare(
-    "SELECT id, from_peer, signal_type, payload FROM webrtc_signals WHERE code = ?1 AND to_peer = ?2 ORDER BY id LIMIT 64"
-  ).bind(code, peer.peerId).all();
+  // A departed seat may already have a new owner when an earlier HTTP poll resumes.
+  const recipient = `code = ?1 AND to_peer = ?2 AND EXISTS (
+    SELECT 1 FROM webrtc_peers WHERE code = ?1 AND peer_id = ?2 AND token_hash = ?3)`;
+  const credentials = [code, peer.peerId, peer.tokenHash];
+  const discardThrough = id => env.DB.prepare(`DELETE FROM webrtc_signals WHERE id IN (
+    SELECT id FROM webrtc_signals WHERE ${recipient} AND id <= ?4 ORDER BY id LIMIT 64)`)
+    .bind(...credentials, id).run();
+  if (Number(cursor) > 0) await discardThrough(Number(cursor));
+  const result = await env.DB.prepare(`
+    SELECT id, from_peer, signal_type, payload FROM webrtc_signals WHERE ${recipient} ORDER BY id LIMIT 64`
+  ).bind(...credentials).all();
   const rows = result.results || [];
+  // Old builds consume each poll once. New builds acknowledge it only after receipt.
+  if (cursor === null && rows.length) await discardThrough(rows[rows.length - 1].id);
   const signals = [];
   for (const row of rows) {
     let data = {};
     try { data = JSON.parse(row.payload); } catch { data = {}; }
     signals.push({ id: Number(row.id), from_peer: Number(row.from_peer), type: row.signal_type, data });
-    await env.DB.prepare("DELETE FROM webrtc_signals WHERE id = ?1").bind(row.id).run();
   }
   return json({ signals, expires_at: expiresAt });
 }

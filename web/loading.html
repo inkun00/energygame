@@ -120,6 +120,63 @@ window.energyGameReady = function () {
   setTimeout(() => overlay.remove(), 320);
 };
 </script>
+<script id="online-room-frames">
+(() => {
+  // Godot captures the frame scheduler at startup. A frame already waiting
+  // when the tab is hidden still needs to poll the room and accept new peers.
+  const requestNativeFrame = window.requestAnimationFrame.bind(window);
+  const cancelNativeFrame = window.cancelAnimationFrame.bind(window);
+  const pending = new Map();
+  let online = false;
+
+  function finish(frame, timestamp) {
+    if (!pending.delete(frame.id)) return;
+    if (frame.timer !== null) clearTimeout(frame.timer);
+    frame.callback.call(window, timestamp);
+  }
+
+  function updateTimer(frame) {
+    if (online && document.hidden) {
+      if (frame.timer !== null) return;
+      frame.timer = setTimeout(() => {
+        frame.timer = null;
+        if (!online || !document.hidden || !pending.has(frame.id)) return;
+        cancelNativeFrame(frame.id);
+        finish(frame, performance.now());
+      }, 250);
+    } else if (frame.timer !== null) {
+      clearTimeout(frame.timer);
+      frame.timer = null;
+    }
+  }
+
+  window.requestAnimationFrame = function (callback) {
+    if (typeof callback !== 'function') return requestNativeFrame(callback);
+    const frame = { id: 0, callback, timer: null };
+    frame.id = requestNativeFrame(timestamp => finish(frame, timestamp));
+    pending.set(frame.id, frame);
+    if (online && document.hidden) updateTimer(frame);
+    return frame.id;
+  };
+  window.cancelAnimationFrame = function (id) {
+    const frame = pending.get(id);
+    if (frame && frame.timer !== null) clearTimeout(frame.timer);
+    pending.delete(id);
+    cancelNativeFrame(id);
+  };
+
+  function updatePendingFrames() {
+    pending.forEach(updateTimer);
+  }
+  window.setEnergyGameOnlineFrames = function (active) {
+    if (online === Boolean(active)) return;
+    online = Boolean(active);
+    if (online) document.addEventListener('visibilitychange', updatePendingFrames);
+    else document.removeEventListener('visibilitychange', updatePendingFrames);
+    updatePendingFrames();
+  };
+})();
+</script>
 <script src="$GODOT_URL"></script>
 <script>
 (() => {

@@ -4,10 +4,14 @@ signal create_requested(settings)
 signal join_requested(code, password)
 
 const UI = preload("res://scripts/ui/CommercialUI.gd")
-var _loaded_once := false
 var _rows: VBoxContainer
 var _status: Label
 var _refresh: Button
+var _code: LineEdit
+var _join_code: Button
+var _available_seats: Array[Button] = []
+var _listing := false
+var _show_list_status := false
 var _back: Button
 var _return_focus: Control
 var _create: Button
@@ -45,7 +49,7 @@ func _ready() -> void:
 	_back = _button("돌아가기", false)
 	_back.pressed.connect(_close_browser)
 	header.add_child(_back)
-	content.add_child(_label("처음 입장할 때 목록을 불러옵니다. 최신 목록은 새로고침을 눌러 확인하세요.", 17))
+	content.add_child(_label("목록에서 참가할 방을 고르거나 방장이 알려 준 6자리 코드를 입력하세요.", 17))
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 24)
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -54,9 +58,24 @@ func _ready() -> void:
 	list_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	list_column.add_theme_constant_override("separation", 12)
 	columns.add_child(list_column)
-	_refresh = _button("방 목록 새로고침", false)
+	var join_tools := HBoxContainer.new()
+	join_tools.custom_minimum_size.y = 48
+	join_tools.add_theme_constant_override("separation", 10)
+	list_column.add_child(join_tools)
+	_refresh = _button("새로고침", false)
 	_refresh.pressed.connect(_request_refresh)
-	list_column.add_child(_refresh)
+	join_tools.add_child(_refresh)
+	_code = LineEdit.new()
+	_code.placeholder_text = "6자리 방 코드"
+	_code.max_length = 6
+	_code.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+	_code.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UI.apply_input(_code)
+	join_tools.add_child(_code)
+	_join_code = _button("코드로 참가", false)
+	_join_code.pressed.connect(func(): prompt_code_join(_code.text))
+	_code.text_submitted.connect(prompt_code_join)
+	join_tools.add_child(_join_code)
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(680, 360)
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -124,9 +143,10 @@ func _ready() -> void:
 	_join_password.custom_minimum_size = Vector2(360, 48)
 	UI.apply_input(_join_password)
 	_password_dialog.add_child(_join_password)
+	_password_dialog.register_text_enter(_join_password)
 	_password_dialog.confirmed.connect(_confirm_password)
 	NetworkManager.room_list_received.connect(_receive_rooms)
-	NetworkManager.room_list_failed.connect(show_error)
+	NetworkManager.room_list_failed.connect(_on_list_failed)
 	hide()
 
 func _label(value: String, font_size: int) -> Label:
@@ -146,14 +166,16 @@ func _button(value: String, primary: bool) -> Button:
 	return button
 
 func open_browser() -> void:
-	_return_focus = get_viewport().gui_get_focus_owner()
+	if not visible:
+		_return_focus = get_viewport().gui_get_focus_owner()
 	show()
 	_back.grab_focus()
-	if not _loaded_once:
-		_loaded_once = true
-		_request_refresh()
+	_request_refresh()
 
 func _close_browser() -> void:
+	if _busy:
+		NetworkManager.disconnect_network()
+		set_busy(false)
 	hide()
 	if is_instance_valid(_return_focus) and _return_focus.is_visible_in_tree():
 		_return_focus.grab_focus()
@@ -161,17 +183,35 @@ func _close_browser() -> void:
 func _request_refresh() -> void:
 	if _busy:
 		return
+	_clear_rows()
+	_listing = true
+	_show_list_status = true
 	_refresh.disabled = true
 	_status.text = "방 목록을 가져오는 중..."
 	NetworkManager.request_room_list()
 
-func _receive_rooms(rooms: Array) -> void:
-	_refresh.disabled = _busy
+func _clear_rows() -> void:
+	_available_seats.clear()
 	for child in _rows.get_children():
 		_rows.remove_child(child)
 		child.queue_free()
+
+func _on_list_failed(message: String) -> void:
+	_listing = false
+	_refresh.disabled = _busy
+	if _show_list_status:
+		_status.text = message
+
+func _receive_rooms(rooms: Array) -> void:
+	_listing = false
+	_refresh.disabled = _busy
+	_clear_rows()
 	for room in rooms:
 		if not (room is Dictionary):
+			continue
+		var code := str(room.get("code", ""))
+		var count := int(room.get("player_count", 0))
+		if count < 1 or not NetworkManager.is_valid_room_code(code):
 			continue
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 12)
@@ -182,7 +222,6 @@ func _receive_rooms(rooms: Array) -> void:
 		title.tooltip_text = title.text
 		description.add_child(title)
 		var locked := bool(room.get("password_required", false))
-		var count := int(room.get("player_count", 0))
 		var capacity := int(room.get("max_players", 4))
 		var detail := _label("%s · %d/%d명 · %s" % [str(room.get("host_name", "방장")), count, capacity, "비밀번호 있음" if locked else "공개 방"], 16)
 		detail.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -191,10 +230,15 @@ func _receive_rooms(rooms: Array) -> void:
 		var join := _button("참가" if count < capacity else "인원 가득 참", false)
 		join.custom_minimum_size = Vector2(130, 58)
 		join.disabled = count >= capacity or _busy or not OS.has_feature("web")
-		join.pressed.connect(_select_room.bind(str(room.get("code", "")), locked))
+		if count < capacity and OS.has_feature("web"):
+			_available_seats.append(join)
+		join.pressed.connect(_select_room.bind(code, locked))
 		row.add_child(join)
 		_rows.add_child(row)
-	_status.text = "현재 표시된 방 %d개 · 목록은 자동으로 갱신되지 않습니다." % rooms.size() if not rooms.is_empty() else "생성된 방이 없습니다. 새 방을 만들거나 새로고침해 주세요."
+	if not _show_list_status:
+		return
+	var shown := _rows.get_child_count()
+	_status.text = "현재 표시된 방 %d개" % shown if shown > 0 else "생성된 방이 없습니다. 새 방을 만들거나 새로고침해 주세요."
 	if not OS.has_feature("web"):
 		_status.text = "웹 방 목록입니다. 목록의 방은 웹 버전에서 참가할 수 있습니다."
 
@@ -211,7 +255,13 @@ func _select_room(code: String, locked: bool) -> void:
 		_join(code, "")
 
 func prompt_code_join(code: String) -> void:
-	_selected_code = code
+	if _busy:
+		return
+	_selected_code = code.strip_edges()
+	if not NetworkManager.is_valid_room_code(_selected_code):
+		show_error("방장이 알려 준 숫자 6자리를 정확히 입력하세요.")
+		_code.grab_focus()
+		return
 	_password_dialog.title = "방 참가 · 비밀번호가 없으면 비워 두세요"
 	_join_password.clear()
 	_password_dialog.popup_centered(Vector2i(480, 150))
@@ -223,6 +273,8 @@ func _confirm_password() -> void:
 	_join(_selected_code, _join_password.text)
 
 func _join(code: String, password: String) -> void:
+	if _busy:
+		return
 	set_busy(true)
 	_status.text = "게임방에 연결하는 중..."
 	join_requested.emit(code, password)
@@ -247,9 +299,18 @@ func _create_room() -> void:
 
 func set_busy(value: bool) -> void:
 	_busy = value
+	if value:
+		_show_list_status = false
 	_create.disabled = value
-	_refresh.disabled = value
+	_join_code.disabled = value
+	_code.editable = not value
+	_refresh.disabled = value or _listing
+	for button in _available_seats:
+		button.disabled = value
 
 func show_error(message: String) -> void:
+	if not visible:
+		open_browser()
 	set_busy(false)
+	_show_list_status = false
 	_status.text = message
