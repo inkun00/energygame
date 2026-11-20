@@ -74,7 +74,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/qa" playwright@1.55.0
           google-chrome --version
       - name: Exercise deployed client with a private room and four browsers
-        run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node qa/production.cjs
+        run: QA_REQUIRE_STAGED=1 NODE_PATH="$RUNNER_TEMP/qa/node_modules" node qa/production.cjs
       - name: Read the private test screens
         if: always()
         run: |
@@ -131,7 +131,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/qa" playwright@1.55.0
           google-chrome --version
       - name: Join own open room and verify a shared die
-        run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node qa/open.cjs
+        run: QA_REQUIRE_STAGED=1 NODE_PATH="$RUNNER_TEMP/qa/node_modules" node qa/open.cjs
       - name: Save own-room screenshots on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -222,4 +222,4 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/qa" playwright@1.55.0
           google-chrome --version
-          QA_FORCE_HOST_RELAY=1 NODE_PATH="$RUNNER_TEMP/qa/node_modules" node qa/after-private.cjs
+          QA_REQUIRE_STAGED=1 QA_FORCE_HOST_RELAY=1 NODE_PATH="$RUNNER_TEMP/qa/node_modules" node qa/after-private.cjs

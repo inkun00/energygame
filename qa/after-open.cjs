@@ -8,7 +8,7 @@ const roomTitle = 'QA-NOJOIN-' + crypto.randomBytes(2).toString('hex');
 const password = '';let pendingOwnJoin=false;let roomMonitor;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const points = {name:[997,232],online:[1105,518],title:[1004,267],lock:[1004,393],password:[1004,437],capacity:[1004,348],create:[1004,525],join:[745,249],codeField:[470,190],submitCode:[748,190],joinPassword:[618,317],confirm:[685,365],start:[743,617],ready:[640,406],dismissGuide:[188,240],dice:[1108,285]};
-let secret, code, pendingCode, stage='baseline', blockedScores=0;
+let browserPackETag=null;let secret, code, pendingCode, stage='baseline', blockedScores=0;
 let privateScreens=true;const rows=new Map();const joinsSent=new Set();let lobbyCount=0;const registered = new Map(), gameStarted = new Set(), clients = [], problems = new Set();
 const redacted = s => String(s).replaceAll(secret||'__impossible__','[redacted]').replace(/\b\d{6}\b/g,'[room]');
 const log = (label, obj={}) => console.log('[QA]',label,JSON.stringify(obj));
@@ -94,11 +94,11 @@ async function submitPassword(page){
   await page.mouse.click(x,y,{delay:220});await delay(650);
 }
 async function measureHost(host){
-  return await host.evaluate(async()=>{const result={sent:0,received:0,links:0,channels:0,paths:[],pairTx:0,pairRx:0,appTx:window.qaTransport.bytes.out,appRx:window.qaTransport.bytes.in};
+  return await host.evaluate(async()=>{const result={sent:0,received:0,links:0,channels:0,paths:[],pairTx:0,pairRx:0,pairIds:[],appTx:window.qaTransport.bytes.out,appRx:window.qaTransport.bytes.in};
     for(const peer of window.qaTransport.peers){if(peer.connectionState!=='connected')continue;result.links++;const stats=await peer.getStats();const usedPairs=new Set();
       for(const item of stats.values()){
         if(item.type==='data-channel' && item.state==='open'){result.sent+=item.bytesSent||0;result.received+=item.bytesReceived||0;result.channels++;}
-        if(item.type==='transport' && item.selectedCandidatePairId){const pair=stats.get(item.selectedCandidatePairId);if(!pair||usedPairs.has(pair.id))continue;usedPairs.add(pair.id);result.pairTx+=pair.bytesSent||0;result.pairRx+=pair.bytesReceived||0;
+        if(item.type==='transport' && item.selectedCandidatePairId){const pair=stats.get(item.selectedCandidatePairId);if(!pair||usedPairs.has(pair.id))continue;usedPairs.add(pair.id);result.pairIds.push(String(pair.id));result.pairTx+=pair.bytesSent||0;result.pairRx+=pair.bytesReceived||0;
           const local=stats.get(pair.localCandidateId),remote=stats.get(pair.remoteCandidateId);
           result.paths.push({localType:local?.candidateType,remoteType:remote?.candidateType,relayProtocol:local?.relayProtocol||remote?.relayProtocol||null});}
       }
@@ -129,6 +129,7 @@ async function run(){
         pendingOwnJoin=true;joinsSent.add(i);log('guest submitted normal open-room join',{player:i+1}); return route.continue();
       });
       const page=await ctx.newPage();clients.push(page);
+      page.on('response',resp=>{if(resp.url()!==site+'/index.pck')return;const tag=resp.headers()['etag'];if(!tag)return;if(browserPackETag!==null&&browserPackETag!==tag)problems.add('Production game changed while participants started');browserPackETag=tag;});
       page.on('request',r=>{if(r.method()!=='POST'||!new URL(r.url()).pathname.endsWith('/signals'))return;try{const b=r.postDataJSON();if(b.type==='offer'||b.kind==='offer')log('offer fallback marker',{player:i+1,requested:b.data?.relay_fallback===true,explicit:b.data?.relay_fallback!==undefined});}catch{}});
       const statuses=new Map();page.on('response',async r=>{
         if(r.request().method()==='GET' && r.url()===directory+'/webrtc/rooms'){try{const out=await r.json();if(out.rooms.some(row=>row.title!==roomTitle))privateScreens=false;const visible=out.rooms.filter(row=>Number(row.player_count)>0&&/^\d{6}$/.test(String(row.code)));const index=visible.findIndex(row=>row.title===roomTitle&&String(row.code)===String(code));const own=visible[index];log('visible private room',{player:i+1,index,locked:own?.password_required,count:own?.player_count,max:own?.max_players});if(index>=0)rows.set(i,index);}catch(e){log('listing parser',{error:redacted(e.message).slice(0,110)});}}
@@ -180,7 +181,7 @@ async function run(){
     await until(async()=>{const m=await read();const hashes=m[0].dice.filter(x=>x.direction==='out').map(x=>x.hash);return hashes.some(h=>m.slice(1).every(q=>q.dice.some(x=>x.direction==='in' && x.hash===h)))},'same authoritative dice event at all guests',37000);
     log('both clients agree on first die',{matchedOnAllGuests:true,blockedScorePosts:blockedScores,baselineOK});
     await delay(Math.max(0,30000-(Date.now()-sampleStarted)));const endStats=await measureHost(host);
-    assert(endStats.links>0 && startStats.links===endStats.links,'test peers remain connected for traffic measurement');log('host data channels during board play',{seconds:(Date.now()-sampleStarted)/1000,links:endStats.links,channels:endStats.channels,browserTx:endStats.channels?endStats.sent-startStats.sent:null,browserRx:endStats.channels?endStats.received-startStats.received:null,icePairBytesSent:endStats.pairTx-startStats.pairTx,icePairBytesReceived:endStats.pairRx-startStats.pairRx,applicationBytesSent:endStats.appTx-startStats.appTx,applicationBytesReceived:endStats.appRx-startStats.appRx,paths:endStats.paths});assert(baselineOK,'public endpoint baseline incomplete');
+    const pairStable=JSON.stringify(startStats.pairIds)===JSON.stringify(endStats.pairIds);assert(endStats.links>0 && startStats.links===endStats.links,'test peers remain connected for traffic measurement');log('host data channels during board play',{seconds:(Date.now()-sampleStarted)/1000,links:endStats.links,channels:endStats.channels,browserTx:endStats.channels?endStats.sent-startStats.sent:null,browserRx:endStats.channels?endStats.received-startStats.received:null,sameSelectedPairs:pairStable,icePairBytesSent:pairStable?endStats.pairTx-startStats.pairTx:null,icePairBytesReceived:pairStable?endStats.pairRx-startStats.pairRx:null,applicationBytesSent:endStats.appTx-startStats.appTx,applicationBytesReceived:endStats.appRx-startStats.appRx,paths:endStats.paths});assert(baselineOK,'public endpoint baseline incomplete');
     stage='wait for synchronized movement after die animation';
     const boardEvents=()=>Promise.all(clients.map(p=>p.evaluate(()=>window.qaTransport.events)));await until(async()=>{const events=await boardEvents();return events[0].out.includes('player_moved')&&events.slice(1).every(x=>x.in.includes('player_moved'));},'all players observed same move after rendering the die animation',95000);log('shared board events',{events:await boardEvents()});
   }catch(e){console.error('[QA] failure at '+stage+': '+redacted(e.message));for(let i=0;i<clients.length;i++){try{if(privateScreens){const fs=require('node:fs');fs.mkdirSync('qa-pictures',{recursive:true});await clients[i].screenshot({path:'qa-pictures/failed-player'+(i+1)+'.png',timeout:8000}).catch(()=>{});}log('browser failure state',{player:i+1,origin:new URL(clients[i].url()).origin,...await clients[i].evaluate(()=>({iceConfigs:window.qaTransport?.iceConfigs,peers:window.qaTransport?.peers.map(x=>({ice:x.iceConnectionState,connection:x.connectionState,signaling:x.signalingState})),body:document.body.innerText.slice(-140)}))});}catch{}}throw Error('Production smoke stopped at '+stage);}
