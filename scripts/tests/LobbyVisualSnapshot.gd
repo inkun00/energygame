@@ -41,7 +41,8 @@ func _capture() -> void:
 		push_error("로비 미리보기 저장 실패: %s" % error)
 		quit(1)
 		return
-	lobby._room_browser._loaded_once = true
+	OS.set_environment("ENERGYGAME_ROOM_DIRECTORY_URL", "")
+	ProjectSettings.set_setting("network/room_directory_url", "")
 	lobby.mode_option_button.select(1)
 	lobby._on_mode_selected(1)
 	lobby._room_browser._receive_rooms([

@@ -45,6 +45,7 @@ jobs:
         run: |
           npm ci
           node --test test/*.test.js
+          node --test ../../scripts/tests/WebRoomFrames.test.mjs
 
       - name: Verify real peer reconnection, host loss and ranked score delivery
         run: |

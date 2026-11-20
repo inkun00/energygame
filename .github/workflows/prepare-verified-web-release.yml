@@ -5,7 +5,7 @@ on:
 permissions:
   contents: read
 env:
-  GAME_SHA: 21d4f08c811abfcfa4111d68437e67dbbdbc895f
+  GAME_SHA: 7b4beb257af6f2ebf75dd07fd80cad2485d76688
 jobs:
   worker-connection:
     runs-on: ubuntu-24.04
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 21d4f08c811abfcfa4111d68437e67dbbdbc895f
+          ref: 7b4beb257af6f2ebf75dd07fd80cad2485d76688
           lfs: true
           persist-credentials: false
       - uses: chickensoft-games/setup-godot@v1
@@ -73,7 +73,7 @@ jobs:
           compression-level: 0
           retention-days: 3
   publish:
-    if: ${{ false }}
+    if: ${{ true }}
     needs: package
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -91,11 +91,55 @@ jobs:
         run: |
           set -euo pipefail
           tag="web-$GAME_SHA"
+          gh api --header 'Accept: application/vnd.github.raw+json' "repos/$GH_REPO/contents/release-prep/worker.mjs?ref=$GITHUB_SHA" > worker.mjs
+          echo "399b0725d48a4588a302f6eb429cce0041a3af330c85382a887f9b7495a01a5b  worker.mjs" | sha256sum -c -
+          node --check worker.mjs
           if ! gh release view "$tag" --repo "$GH_REPO" > /dev/null 2>&1; then
-            gh release create "$tag" energygame-web.zip --repo "$GH_REPO" --target "$GAME_SHA" --title "온라인 모험 방 참가 개선" --notes "온라인 모험의 방 참가 과정을 개선한 웹 빌드입니다."
+            gh release create "$tag" energygame-web.zip worker.mjs --repo "$GH_REPO" --target "$GAME_SHA" --title "온라인 모험 방 참가 개선" --notes "온라인 모험의 방 참가 과정을 개선한 웹 빌드입니다."
           fi
           test "$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq .object.sha)" = "$GAME_SHA"
           mkdir -p "$RUNNER_TEMP/release-download"
           gh release download "$tag" --repo "$GH_REPO" --pattern energygame-web.zip --dir "$RUNNER_TEMP/release-download"
           cmp energygame-web.zip "$RUNNER_TEMP/release-download/energygame-web.zip"
-          sha256sum energygame-web.zip
+          gh release download "$tag" --repo "$GH_REPO" --pattern worker.mjs --dir "$RUNNER_TEMP/release-download"
+          cmp worker.mjs "$RUNNER_TEMP/release-download/worker.mjs"
+          sha256sum energygame-web.zip worker.mjs
+  verify-live:
+    if: ${{ true }}
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: game-web
+      - name: Verify the production game and ranking API
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, re, time, urllib.request, zipfile
+          base = "https://energygame-minigames-demo.vercel.app/"
+          sha = os.environ["GAME_SHA"]
+          with zipfile.ZipFile("energygame-web.zip") as archive:
+              expected_html = archive.read("index.html")
+              expected_pck = hashlib.sha256(archive.read("index.pck")).hexdigest()
+          def fetch(path):
+              req = urllib.request.Request(base + path, headers={"Cache-Control": "no-cache", "User-Agent": "energygame-release-validation"})
+              with urllib.request.urlopen(req, timeout=45) as response:
+                  return response.read()
+          for attempt in range(65):
+              try:
+                  html = fetch("?release=" + sha + "&check=" + str(attempt))
+                  if html == expected_html:
+                      digest = hashlib.sha256(fetch("index.pck?release=" + sha)).hexdigest()
+                      if digest == expected_pck:
+                          board = json.loads(fetch("api/scores/solar_align"))
+                          assert board["game_id"] == "solar_align" and isinstance(board["entries"], list)
+                          print(f"Production matches game={sha} html_sha256={hashlib.sha256(expected_html).hexdigest()} pck_sha256={digest}; scores={board['game_id']}")
+                          break
+              except Exception as error:
+                  print(type(error).__name__, flush=True)
+              time.sleep(12)
+          else:
+              raise RuntimeError("Production is not yet serving the release")
+          PY

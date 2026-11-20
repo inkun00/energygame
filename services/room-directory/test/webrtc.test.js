@@ -11,6 +11,67 @@ function client(env) {
   }), env);
 }
 
+test("a lost poll is replayed until acknowledged while legacy peers consume their own inbox once", async () => {
+  const env = { DB: new SqliteD1() }, req = client(env);
+  await req("", "POST", {code: "345678", host_token: host});
+  await req("/345678/join", "POST", {peer_token: guest});
+  const path = "/345678/signals";
+  for (const type of ["offer", "candidate"]) {
+    assert.equal((await req(path, "POST", {to_peer: 1, type, data: {attempt: "first"}}, guest)).status, 202);
+  }
+  await req(path, "POST", {to_peer: 2, type: "answer", data: {attempt: "first"}}, host);
+  const poll = async (query, token) => (await (await req(path + query, "GET", undefined, token)).json()).signals;
+  const lost = await poll("?ack=0", host);
+  assert.deepEqual(lost.map(signal => signal.type), ["offer", "candidate"]);
+  assert.deepEqual(await poll("?ack=0", host), lost);
+  for (const ack of ["-1", "1.5", "", "9007199254740992"]) {
+    assert.equal((await req(path + "?ack=" + ack, "GET", undefined, host)).status, 400);
+  }
+  assert.deepEqual(await poll("?ack=" + lost[0].id, host), [lost[1]]);
+  assert.deepEqual(await poll("?ack=" + lost[1].id, host), []);
+  assert.deepEqual(await poll("?ack=" + lost[0].id, host), []);
+  assert.deepEqual((await poll("", guest)).map(signal => signal.type), ["answer"]);
+  assert.deepEqual(await poll("", guest), []);
+});
+
+test("a full legacy ICE signaling inbox fits within the D1 query budget", async () => {
+  const env = { DB: new SqliteD1() }, req = client(env);
+  await req("", "POST", {code: "345678", host_token: host});
+  await req("/345678/join", "POST", {peer_token: guest});
+  const insert = env.DB.db.prepare(`INSERT INTO webrtc_signals (code, from_peer, to_peer, signal_type, payload, created_at)
+    VALUES ('345678', 2, 1, 'candidate', '{}', 1)`);
+  for (let i = 0; i < 65; i++) insert.run();
+  let queryCount = 0;
+  const prepare = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = sql => { queryCount++; return prepare(sql); };
+  const first = await (await req("/345678/signals", "GET", undefined, host)).json();
+  assert.equal(first.signals.length, 64);
+  assert.ok(queryCount < 10, `used ${queryCount} queries for one poll`);
+  const second = await (await req("/345678/signals", "GET", undefined, host)).json();
+  assert.deepEqual(second.signals.map(signal => signal.id), [first.signals[63].id + 1]);
+});
+
+test("a poll whose seat changed hands cannot acknowledge or see the replacement's inbox", async () => {
+  const env = { DB: new SqliteD1() }, req = client(env);
+  await req("", "POST", {code: "345678", host_token: host});
+  await req("/345678/join", "POST", {peer_token: guest});
+  const prepare = env.DB.prepare.bind(env.DB);
+  let changed = false;
+  env.DB.prepare = sql => {
+    if (!changed && sql.startsWith("UPDATE webrtc_peers SET expires_at")) {
+      changed = true;
+      env.DB.db.exec(`UPDATE webrtc_peers SET token_hash = 'replacement' WHERE peer_id = 2;
+        INSERT INTO webrtc_signals (code, from_peer, to_peer, signal_type, payload, created_at)
+        VALUES ('345678', 1, 2, 'answer', '{}', 1);`);
+    }
+    return prepare(sql);
+  };
+  const stale = await (await req("/345678/signals?ack=123", "GET", undefined, guest)).json();
+  assert.ok(changed);
+  assert.deepEqual(stale.signals, []);
+  assert.equal(env.DB.db.prepare("SELECT COUNT(*) AS count FROM webrtc_signals").get().count, 1);
+});
+
 test("private room list hides secrets, enforces password and capacity, and frees departed seats", async () => {
   const env = { DB: new SqliteD1() }, req = client(env);
   assert.equal((await req("", "POST", {code: "654321", host_token: host, title: "친구들의 모험", host_name: "로코코", max_players: 2, password: "secret-test"})).status, 201);

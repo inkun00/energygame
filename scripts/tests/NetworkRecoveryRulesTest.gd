@@ -7,6 +7,7 @@ func _initialize() -> void:
 	call_deferred("_run")
 
 func _run() -> void:
+	_test_browser_directory()
 	var main = load("res://scenes/Main.tscn").instantiate()
 	root.add_child(main)
 	var gm := root.get_node("GameManager")
@@ -90,3 +91,173 @@ func _expect(value: bool, message: String) -> void:
 	if not value:
 		failures.append(message)
 		push_error("[FAIL] Recovery rules: " + message)
+
+
+func _test_browser_directory() -> void:
+	var checks_before := failures.size()
+	var probe: Node = load("res://scripts/tests/WebRoomDirectoryProbe.gd").new()
+	root.add_child(probe)
+	_test_guest_connection_deadlines()
+	probe._create_browser_room({})
+	var old_registration: Dictionary = probe.sent.back()
+	probe.disconnect_network()
+	_expect(probe.sent.back().method == HTTPClient.METHOD_DELETE and probe.sent.back().token == old_registration.payload.host_token,
+		"host leaving before its create response removes the public listing")
+	probe._create_browser_room({})
+	var active_registration: Dictionary = probe.sent.back()
+	probe.respond(old_registration, HTTPRequest.RESULT_SUCCESS, 201)
+	_expect(probe.sent.back().path == "/webrtc/rooms/" + old_registration.payload.code and probe.sent.back().token == old_registration.payload.host_token,
+		"a room registered after cancellation is deleted with its original host credential")
+	probe.respond(active_registration, HTTPRequest.RESULT_SUCCESS, 201)
+	_expect(probe._web_signaling_active and probe.online_frames, "new host keeps signaling after a previous room's late registration")
+	probe.disconnect_network()
+	_expect(not probe.online_frames, "background online frames stop on disconnect")
+	probe.sent.clear()
+	probe._join_browser_room("234567", {}, "classroom")
+	var admission: Dictionary = probe.sent.back()
+	probe.respond(admission, HTTPRequest.RESULT_TIMEOUT, 0)
+	var retried: Dictionary = probe.sent.back()
+	_expect(probe.sent.size() == 2 and retried.payload == admission.payload, "retry admission with the original seat credential")
+	probe.disconnect_network()
+	_expect(probe.sent.back().path == "/webrtc/rooms/234567/leave", "cancel releases the pending seat")
+	probe._join_browser_room("345678", {}, "")
+	var new_admission: Dictionary = probe.sent.back()
+	probe.respond(retried, HTTPRequest.RESULT_SUCCESS, 201, {"peer_id": 2})
+	_expect(probe.sent.back().path == "/webrtc/rooms/234567/leave" and probe.sent.back().token == admission.payload.peer_token,
+		"a late admission releases only the old room's reservation")
+	_expect(probe._room_lookup_active and probe.pending_room_code == "345678", "late admission preserves the new join")
+	var call_count: int = probe.sent.size()
+	probe.respond(new_admission, HTTPRequest.RESULT_SUCCESS, 403, {"error": "wrong password"})
+	_expect(probe.sent.size() == call_count and not probe._room_lookup_active, "invalid password ends the lookup immediately")
+	probe._join_browser_room("345678", {}, "")
+	probe.respond(probe.sent.back(), HTTPRequest.RESULT_SUCCESS, 201, {"peer_id": 2})
+	_expect(probe.online_frames and probe._web_signaling_active, "admitted guest keeps signaling in a background tab")
+	probe.disconnect_network()
+
+	probe._web_transport = true
+	probe._web_signaling_active = true
+	probe.is_host = true
+	probe.room_code = "345678"
+	probe._host_directory_token = "host-test-credential"
+	probe._web_connection_attempts[2] = "new-peer"
+	probe._web_peer_generations[2] = 1
+	probe._send_browser_signal(2, "answer", {"sdp": "test-answer"})
+	var answer: Dictionary = probe.sent.back()
+	probe.respond(answer, HTTPRequest.RESULT_TIMEOUT, 0)
+	_expect(probe.sent.back().payload == answer.payload and not answer.payload.data.delivery_id.is_empty(),
+		"retry SDP with the same delivery ID and attempt")
+	var outgoing_count: int = probe.sent.size()
+	probe._web_connection_attempts[2] = "replacement"
+	probe.respond(probe.sent.back(), HTTPRequest.RESULT_SUCCESS, 503)
+	_expect(probe.sent.size() == outgoing_count, "late send failure cannot retry an old negotiation")
+
+	var early := {"id": 7, "from_peer": 2, "type": "candidate", "data": {
+		"attempt": "newcomer", "generation": 1, "delivery_id": "ice-a", "media": "0", "index": 0, "sdp": "test-ice"}}
+	var duplicate := early.duplicate(true)
+	duplicate.id = 8
+	probe._poll_browser_signals()
+	_expect(probe.sent.back().path.ends_with("?ack=0"), "new room has no acknowledged signals")
+	probe.respond(probe.sent.back(), HTTPRequest.RESULT_SUCCESS, 200, {"signals": [early, duplicate]})
+	_expect(probe._web_early_candidates.get("2:1:newcomer", []).size() == 1, "same-generation replacement keeps early ICE exactly once")
+	probe._poll_browser_signals()
+	_expect(probe.sent.back().path.ends_with("?ack=8"), "next poll acknowledges the processed batch")
+	probe.respond(probe.sent.back(), HTTPRequest.RESULT_TIMEOUT, 0)
+	_expect(probe._web_processed_signal_id == 8, "lost poll response cannot advance its cursor")
+	_test_dropped_legacy_batches(probe)
+	probe.is_online = true
+	probe._poll_browser_signals()
+	probe.respond(probe.sent.back(), HTTPRequest.RESULT_SUCCESS, 404)
+	_expect(not probe.is_online and probe.room_code.is_empty(), "expired empty host room returns to the lobby")
+	_expect(probe._web_processed_signal_id == 0, "leaving resets the room's signal cursor")
+	probe.queue_free()
+	if failures.size() == checks_before:
+		print("[PASS] Browser admission, seat reuse, delayed responses, lost SDP/ICE batches, retries and acknowledgement")
+
+
+func _test_guest_connection_deadlines() -> void:
+	var guest: Node = load("res://scripts/tests/WebRoomDirectoryProbe.gd").new()
+	root.add_child(guest)
+	var errors: Array[String] = []
+	var on_failure := func(detail: String): errors.append(detail)
+	guest.room_code_lookup_failed.connect(on_failure)
+	guest._join_browser_room("345678", {}, "")
+	guest.respond(guest.sent.back(), HTTPRequest.RESULT_SUCCESS, 201, {"peer_id": 2})
+	guest._process(30.1)
+	_expect(not guest.is_online and errors.size() == 1 and "방장의 응답을 받지 못했습니다" in errors[0],
+		"a silent host is identified after the bounded answer deadline")
+
+	guest._join_browser_room("345678", {}, "")
+	guest.respond(guest.sent.back(), HTTPRequest.RESULT_SUCCESS, 201, {"peer_id": 2})
+	guest._web_connection_attempts[1] = "late-answer"
+	guest._process(29.5)
+	_expect(guest.is_online and guest._web_connect_remaining > 0.0, "slow signaling can pass the former 20 second cutoff")
+	var answer := {"from_peer": 1, "type": "answer", "data": {"attempt": "late-answer", "sdp": "valid-answer"}}
+	guest._apply_browser_signal(answer)
+	guest._process(14.0)
+	_expect(guest.is_online and guest._web_connect_remaining > 0.0, "late first host answer gives the data channel time to open")
+	guest._apply_browser_signal(answer)
+	guest._process(1.1)
+	_expect(not guest.is_online and errors.size() == 2 and "두 기기를 직접 연결하지 못했습니다" in errors[1],
+		"a known host reply distinguishes direct-link failure and cannot renew the deadline twice")
+	guest.room_code_lookup_failed.disconnect(on_failure)
+	guest.queue_free()
+
+
+func _test_dropped_legacy_batches(host: Node) -> void:
+	var guest: Node = load("res://scripts/tests/WebRoomDirectoryProbe.gd").new()
+	root.add_child(guest)
+	guest._web_transport = true
+	guest._web_signaling_active = true
+	guest.room_code = host.room_code
+	guest.my_peer_id = 2
+	guest._host_directory_token = "guest-test-credential"
+	guest._web_peer_generations[1] = 1
+	guest._web_connection_attempts[1] = "fresh-seat"
+	host._web_connection_attempts[2] = "prior-seat"
+	host._web_peer_generations[2] = 3
+
+	# Both original signals are accepted by the old directory, then its poll response is lost.
+	guest._send_browser_signal(1, "offer", {"sdp": "fresh-offer"})
+	guest._send_browser_signal(1, "candidate", {"sdp": "guest-ice"})
+	guest.respond(guest.sent[0], HTTPRequest.RESULT_SUCCESS, 202)
+	guest.respond(guest.sent[1], HTTPRequest.RESULT_SUCCESS, 202)
+	guest._replay_pending_browser_signals(4.1)
+	_expect(guest.sent.size() == 4 and guest.sent[2].payload == guest.sent[0].payload
+		and guest.sent[3].payload == guest.sent[1].payload, "lost successful offer and ICE are replayed unchanged")
+	_deliver_recorded_signal(host, guest.sent[3], 2)
+	_deliver_recorded_signal(host, guest.sent[2], 2)
+	_deliver_recorded_signal(host, guest.sent[2], 2)
+	_expect(host.remote_descriptions == ["fresh-offer"] and host.remote_candidates == ["guest-ice"],
+		"generation-one successor accepts out-of-order ICE and applies its offer exactly once")
+	host._apply_browser_signal({"from_peer": 2, "type": "offer", "data": {
+		"attempt": "prior-seat", "generation": 3, "sdp": "expired-offer"}})
+	_expect(host._web_connection_attempts[2] == "fresh-seat", "a delayed retired offer cannot displace the replacement")
+
+	var first_answer: Dictionary = host.sent.back()
+	host._send_browser_signal(2, "candidate", {"sdp": "host-ice"})
+	var first_candidate: Dictionary = host.sent.back()
+	host.respond(first_answer, HTTPRequest.RESULT_SUCCESS, 202)
+	host.respond(first_candidate, HTTPRequest.RESULT_SUCCESS, 202)
+	# The guest loses the entire first answer batch, too.
+	host._replay_pending_browser_signals(4.1)
+	var resent_answer: Dictionary = host.sent[-2]
+	var resent_ice: Dictionary = host.sent[-1]
+	_expect(resent_answer.payload == first_answer.payload and resent_ice.payload == first_candidate.payload,
+		"lost successful answer and ICE are replayed unchanged")
+	_deliver_recorded_signal(guest, resent_answer, 1)
+	_deliver_recorded_signal(guest, resent_ice, 1)
+	_deliver_recorded_signal(guest, resent_ice, 1)
+	_expect(guest.remote_descriptions == ["answer-fresh-offer"] and guest.remote_candidates == ["host-ice"],
+		"guest applies the recovered answer and ICE exactly once")
+	host._on_peer_connected(2)
+	var sent_after_connect: int = host.sent.size()
+	host._replay_pending_browser_signals(4.1)
+	_expect(host.sent.size() == sent_after_connect, "connected peers stop replaying handshakes")
+	for index in range(5):
+		guest._replay_pending_browser_signals(4.1)
+	_expect(guest.sent.size() == 8, "an unanswered handshake stops after three timed replays")
+	guest.queue_free()
+
+
+func _deliver_recorded_signal(receiver: Node, request: Dictionary, from_peer: int) -> void:
+	receiver._apply_browser_signal({"from_peer": from_peer, "type": request.payload.type, "data": request.payload.data})

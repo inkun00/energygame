@@ -32,10 +32,12 @@ func _run() -> void:
 	lobby._character_buttons[5].pressed.emit()
 	await settle()
 	check(lobby.size == phone and lobby.char_option_button.selected == 5, "Hero selection returns to the full-height form and keeps the chosen character")
-	lobby._room_browser._loaded_once = true
+	OS.set_environment("ENERGYGAME_ROOM_DIRECTORY_URL", "")
+	ProjectSettings.set_setting("network/room_directory_url", "")
 	lobby._on_mode_selected(1)
 	await settle()
 	check(root.content_scale_size == Vector2i(1280, 720) and lobby._room_browser.visible, "Online rooms retain their full dialog canvas")
+	exercise_room_browser()
 	lobby._room_browser._close_browser()
 	await settle()
 	check(lobby.size == phone, "Closing online rooms restores the phone")
@@ -59,3 +61,55 @@ func _run() -> void:
 	await settle()
 	if failures.is_empty(): print("[PASS] Lobby portrait: full-height settings, modals return, hero story, landscape restoration")
 	quit(0 if failures.is_empty() else 1)
+
+func exercise_room_browser() -> void:
+	var browser = lobby._room_browser
+	var network = root.get_node("NetworkManager")
+	var joins: Array = []
+	var capture := func(code, password): joins.append([code, password])
+	browser.join_requested.disconnect(lobby._join_listed_room)
+	browser.join_requested.connect(capture)
+	for control in [browser._code, browser._join_code]:
+		check(browser.get_global_rect().encloses(control.get_global_rect()) and control.size.y >= 44, "Room code controls fit on the touch canvas")
+	browser._code.text = "12"
+	browser._join_code.pressed.emit()
+	check(not browser._password_dialog.visible and joins.is_empty(), "Incomplete codes do not request admission")
+	browser._code.text = "123456"
+	browser._code.text_submitted.emit(browser._code.text)
+	check(browser._password_dialog.visible, "Submitting a code opens the optional password dialog")
+	browser._join_password.text = "classroom"
+	browser._join_password.text_submitted.emit(browser._join_password.text)
+	check(joins == [["123456", "classroom"]], "Enter submits the password and code once")
+	var joining_status: String = browser._status.text
+	network.room_list_failed.emit("late list error")
+	check(browser._busy and browser._status.text == joining_status, "A room-list error cannot interrupt a pending join")
+	browser._join_code.pressed.emit()
+	check(joins.size() == 1, "A pending join cannot be submitted twice")
+	browser.show_error("wrong password")
+	network.room_list_received.emit([
+		{"code": "234567", "player_count": 1, "max_players": 4},
+		{"code": "345678", "player_count": 2, "max_players": 2},
+		{"code": "456789", "player_count": 0, "max_players": 4},
+		{"code": "567890", "player_count": 1, "max_players": 2, "password_required": true}
+	])
+	check(browser._status.text == "wrong password" and not browser._join_code.disabled, "A failed join keeps its error and permits a retry while the list updates")
+	check(browser._rows.get_child_count() == 3 and browser._rows.get_child(1).get_child(1).disabled, "Empty rooms disappear and full rooms cannot be joined")
+	browser._rows.get_child(2).get_child(1).pressed.emit()
+	check(browser._password_dialog.visible and browser._join_password.text.is_empty(), "Locked rooms prompt for a fresh password")
+	browser._join_password.text = "correct"
+	browser._password_dialog.get_ok_button().pressed.emit()
+	check(joins.back() == ["567890", "correct"], "The listed private room submits the correct code and password")
+	browser.show_error("connection failed")
+	browser._join_code.pressed.emit()
+	browser._password_dialog.get_ok_button().pressed.emit()
+	check(joins.back() == ["123456", ""], "A public room code accepts an empty password")
+	browser.show_error("connection failed")
+	browser._rows.get_child(0).get_child(1).pressed.emit()
+	check(joins.back() == ["234567", ""], "The public room button submits its own code without a password")
+	browser._close_browser()
+	browser.open_browser()
+	check(not browser._busy and browser._rows.get_child_count() == 0, "Reopening clears stale rooms and cancels any previous join")
+	browser.join_requested.disconnect(capture)
+	browser.join_requested.connect(lobby._join_listed_room)
+	browser.join_requested.emit("12", "")
+	check(browser._status.text.contains("숫자 6자리"), "A rejected code shows code-specific guidance")

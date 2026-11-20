@@ -626,8 +626,17 @@ func _create_configured_room(settings: Dictionary) -> void:
 func _join_listed_room(code: String, password: String) -> void:
 	ip_edit.text = code
 	var error := NetworkManager.join_room_by_code(code, _get_local_player_info(), password)
-	if error != OK:
-		_room_browser.show_error("방에 참가하지 못했습니다. 네트워크 상태를 확인하세요.")
+	match error:
+		OK:
+			return
+		ERR_INVALID_PARAMETER:
+			_room_browser.show_error("방장이 알려 준 숫자 6자리를 정확히 입력하세요.")
+		ERR_UNCONFIGURED:
+			_room_browser.show_error("이 버전에는 온라인 방 서버 주소가 설정되어 있지 않습니다.")
+		ERR_CANT_CONNECT:
+			_room_browser.show_error("방 서버에 참가 요청을 보내지 못했습니다. 잠시 뒤 다시 참가해 주세요.")
+		_:
+			_room_browser.show_error("이 기기에서 방 검색을 시작하지 못했습니다. 잠시 뒤 다시 참가해 주세요.")
 
 func _on_join_pressed() -> void:
 	_commit_line_edit_ime(ip_edit)
@@ -729,7 +738,6 @@ func _on_external_room_failed(message: String) -> void:
 	status_label.text = message
 	if not NetworkManager.is_online:
 		reset_network_controls(message)
-		_room_browser.open_browser()
 		_room_browser.show_error(message)
 		host_button.disabled = false
 		join_button.disabled = false
