@@ -15,12 +15,13 @@ test("only admitted WebRTC seats receive per-seat TURN credentials and retries r
   const env = { DB: new SqliteD1(), TURN_KEY_ID: "test-id", TURN_KEY_API_TOKEN: "provider-only" };
   const req = client(env);
   const tls = "turns:turn.cloudflare.com:443?transport=tcp";
+  const tlsPrimary = "turns:turn.cloudflare.com:5349?transport=tcp";
   const udp = "turn:turn.cloudflare.com:3478?transport=udp";
   const stun = "stun:stun.cloudflare.com:3478";
   const mint = t.mock.method(globalThis, "fetch", async () => {
     const name = crypto.randomUUID();
     return Response.json({ iceServers: [
-      { urls: stun }, { urls: [tls, udp, "turn:turn.cloudflare.com:53?transport=udp", "https://invalid.test"],
+      { urls: stun }, { urls: [tlsPrimary, udp, "turn:turn.cloudflare.com:53?transport=udp", "https://invalid.test"],
         username: name, credential: "temporary" }, { urls: tls }, { urls: [stun], internal: "provider-only" },
     ] }, { status: 201 });
   });
@@ -28,7 +29,8 @@ test("only admitted WebRTC seats receive per-seat TURN credentials and retries r
   assert.equal(created.status, 201);
   const room = await created.json();
   const relay = room.ice_servers.find(server => server.credential);
-  assert.deepEqual(relay.urls, [tls, udp]);
+  assert.deepEqual(relay.urls, [tlsPrimary, udp, tls]);
+  assert.ok(!Object.hasOwn(room, "relay_status"));
   assert.equal(relay.credential, "temporary");
   assert.ok(!JSON.stringify(room).includes(env.TURN_KEY_API_TOKEN));
   const [url, options] = mint.mock.calls[0].arguments;
@@ -37,15 +39,19 @@ test("only admitted WebRTC seats receive per-seat TURN credentials and retries r
   assert.equal(options.headers.Authorization, "Bearer " + env.TURN_KEY_API_TOKEN);
   assert.equal(JSON.parse(options.body).ttl, 7200);
   assert.ok(options.signal instanceof AbortSignal);
-  assert.equal(options.redirect, "error");
+  assert.equal(options.redirect, "manual");
 
   const join = (peer_token, password = "private") => req("/345678/join", "POST", { peer_token, password });
-  assert.equal((await join(guest, "wrong")).status, 403);
+  const denied = await join(guest, "wrong");
+  assert.equal(denied.status, 403);
+  assert.ok(!Object.hasOwn(await denied.json(), "relay_status"));
   assert.equal((await req("", "POST", { code: "345678", host_token: host })).status, 409);
   const list = await (await req("")).json();
   assert.ok(!JSON.stringify(list).includes("ice_servers"));
+  assert.ok(!JSON.stringify(list).includes("relay_status"));
   const signals = await (await req("/345678/signals?ack=0", "GET", undefined, host)).json();
   assert.ok(!Object.hasOwn(signals, "ice_servers"));
+  assert.ok(!Object.hasOwn(signals, "relay_status"));
   assert.equal(mint.mock.callCount(), 1);
 
   const admissions = await Promise.all([join(guest), join(guest)]);
@@ -71,20 +77,37 @@ test("absent, timed-out or unusable TURN provisioning leaves admission available
     () => { throw new DOMException("test timeout", "TimeoutError"); },
     () => new Response("provider error", { status: 503 }),
     () => Response.json({ iceServers: [{ urls: "turns:turn.cloudflare.com:443?transport=tcp" }] }),
+    () => { throw new TypeError("private-upstream-error-detail"); },
+    () => new Response("private-invalid-json"),
+    () => Response.redirect("https://example.invalid/never-follow", 302),
   ];
   const provider = t.mock.method(globalThis, "fetch", () => failureResponses.shift()());
   const create = code => req("", "POST", { code, host_token: host });
   const disabled = await create("345678");
   assert.equal(disabled.status, 201);
-  assert.ok(!Object.hasOwn(await disabled.json(), "ice_servers"));
+  const absent = await disabled.json();
+  assert.ok(!Object.hasOwn(absent, "ice_servers"));
+  assert.deepEqual(absent.relay_status, { stage: "bindings_absent", id32: false, token64: false });
   assert.equal(provider.mock.callCount(), 0);
   env.TURN_KEY_API_TOKEN = "provider-only";
-  for (const code of ["345679", "345680", "345681"]) {
+  for (const [code, expected] of [
+    ["345679", { stage: "upstream_timeout" }], ["345680", { stage: "upstream_http", code: 503 }],
+    ["345681", { stage: "upstream_shape" }], ["345682", { stage: "upstream_fetch", error_name: "TypeError" }],
+    ["345683", { stage: "upstream_shape" }], ["345684", { stage: "upstream_http", code: 302 }],
+  ]) {
     const response = await create(code);
     assert.equal(response.status, 201);
-    assert.ok(!Object.hasOwn(await response.json(), "ice_servers"));
+    const result = await response.json();
+    assert.ok(!Object.hasOwn(result, "ice_servers"));
+    assert.deepEqual(result.relay_status, { ...expected, id32: false, token64: false });
+    assert.ok(!JSON.stringify(result).includes("private-"));
   }
-  assert.equal(provider.mock.callCount(), 3);
+  assert.equal(provider.mock.callCount(), 6);
+  env.DB.db.exec("DROP TABLE webrtc_turn_grants");
+  const join = await req("/345678/join", "POST", { peer_token: guest });
+  assert.equal(join.status, 201);
+  assert.deepEqual((await join.json()).relay_status, { stage: "storage_claim", id32: false, token64: false });
+  assert.equal(provider.mock.callCount(), 6);
 });
 
 test("a lost poll is replayed until acknowledged while legacy peers consume their own inbox once", async () => {
