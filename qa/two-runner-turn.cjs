@@ -131,13 +131,18 @@ module.exports = async ({ github, context }) => {
     await page.evaluate(({ role, iceServers }) => {
       window.pc = new RTCPeerConnection({ iceTransportPolicy: "relay", iceServers });
       window.hasRelay = false; window.complete = false;
+      window.started = performance.now(); window.echoMs = null;
+      window.appBytes = { sent: 0, received: 0 };
+      const count = text => new TextEncoder().encode(text).length;
+      const send = text => { dc.send(text); window.appBytes.sent += count(text); };
       pc.onicecandidate = e => { if (e.candidate?.type === "relay") window.hasRelay = true; };
       window.dc = pc.createDataChannel("reliable", { negotiated: true, ordered: true, id: 1 });
-      dc.onopen = () => { if (role === "guest") dc.send("energygame-ping"); };
+      dc.onopen = () => { if (role === "guest") send("energygame-ping"); };
       dc.onmessage = e => {
-        if (role === "host" && e.data === "energygame-ping") dc.send("energygame-echo");
-        if (role === "guest" && e.data === "energygame-echo") { dc.send("complete"); window.complete = true; }
-        if (role === "host" && e.data === "complete") window.complete = true;
+        window.appBytes.received += count(e.data);
+        if (role === "host" && e.data === "energygame-ping") send("energygame-echo");
+        if (role === "guest" && e.data === "energygame-echo") { send("complete"); window.complete = true; window.echoMs = performance.now() - window.started; }
+        if (role === "host" && e.data === "complete") { window.complete = true; window.echoMs = performance.now() - window.started; }
       };
     }, { role, iceServers: await reserve() });
     if (role === "guest") { await sendDescription("offer"); await pollDescription("answer"); }
@@ -150,7 +155,7 @@ module.exports = async ({ github, context }) => {
         [...stats.values()].find(e => e.type === "candidate-pair" && e.nominated && e.state === "succeeded");
       if (!selected) return null;
       const local = stats.get(selected.localCandidateId), remote = stats.get(selected.remoteCandidateId);
-      return { local: local?.candidateType, remote: remote?.candidateType, relayProtocol: local?.relayProtocol || "unreported" };
+      return { local: local?.candidateType, remote: remote?.candidateType, relayProtocol: local?.relayProtocol || "unreported", appBytes: window.appBytes, echoMs: Math.round(window.echoMs) };
     });
     if (pair?.local !== "relay" || pair?.remote !== "relay") throw new Error("Data echo lacked a selected relay pair");
     console.log("TLS_443_BIDIRECTIONAL_ECHO_OK role=" + role + " selected=" + JSON.stringify(pair));
@@ -161,6 +166,6 @@ module.exports = async ({ github, context }) => {
   } finally {
     if (browser) await browser.close().catch(() => {});
     if (admittedGuest) await request("POST", "/" + code + "/leave", {}, true, [200, 401, 404]);
-    if (ownsRoom || possiblyOwnedRoom) await request("DELETE", "/" + code, undefined, true, ownsRoom ? [200] : [200, 401, 404]);
+    if (ownsRoom || possiblyOwnedRoom) { const removed = await request("DELETE", "/" + code, undefined, true, ownsRoom ? [200] : [200, 401, 404]); console.log("ROOM_CLEANUP_HTTP=" + removed.status); }
   }
 };
