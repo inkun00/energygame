@@ -3,6 +3,7 @@ import { admissionIceServers } from "./turn.js";
 
 const ROOM_TTL_SECONDS = 90;
 const WEBRTC_ROOM_TTL_SECONDS = 120;
+const WEBRTC_LEASE_REFRESH_SECONDS = 30;
 const WEBRTC_MAX_PLAYERS = 4;
 const WEBRTC_SIGNAL_TYPES = new Set(["offer", "answer", "candidate"]);
 const schemaReady = new WeakSet();
@@ -216,10 +217,14 @@ async function authorizeWebRtcPeer(request, env, code) {
   if (token.length < 32) return null;
   const now = Math.floor(Date.now() / 1000);
   const tokenHash = await sha256Hex(token);
-  const peer = await env.DB.prepare(
-    "SELECT peer_id FROM webrtc_peers WHERE code = ?1 AND token_hash = ?2 AND expires_at > ?3"
+  const peer = await env.DB.prepare(`
+    SELECT p.peer_id AS peerId, p.expires_at AS expiresAt,
+      CASE WHEN p.peer_id = 1 THEN (
+        SELECT r.expires_at FROM webrtc_rooms r WHERE r.code = p.code AND r.host_token_hash = p.token_hash
+      ) END AS roomExpiresAt
+    FROM webrtc_peers p WHERE p.code = ?1 AND p.token_hash = ?2 AND p.expires_at > ?3`
   ).bind(code, tokenHash, now).first();
-  return peer ? { peerId: Number(peer.peer_id), now, tokenHash } : null;
+  return peer ? { ...peer, now, tokenHash } : null;
 }
 
 async function createWebRtcRoom(request, env) {
@@ -367,6 +372,37 @@ async function postWebRtcSignal(request, env, code) {
   return json({ accepted: true }, 202);
 }
 
+async function refreshWebRtcLease(env, code, peer) {
+  const newExpiry = peer.now + WEBRTC_ROOM_TTL_SECONDS;
+  const renewThrough = newExpiry - WEBRTC_LEASE_REFRESH_SECONDS;
+  const peerDue = peer.expiresAt <= renewThrough;
+  const roomDue = peer.roomExpiresAt != null && peer.roomExpiresAt <= renewThrough;
+  if (!peerDue && !roomDue) return peer.expiresAt;
+
+  // Recheck the threshold in D1 so overlapping polls only pay for one renewal.
+  const updates = [];
+  if (peerDue) {
+    updates.push(env.DB.prepare(`
+      UPDATE webrtc_peers SET expires_at = ?1
+      WHERE code = ?2 AND peer_id = ?3 AND token_hash = ?4 AND expires_at <= ?5`
+    ).bind(newExpiry, code, peer.peerId, peer.tokenHash, renewThrough));
+  }
+  if (roomDue) {
+    updates.push(env.DB.prepare(`
+      UPDATE webrtc_rooms SET expires_at = ?1, updated_at = MAX(updated_at, ?2)
+      WHERE code = ?3 AND host_token_hash = ?4 AND expires_at <= ?5`
+    ).bind(newExpiry, peer.now, code, peer.tokenHash, renewThrough));
+  }
+  if (updates.length === 1) await updates[0].run();
+  else await env.DB.batch(updates);
+
+  // A concurrent poll or admission retry may have committed a different expiry.
+  const stored = await env.DB.prepare(
+    "SELECT expires_at FROM webrtc_peers WHERE code = ?1 AND peer_id = ?2 AND token_hash = ?3"
+  ).bind(code, peer.peerId, peer.tokenHash).first();
+  return stored?.expires_at ?? null;
+}
+
 async function pollWebRtcSignals(request, env, code) {
   if (!isValidRoomCode(code)) return json({ error: "방 코드 형식이 올바르지 않습니다." }, 400);
   const peer = await authorizeWebRtcPeer(request, env, code);
@@ -375,15 +411,8 @@ async function pollWebRtcSignals(request, env, code) {
   if (cursor !== null && (!/^(0|[1-9]\d*)$/.test(cursor) || !Number.isSafeInteger(Number(cursor)))) {
     return json({ error: "신호 수신 번호가 올바르지 않습니다." }, 400);
   }
-  const expiresAt = peer.now + WEBRTC_ROOM_TTL_SECONDS;
-  await env.DB.prepare(
-    "UPDATE webrtc_peers SET expires_at = MAX(expires_at, ?1) WHERE code = ?2 AND peer_id = ?3 AND token_hash = ?4"
-  ).bind(expiresAt, code, peer.peerId, peer.tokenHash).run();
-  if (peer.peerId === 1) {
-    await env.DB.prepare(
-      "UPDATE webrtc_rooms SET expires_at = MAX(expires_at, ?1), updated_at = MAX(updated_at, ?2) WHERE code = ?3 AND host_token_hash = ?4"
-    ).bind(expiresAt, peer.now, code, peer.tokenHash).run();
-  }
+  const expiresAt = await refreshWebRtcLease(env, code, peer);
+  if (expiresAt === null) return json({ error: "신호 수신 권한이 없거나 방이 만료되었습니다." }, 401);
 
   // A departed seat may already have a new owner when an earlier HTTP poll resumes.
   const recipient = `code = ?1 AND to_peer = ?2 AND EXISTS (

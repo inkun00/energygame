@@ -150,6 +150,78 @@ test("a full legacy ICE signaling inbox fits within the D1 query budget", async 
   assert.deepEqual(second.signals.map(signal => signal.id), [first.signals[63].id + 1]);
 });
 
+test("empty polls renew host and guest leases only every 30 seconds and return the stored expiry", async t => {
+  const start = 1_793_824_800;
+  let now = start;
+  t.mock.method(Date, "now", () => now * 1000);
+  const env = { DB: new SqliteD1() }, req = client(env);
+  const code = "345678";
+  assert.equal((await req("", "POST", { code, host_token: host })).status, 201);
+  assert.equal((await req("/345678/join", "POST", { peer_token: guest })).status, 201);
+  const poll = token => req("/345678/signals?ack=0", "GET", undefined, token);
+  const changes = () => env.DB.db.prepare("SELECT total_changes() AS n").get().n;
+  const roomExpiry = () => env.DB.db.prepare("SELECT expires_at FROM webrtc_rooms WHERE code = ?").get(code).expires_at;
+  const checkPoll = async (token, peerId, expectedExpiry, expectedChanges) => {
+    const before = changes();
+    const response = await poll(token);
+    assert.equal(response.status, 200);
+    assert.equal(changes() - before, expectedChanges);
+    const stored = env.DB.db.prepare("SELECT expires_at FROM webrtc_peers WHERE code = ? AND peer_id = ?").get(code, peerId);
+    assert.equal(stored.expires_at, expectedExpiry);
+    assert.deepEqual(await response.json(), { signals: [], expires_at: stored.expires_at });
+  };
+
+  for (const offset of [0, 1, 29]) {
+    now = start + offset;
+    await checkPoll(host, 1, start + 120, 0);
+    await checkPoll(guest, 2, start + 120, 0);
+  }
+  now = start + 30;
+  await checkPoll(guest, 2, start + 150, 1);
+  assert.equal(roomExpiry(), start + 120);
+  await checkPoll(host, 1, start + 150, 2);
+  assert.equal(roomExpiry(), start + 150);
+  now = start + 59;
+  await checkPoll(guest, 2, start + 150, 0);
+  await checkPoll(host, 1, start + 150, 0);
+
+  now = start + 149;
+  await checkPoll(host, 1, now + 120, 2);
+  now = start + 150;
+  const before = changes();
+  assert.equal((await poll(guest)).status, 401);
+  assert.equal(changes(), before);
+  const rejoined = await req("/345678/join", "POST", { peer_token: guest });
+  assert.equal(rejoined.status, 201);
+  assert.equal((await rejoined.json()).expires_at, now + 120);
+  await checkPoll(guest, 2, now + 120, 0);
+});
+
+test("a host poll renews only the due lease when the room and host expiries differ", async t => {
+  let now = 1_793_824_800;
+  t.mock.method(Date, "now", () => now * 1000);
+  const env = { DB: new SqliteD1() }, req = client(env);
+  const code = "345678";
+  await req("", "POST", { code, host_token: host });
+  const changes = () => env.DB.db.prepare("SELECT total_changes() AS n").get().n;
+  const checkHost = async (expectedSeat, expectedRoom) => {
+    const before = changes();
+    const response = await req("/345678/signals?ack=0", "GET", undefined, host);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).expires_at, expectedSeat);
+    assert.equal(changes() - before, 1);
+    assert.equal(env.DB.db.prepare("SELECT expires_at FROM webrtc_peers WHERE code = ? AND peer_id = 1").get(code).expires_at, expectedSeat);
+    assert.equal(env.DB.db.prepare("SELECT expires_at FROM webrtc_rooms WHERE code = ?").get(code).expires_at, expectedRoom);
+  };
+
+  // Earlier builds updated the two rows separately, so their leases can be out of sync.
+  env.DB.db.prepare("UPDATE webrtc_rooms SET expires_at = ? WHERE code = ?").run(now + 110, code);
+  now += 20;
+  await checkHost(now + 100, now + 120);
+  now += 10;
+  await checkHost(now + 120, now + 110);
+});
+
 test("a poll whose seat changed hands cannot acknowledge or see the replacement's inbox", async () => {
   const env = { DB: new SqliteD1() }, req = client(env);
   await req("", "POST", {code: "345678", host_token: host});
@@ -157,7 +229,7 @@ test("a poll whose seat changed hands cannot acknowledge or see the replacement'
   const prepare = env.DB.prepare.bind(env.DB);
   let changed = false;
   env.DB.prepare = sql => {
-    if (!changed && sql.startsWith("UPDATE webrtc_peers SET expires_at")) {
+    if (!changed && sql.startsWith("DELETE FROM webrtc_signals")) {
       changed = true;
       env.DB.db.exec(`UPDATE webrtc_peers SET token_hash = 'replacement' WHERE peer_id = 2;
         INSERT INTO webrtc_signals (code, from_peer, to_peer, signal_type, payload, created_at)
