@@ -98,7 +98,7 @@ func begin(game_board: Node) -> void:
 	if not board.hud.learning_village_ui.practice_adventure_requested.is_connected(_complete_trial_practice):
 		board.hud.learning_village_ui.practice_adventure_requested.connect(_complete_trial_practice)
 	show()
-	_set_stage("dice", "1 / 7  주사위와 이동", "주사위를 눌러 재료 칸으로 이동하세요.")
+	_set_stage("dice", "1 / 7  주사위와 이동", "전기가 부족한 마을을 구해요. 신재생에너지 발전소를 지을 부품이 필요해요. 주사위를 눌러 재료 칸으로 이동하세요.")
 	focused_control = board.hud.center_dice_button
 	board.hud.center_dice_button.grab_focus()
 

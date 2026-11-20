@@ -112,7 +112,7 @@ func _build_summary() -> void:
 	materials.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	materials.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_child(materials)
-	goal_materials = _label("모험에서 재료를 모아 종료 후 마을을 건설해요", 20)
+	goal_materials = _label("부품을 모아 신재생에너지 발전소를 지어요", 20)
 	goal_materials.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	goal_materials.custom_minimum_size.y = 50
 	materials.add_child(goal_materials)
@@ -400,7 +400,7 @@ func refresh(new_inventory: Dictionary) -> void:
 	summary_toggle.visible = not first_action and not portrait_board
 	catalog_open_button.visible = not first_action
 	if first_action:
-		goal_name.text = "밤에도 우리 학교 불을 켜요"
+		goal_name.text = "부품을 모아 신재생에너지 발전소를 짓고 마을을 구해요"
 		return
 	if selected_goal < 0:
 		var ready_count := 0
@@ -426,7 +426,7 @@ func refresh(new_inventory: Dictionary) -> void:
 		else:
 			goal_name.text = "보유 재료 총 %d개" % total_materials if total_materials > 0 else "재료를 모아보세요"
 			goal_name.add_theme_color_override("font_color", UI.TEXT)
-			goal_materials.text = "재료를 모아 모험 뒤에 함께 건설해요"
+			goal_materials.text = "부품을 모아 함께 신재생에너지 발전소를 지어요"
 			goal_materials.tooltip_text = ""
 			goal_materials.add_theme_color_override("font_color", UI.TEXT_MUTED)
 			goal_progress.max_value = 10
@@ -502,7 +502,7 @@ func _refresh_tutorial() -> void:
 		tutorial.position = (board_canvas - Vector2(600, 320)) * 0.5 if portrait_board else Vector2(340, 170)
 		tutorial.custom_minimum_size.x = 600
 		tutorial_body.custom_minimum_size = Vector2(568, 160)
-		tutorial_body.text = "밤에도 학교 불이 켜지도록 마을에 전기를 보내요.\n먼저 주사위를 굴려 건설에 쓸 부품을 모아요."
+		tutorial_body.text = "마을에 전기가 부족해요. 주사위를 굴려 부품을 모으고, 친구들과 신재생에너지 발전소를 지어요.\n낮에도 밤에도 전기를 보내 학교 불을 밝혀요."
 		var state := GameManager.get_adventure_preparation_state()
 		tutorial_title.text = "모험 시작 전  ·  준비 %d / %d명" % [state["ready_count"], state["player_count"]]
 		tutorial_button.disabled = GameManager.adventure_ready_players.has(local_index)

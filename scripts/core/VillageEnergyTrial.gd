@@ -10,6 +10,7 @@ const STORAGE_CAPACITY := 100.0
 const REQUIRED_COVERAGE := 0.95
 const REQUIRED_NIGHT_COVERAGE := 0.90
 const EPSILON := 0.000001
+const RENEWABLE_PROJECT_IDS: Array[int] = [0, 1, 4, 5, 6] # Solar, wind, small hydro, geothermal, tidal.
 const GENERATION := {
 	0: Vector2(8.0, 0.0), # Solar: sunlight is absent during this night.
 	1: Vector2(5.0, 2.0), # This forecast has weaker wind at night.
@@ -29,7 +30,7 @@ const FLOW_FIELDS := [
 	"delivered", "unserved", "battery", "capacity",
 ]
 
-static func create_state(built_ids: Array, player_count: int = 4) -> Dictionary:
+static func create_state(built_ids: Array, player_count: int = 4, donated_plant_ids: Array = []) -> Dictionary:
 	var ids: Array[int] = []
 	for id in built_ids:
 		if typeof(id) == TYPE_INT and id >= 0 and id <= 9 and not ids.has(id):
@@ -40,6 +41,7 @@ static func create_state(built_ids: Array, player_count: int = 4) -> Dictionary:
 	var state: Dictionary = {
 		"phase": "day", "elapsed": 0.0, "duration": DURATION,
 		"phase_remaining": DAY_DURATION, "built_ids": ids,
+		"donated_plant_ids": donated_plant_ids.duplicate(),
 		"player_count": count, "players": [], "profile": profile,
 		"coverage": 0.0, "daytime_coverage": 0.0, "night_coverage": 0.0,
 		"success": false, "required_coverage": REQUIRED_COVERAGE,
@@ -98,7 +100,8 @@ static func forecast(built_ids: Array) -> Dictionary:
 		"coverage": state["coverage"],
 		"daytime_coverage": state["daytime_coverage"],
 		"night_coverage": state["night_coverage"],
-		"success": state["success"], "can_cover": state["success"],
+		"success": state["success"], "can_cover": state["power_target_met"],
+		"renewable_plant_ids": state["renewable_plant_ids"], "power_target_met": state["power_target_met"],
 		"built_ids": state["built_ids"].duplicate(),
 		"remaining_battery": state["battery"],
 	})
@@ -106,6 +109,21 @@ static func forecast(built_ids: Array) -> Dictionary:
 
 static func is_complete(state: Dictionary) -> bool:
 	return state.get("phase", "") == "complete" or float(state.get("elapsed", 0.0)) >= DURATION
+
+static func renewable_plant_ids(built_ids: Array, donated_plant_ids: Array = []) -> Array[int]:
+	var plants: Array[int] = []
+	for id in RENEWABLE_PROJECT_IDS:
+		if id in built_ids and id not in donated_plant_ids:
+			plants.append(id)
+	return plants
+
+static func _power_target_met(coverage: float, night_coverage: float) -> bool:
+	return coverage + EPSILON >= REQUIRED_COVERAGE and night_coverage + EPSILON >= REQUIRED_NIGHT_COVERAGE
+
+static func update_rescue_goal(state: Dictionary) -> void:
+	state["renewable_plant_ids"] = renewable_plant_ids(state.get("built_ids", []), state.get("donated_plant_ids", []))
+	state["power_target_met"] = is_complete(state) and _power_target_met(float(state.get("coverage", 0.0)), float(state.get("night_coverage", 0.0)))
+	state["success"] = state["power_target_met"] and not state["renewable_plant_ids"].is_empty()
 
 static func summarize(state: Dictionary, projects: Array, district_index: int = -1) -> Dictionary:
 	var districts: Array = state.get("players", [])
@@ -121,7 +139,9 @@ static func summarize(state: Dictionary, projects: Array, district_index: int = 
 	var day := float(record.get("daytime_coverage", 0.0))
 	var night := float(record.get("night_coverage", 0.0))
 	var overall := float(record.get("coverage", 0.0))
-	var success := overall + EPSILON >= REQUIRED_COVERAGE and night + EPSILON >= REQUIRED_NIGHT_COVERAGE
+	var plants := renewable_plant_ids(ids, state.get("donated_plant_ids", []))
+	var power_target_met := is_complete(state) and _power_target_met(overall, night)
+	var success := power_target_met and not plants.is_empty()
 	var day_store := float(record.get("daytime_stored", record.get("total_stored", 0.0)))
 	var night_use := float(record.get("night_discharged", record.get("total_discharged", 0.0)))
 	var cause := ""
@@ -134,9 +154,14 @@ static func summarize(state: Dictionary, projects: Array, district_index: int = 
 			cause = "%s에서 만든 전기를 바로 보냈어요." % "·".join(generators)
 		if 2 in ids or 8 in ids: cause += " 절전 시설 덕분에 필요한 전기도 줄었어요."
 		advice = "시설을 하나 바꾸면 어느 시간의 공급이 달라질까요?"
-	elif generators.is_empty():
-		cause = "마을에서 전기를 만드는 시설이 없었어요."
-		advice = "강물이 있는 곳에 소수력 발전소를 놓고 낮과 밤을 비교해 봐요."
+	elif plants.is_empty():
+		if power_target_met:
+			cause = "낮과 밤에 필요한 전기는 충분히 보냈어요. 마을을 구하려면 우리 모둠이 신재생에너지 발전소도 한 곳 이상 지어야 해요."
+		elif generators.is_empty():
+			cause = "마을에 전기를 만드는 발전소가 없어서 전기를 보낼 수 없었어요."
+		else:
+			cause = "공급한 전기가 부족하고 우리 모둠이 지은 신재생에너지 발전소도 아직 없어요."
+		advice = "햇빛 초원에 태양광 발전소를 짓거나 강변에 소수력 발전소를 지어 보세요."
 	elif day + EPSILON < night:
 		period = "낮"
 		cause = "낮에 만든 전기가 마을에서 쓸 양보다 적었어요."
@@ -167,7 +192,8 @@ static func summarize(state: Dictionary, projects: Array, district_index: int = 
 		else:
 			cause = "저장한 전기를 꺼냈지만 밤에 필요한 양보다 적었어요."
 			advice = "밤에도 발전하는 시설을 더하거나 절전 시설로 수요를 줄여 봐요."
-	return {"success": success, "coverage": overall, "daytime_coverage": day, "night_coverage": night,
+	return {"success": success, "renewable_plant_ids": plants, "power_target_met": power_target_met,
+		"coverage": overall, "daytime_coverage": day, "night_coverage": night,
 		"built_ids": ids.duplicate(), "facilities": names, "period": period, "cause": cause, "advice": advice}
 
 static func comparison(before: Dictionary, after: Dictionary) -> String:
@@ -267,7 +293,7 @@ static func _refresh(state: Dictionary) -> void:
 			state[field] += float(player.get(field, 0.0))
 	_update_coverage(state)
 	state["light_ratio"] = _ratio(float(state["delivered"]), float(state["demand"]))
-	state["success"] = is_complete(state) and float(state["coverage"]) + EPSILON >= REQUIRED_COVERAGE and float(state["night_coverage"]) + EPSILON >= REQUIRED_NIGHT_COVERAGE
+	update_rescue_goal(state)
 
 static func _update_coverage(target: Dictionary) -> void:
 	target["coverage"] = _ratio(float(target["total_delivered"]), float(target["total_demand"]))

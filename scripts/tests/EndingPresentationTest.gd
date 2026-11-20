@@ -72,7 +72,7 @@ func _verify_presentation() -> bool:
 			var learning := card.find_child("LearningContribution", true, false) as Label
 			var construction := card.find_child("BuildingContribution", true, false) as Label
 			_check(portrait.texture.resource_path.ends_with(portraits[index] + ".webp"), "Each contribution is linked to that selected hero's existing portrait")
-			_check(learning.text == "퀴즈 %d · 재료 %d" % [index + 2, index + 5] and construction.text == "시설 %d곳 완공" % (index % 3), "Contribution labels use real quiz/material/build values, not fabricated hero roles")
+			_check(learning.text == "퀴즈 %d · 부품 %d" % [index + 2, index + 5] and construction.text == "시설 %d곳 완공" % (index % 3), "Contribution labels use real quiz, part and construction counts")
 			_check(card.get_global_rect().encloses(learning.get_global_rect()) and card.get_global_rect().encloses(construction.get_global_rect()), "Contribution numbers fit their own card")
 		_check(ending._energy_label.text.contains("100%") and ending._energy_label.text.contains("94%") and not ending._energy_label.text.contains("친환경 지수"), "Ending displays the measured day and night supply, rather than the old building-point target")
 		await _capture("recovery-after-team")
@@ -80,6 +80,9 @@ func _verify_presentation() -> bool:
 	ending.set_process(false)
 	ending._show_scene(2, true)
 	_check(not ending.is_success and ending._energy_label.text.contains("20%") and ending._recovery_label.text.contains("공급 부족"), "An undersupplied village shows the failed trial rather than a false recovery")
+	ending.setup(false, 70, 70, players, {"power_target_met": true, "renewable_plant_ids": [], "daytime_coverage": 1.0, "night_coverage": 1.0})
+	ending._show_scene(0, true)
+	_check(ending.title_text.contains("재생에너지 발전소") and not ending._recovery_label.text.contains("공급 부족"), "Full power without a team-built renewable plant identifies the missing plant")
 	var tidal_trial := {"success": false, "daytime_coverage": 1.0/3.0, "night_coverage": 1.0, "built_ids": [6], "facilities": ["조력 발전소"], "period": "낮", "cause": "낮에 발전량이 부족했어요.", "advice": "낮에 태양광을 더해 봐요.", "comparison": "낮 0% → 33%"}
 	ending.setup(false, 30, 70, players, tidal_trial)
 	ending._show_scene(0, true)

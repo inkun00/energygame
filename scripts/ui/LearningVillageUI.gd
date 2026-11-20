@@ -348,8 +348,8 @@ func _choose_component(item_id: String, token: int) -> void:
 	GameManager.choose_quiz_component(_local_index(), item_id, token)
 
 func _build_plan() -> void:
-	heading.text = "함께 지을 시설 고르기"
-	subheading.text = "각자 시설을 추천해요. 모은 재료는 함께 써요."
+	heading.text = "우리 마을의 발전소 계획"
+	subheading.text = "모둠 부품으로 재생에너지 발전소를 한 곳 이상 지어요. 전기를 저장하거나 아낄 시설도 추천해 보세요."
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 16)
 	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -483,6 +483,7 @@ func _build_trial() -> void:
 	support_option.item_selected.connect(func(_idx: int):
 		retire_option.disabled = support_option.selected == 0
 		_link_focus(_trial_result_actions()))
+	retire_option.item_selected.connect(func(_idx: int): _label_redesign_support())
 	redesign_row.hide()
 	mode_buttons["store"] = _button("1  내 구역에 전기 저장", _choose_mode.bind("store"))
 	mode_buttons["supply"] = _button("2  내 배터리 전기 사용", _choose_mode.bind("supply"))
@@ -525,6 +526,8 @@ func _update_trial() -> void:
 		var feedback := personal if practice and not personal.is_empty() else summary
 		var comparison := str(feedback.get("comparison", ""))
 		if not comparison.is_empty(): subheading.text = ("내 구역 · " if practice else "") + comparison
+		if not practice and summary.has("renewable_plant_ids"):
+			subheading.text = renewable_plant_status(summary["renewable_plant_ids"]) + "  ·  " + subheading.text
 		trial_message.text = str(feedback.get("cause", ""))
 		if not bool(feedback.get("success", false)):
 			trial_message.text += " " + str(feedback.get("advice", ""))
@@ -540,6 +543,8 @@ func _update_trial() -> void:
 	else:
 		heading.text = "우리 마을에 전기 보내기"
 		subheading.text = "이번 %s: %s" % ["낮" if phase == "day" else "밤", str(trial_state.get("condition_label", ""))]
+		if not practice and trial_state.has("renewable_plant_ids"):
+			subheading.text += "  ·  " + renewable_plant_status(trial_state["renewable_plant_ids"])
 		var electricity := "만든 전기 %.1f칸 / 필요한 전기 %.1f칸\n" % [float(trial_state.get("generation", 0.0)), float(trial_state.get("demand", 0.0))]
 		if float(own.get("capacity", 0.0)) <= 0.0:
 			trial_message.text = electricity + "저장소가 없어요. 발전소에서 만든 전기만 보낼 수 있어요."
@@ -579,13 +584,17 @@ func _fill_redesign_options() -> void:
 	support_option.add_item("지원 시설 없이 다시 설계")
 	support_option.set_item_metadata(0, -1)
 	var baseline := TrialRules.forecast(built)
-	var best := _supply_score(baseline)
+	var needs_plant: bool = trial_state.get("renewable_plant_ids", baseline.renewable_plant_ids).is_empty()
+	var best := -1.0 if needs_plant else _supply_score(baseline)
 	var recommendation := 0
 	for idx in range(GameManager.CONSTRUCTION_PROJECTS.size()):
 		var picker := retire_option if idx in built else support_option
-		picker.add_item(("%s 반납" if idx in built else "%s 무상 지원") % GameManager.CONSTRUCTION_PROJECTS[idx]["name"])
+		var project_name: String = GameManager.CONSTRUCTION_PROJECTS[idx]["name"]
+		picker.add_item(project_name + " 반납" if idx in built else project_name)
 		picker.set_item_metadata(picker.item_count - 1, idx)
-		if idx not in built and not bool(baseline.success):
+		if idx not in built and (needs_plant or not bool(baseline.success)):
+			if needs_plant and idx not in TrialRules.RENEWABLE_PROJECT_IDS:
+				continue
 			var candidate := built.duplicate()
 			candidate.append(idx)
 			var score := _supply_score(TrialRules.forecast(candidate))
@@ -595,6 +604,25 @@ func _fill_redesign_options() -> void:
 	support_option.select(recommendation)
 	retire_option.disabled = recommendation == 0
 	retire_option.visible = not built.is_empty()
+	_label_redesign_support()
+
+func _label_redesign_support() -> void:
+	var remaining_plants: Array = trial_state.get("renewable_plant_ids", TrialRules.renewable_plant_ids(trial_state.get("built_ids", []))).duplicate()
+	remaining_plants.erase(retire_option.get_selected_metadata())
+	for item in range(1, support_option.item_count):
+		var project_id := int(support_option.get_item_metadata(item))
+		var project_name: String = GameManager.CONSTRUCTION_PROJECTS[project_id]["name"]
+		var needs_parts := remaining_plants.is_empty() and project_id in TrialRules.RENEWABLE_PROJECT_IDS
+		support_option.set_item_text(item, project_name + (" 건설 부품 지원" if needs_parts else " 시설 지원"))
+		support_option.set_item_tooltip(item, "지원받은 부품으로 지도에 발전소를 직접 지어요." if needs_parts else "선택한 시설이 알맞은 자리에 배치돼요.")
+
+static func renewable_plant_status(plant_ids: Array) -> String:
+	if plant_ids.is_empty():
+		return "모둠이 지은 재생에너지 발전소 0곳"
+	var plant_name: String = GameManager.CONSTRUCTION_PROJECTS[plant_ids[0]]["name"]
+	if plant_ids.size() == 1:
+		return plant_name + " 완공"
+	return "%s 등 발전소 %d곳 완공" % [plant_name, plant_ids.size()]
 
 func _supply_score(forecast: Dictionary) -> float:
 	return minf(float(forecast.coverage) / TrialRules.REQUIRED_COVERAGE, 1.0) + minf(float(forecast.night_coverage) / TrialRules.REQUIRED_NIGHT_COVERAGE, 1.0)

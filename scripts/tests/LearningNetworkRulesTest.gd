@@ -185,6 +185,15 @@ func _test_phase_guards_and_retry() -> void:
 	TRIAL.advance(gm.energy_trial, 40.0)
 	_reject("trial_finish", payload, "a delayed action from the first attempt cannot confirm the second")
 	_check(gm.get_energy_trial_state().summary.comparison.contains("밤 0% → 100%"), "Second trial reports the verified supply improvement")
+	payload = _fixture("trial_finish")
+	gm.built_project_ids.clear()
+	gm._start_energy_trial()
+	TRIAL.advance(gm.energy_trial, 40.0)
+	payload.merge({"retry": true, "attempt": 0, "remove_project": -1, "support_project": 0}, true)
+	nm._handle_game_action(22, "trial_finish", payload)
+	update = nm._capture_game_state_patch("village_construction_started", [])
+	_check(update["built_project_ids"].is_empty() and update["team_parts"].get("solar_panel") == 2 and update["team_parts"].get("battery") == 2, "a reconnecting class receives the two recipes' missing materials, without a prebuilt first plant")
+	_check(update["team_plan"]["support_recipe_ids"] == [0, 3] and not update["previous_energy_trial"]["power_target_met"], "the shared redesign identifies exactly what classmates still need to build")
 
 func _on_learning_event(state: Dictionary, event_name: String) -> void:
 	event_counts[event_name] = int(event_counts.get(event_name, 0)) + 1

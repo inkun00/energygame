@@ -90,7 +90,7 @@ const OPENING_STORY := [
 	{"caption": "요정마을은 쓰지 않는 불과 기기를 켜 둔 채 전기를 낭비했어요."},
 	{"caption": "전기가 부족해지자 석탄과 석유를 더 많이 태웠어요."},
 	{"caption": "연료를 태울수록 공기가 오염되고, 지구를 덥게 하는 기체도 늘어났어요."},
-	{"caption": "%s의 약속\n“낮에 부품을 모으고 함께 시설을 짓자. 밤에도 학교 불을 켤 수 있을까?”"}
+	{"caption": "%s의 약속\n“부품을 모아 신재생에너지 발전소를 짓자! 밤에도 학교에 전기를 보내서 우리 마을을 구하자.”"}
 ]
 
 func _ready() -> void:
@@ -675,7 +675,7 @@ func _on_room_state_changed(players_data: Dictionary) -> void:
 		return
 	_show_room_popup(players_data)
 	if NetworkManager.is_host:
-		status_label.text = "탐험 %d분 뒤에는 함께 마을을 짓고 전기를 보내요." % (int(game_time_option_button.get_selected_metadata()) / 60)
+		status_label.text = "탐험 %d분 동안 부품을 모은 뒤 함께 신재생에너지 발전소를 지어요." % (int(game_time_option_button.get_selected_metadata()) / 60)
 		host_button.disabled = false
 	else:
 		status_label.text = "게임방에 참가했습니다. 방장이 모험을 시작할 때까지 기다려 주세요."

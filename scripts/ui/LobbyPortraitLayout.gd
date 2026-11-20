@@ -36,6 +36,13 @@ func setup(view: Control) -> void:
 	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	stack.add_theme_constant_override("separation", 18)
 	scroll.add_child(stack)
+	var mission := Label.new()
+	mission.text = lobby.logo_container.get_node("Eyebrow").text
+	mission.add_theme_font_size_override("font_size", 24)
+	mission.add_theme_color_override("font_color", UI.GOLD)
+	mission.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	mission.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stack.add_child(mission)
 	var hero := PanelContainer.new()
 	hero.add_theme_stylebox_override("panel", UI.padded_panel(UI.PANEL, UI.TEAL_DARK, 14))
 	stack.add_child(hero)

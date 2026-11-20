@@ -16,8 +16,8 @@ const SchoolWindow = preload("res://scripts/ui/SchoolWindow.gd")
 const SUCCESS_SCENES: Array[Dictionary] = [
 	{
 		"image": "res://assets/kingdom/kingdom_stage_0.webp",
-		"title": "함께 지은 마을",
-		"caption": "모은 부품으로 시설을 짓고, 마을에 전기를 보냈어요."
+		"title": "부품을 모아 발전소를 지었어요",
+		"caption": "탐험에서 모은 부품이 우리 마을의 재생에너지 발전소가 되었어요."
 	},
 	{
 		"image": "res://assets/kingdom/kingdom_stage_50.webp",
@@ -45,7 +45,7 @@ const FAILURE_SCENES: Array[Dictionary] = [
 	{
 		"image": "res://assets/story/ending/failure_03_new_plan.webp",
 		"title": "마을 계획을 돌아봐요",
-		"caption": "발전 시설과 배터리를 갖추고, 절전 시설로 필요한 전기를 줄일 수 있어요."
+		"caption": "전기를 만들 발전소, 남는 전기를 저장할 배터리, 전기를 아낄 시설 중 무엇이 더 필요할까요?"
 	}
 ]
 
@@ -96,21 +96,28 @@ func setup(success: bool, energy_value: int, target_value: int, players_snapshot
 			team_snapshot.append(player.duplicate(true))
 	team_snapshot.sort_custom(func(a: Dictionary, b: Dictionary): return int(a.get("index", 0)) < int(b.get("index", 0)))
 	scenes = (SUCCESS_SCENES if is_success else FAILURE_SCENES).duplicate(true)
+	var missing_plant: bool = trial_summary.has("renewable_plant_ids") and trial_summary["renewable_plant_ids"].is_empty()
+	if missing_plant:
+		scenes[0]["title"] = "재생에너지 발전소가 필요해요"
+		scenes[0]["caption"] = "모은 부품으로 마을의 첫 재생에너지 발전소를 지어 보세요."
+		if bool(trial_summary.get("power_target_met", false)):
+			scenes[1]["title"] = "전기는 충분히 보냈어요"
+			scenes[1]["caption"] = "낮과 밤에 필요한 전기를 마련했어요. 이제 모둠이 지은 재생에너지 발전소가 필요해요."
 	if trial_summary.has("cause"):
 		var names: Array = trial_summary.get("facilities", [])
 		if not names.is_empty():
 			var facilities := str(names[0])
 			if names.size() == 2: facilities += " · " + str(names[1])
 			elif names.size() > 2: facilities += " 등 %d곳" % names.size()
-			scenes[0]["caption"] = "우리 팀이 마련한 시설: %s." % facilities
+			scenes[0]["caption"] = "모둠이 마련한 시설 · %s" % facilities
 		else:
 			scenes[0]["caption"] = "이번에는 마을에 시설을 짓지 못했어요."
 		var period := str(trial_summary.get("period", "낮과 밤"))
-		scenes[1]["title"] = "어떻게 전기를 보냈을까요?" if is_success else "%s에 전기가 부족했어요" % period
+		scenes[1]["title"] = "어떻게 전기를 보냈을까요?" if is_success or bool(trial_summary.get("power_target_met", false)) else "%s에 전기가 부족했어요" % period
 		scenes[1]["caption"] = trial_summary["cause"]
 		if not is_success and period == "낮":
 			scenes[1]["image"] = "res://assets/kingdom/kingdom_stage_25.webp"
-		scenes[2]["caption"] = "우리 시설이 보낸 전기로 학교 창문이 밝아졌어요. 다음에는 무엇을 하나 바꿔 볼까요?" if is_success else trial_summary["advice"]
+		scenes[2]["caption"] = "모둠이 지은 발전소에서 보낸 전기로 학교 창문이 밝아졌어요. 마을을 에너지 위기에서 구했어요!" if is_success else trial_summary["advice"]
 		if not str(trial_summary.get("comparison", "")).is_empty():
 			scenes[2]["caption"] += "\n" + str(trial_summary["comparison"])
 	if is_node_ready():
@@ -287,7 +294,7 @@ func _rebuild_team_cards() -> void:
 		row.add_child(text)
 		var name_label := _team_text("HeroName", str(player.get("name", "탐험대원")), 18, UI.GOLD)
 		text.add_child(name_label)
-		text.add_child(_team_text("LearningContribution", "퀴즈 %d · 재료 %d" % [int(player.get("quiz_correct", 0)), int(player.get("construction_contribution", 0))], 17, UI.TEXT))
+		text.add_child(_team_text("LearningContribution", "퀴즈 %d · 부품 %d" % [int(player.get("quiz_correct", 0)), int(player.get("construction_contribution", 0))], 17, UI.TEXT))
 		text.add_child(_team_text("BuildingContribution", "시설 %d곳 완공" % int(player.get("project_completion_bonus", 0)), 17, UI.TEAL))
 
 func _team_text(node_name: String, message: String, font_size: int, color: Color) -> Label:
@@ -353,7 +360,8 @@ func _show_scene(next_index: int, immediate: bool = false) -> void:
 			_energy_label.text = "공급 · 낮 %d%% / 밤 %d%%" % [roundi(float(trial_summary.get("daytime_coverage", 0.0)) * 100.0), roundi(float(trial_summary.get("night_coverage", 0.0)) * 100.0)]
 		_energy_label.add_theme_color_override("font_color", UI.TEAL if is_success else Color("d4e8ef"))
 	if _recovery_label:
-		var stages := ["함께 건설", "낮과 밤", "마을 회복"] if is_success else ["공급 부족", str(trial_summary.get("period", "낮과 밤")) + "의 전기", "마을 계획"]
+		var missing_plant: bool = trial_summary.has("renewable_plant_ids") and trial_summary["renewable_plant_ids"].is_empty()
+		var stages := ["발전소 건설", "전기 공급", "마을 구출"] if is_success else ["발전소 확인" if missing_plant else "공급 부족", "낮과 밤", "다음 계획"]
 		var stage_text := ""
 		for index in range(stages.size()):
 			stage_text += ("▶ " if index == scene_index else "") + str(stages[index])

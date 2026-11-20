@@ -40,6 +40,36 @@ func _finish_trial() -> void:
 	for idx in range(4):
 		gm.finish_energy_trial(idx)
 
+func _test_first_plant_support() -> void:
+	_fresh()
+	gm.team_parts = {"solar_panel": 2, "battery": 2, "smart_grid": 1}
+	gm.select_team_project(1, 3)
+	gm._start_village_construction_phase()
+	_check(gm._choose_ai_village_project(1) == 0, "AI reserves the common grid part for the team's first renewable plant")
+	for plant in gm.EnergyTrial.RENEWABLE_PROJECT_IDS:
+		_fresh()
+		gm.players[0]["inventory"]["smart_grid"] = 1
+		gm._start_village_construction_phase()
+		gm.evaluate_village()
+		gm._process(40.0)
+		gm.finish_energy_trial(0, true, -1, plant)
+		var recipes: Array = gm.team_plan["support_recipe_ids"]
+		_check(gm.village_construction_active and gm.built_project_ids.is_empty() and recipes[0] == plant, "first-plant support cannot count as a completed building")
+		_check(gm._choose_ai_village_project(1) == plant, "AI teammates can complete the team's requested redesign first")
+		var parts: Dictionary = gm.team_parts.duplicate()
+		gm.finish_energy_trial(0, true, -1, plant)
+		_check(gm.team_parts == parts, "repeated requests cannot grant more parts")
+		for id in recipes:
+			_check(gm.build_village_project(id, 0), "the team can pay for and place the supported design")
+		_check(gm.get_renewable_plant_ids().has(plant) and gm.built_project_owners[plant] == 0, "the placed renewable plant belongs to its builder")
+		gm.evaluate_village()
+		for idx in range(4): gm.set_energy_trial_mode(idx, "store")
+		gm._process(20.0)
+		for idx in range(4): gm.set_energy_trial_mode(idx, "supply")
+		gm._process(20.0)
+		_finish_trial()
+		_check(gm.kingdom_recovered, "the supported design can actually rescue the village after a resource-poor first attempt")
+
 func _test_tutorial_explanation_wait() -> void:
 	_fresh()
 	var main: Node = load("res://scenes/Main.tscn").instantiate()
@@ -215,6 +245,7 @@ func _run() -> void:
 	_fresh()
 	_check(gm.energy_trial.is_empty() and gm.component_choices.is_empty() and not gm.team_plan["active"] and not gm._village_result_finalized, "a new session cannot inherit previous results")
 	gm.stop_game()
+	_test_first_plant_support()
 	await _test_tutorial_explanation_wait()
 	# Let session-guarded quiz explanation callbacks retire before shutdown.
 	Engine.time_scale = 100.0

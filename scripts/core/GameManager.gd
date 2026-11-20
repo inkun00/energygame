@@ -687,6 +687,9 @@ func _apply_network_values(values: Dictionary) -> void:
 		built_project_placements = (values["built_project_placements"] as Dictionary).duplicate(true)
 	if values.has("built_project_owners"):
 		built_project_owners = (values["built_project_owners"] as Dictionary).duplicate(true)
+	if values.has("energy_trial") and not energy_trial.is_empty() and not energy_trial.has("renewable_plant_ids"):
+		energy_trial["donated_plant_ids"] = _donated_plant_ids()
+		EnergyTrial.update_rescue_goal(energy_trial)
 	if values.has("collected_item_tiles"):
 		collected_item_tiles = (values["collected_item_tiles"] as Dictionary).duplicate(true)
 	if values.has("collected_item_update"):
@@ -1881,11 +1884,23 @@ func get_component_choice_state() -> Dictionary:
 func get_team_plan_state() -> Dictionary:
 	return team_plan.duplicate(true)
 
+func _donated_plant_ids() -> Array[int]:
+	var ids: Array[int] = []
+	for id in EnergyTrial.RENEWABLE_PROJECT_IDS:
+		if built_project_owners.get(id, 0) == -1:
+			ids.append(id)
+	return ids
+
+func get_renewable_plant_ids() -> Array[int]:
+	return EnergyTrial.renewable_plant_ids(built_project_ids, _donated_plant_ids())
+
 func get_energy_trial_state() -> Dictionary:
 	var state := energy_trial.duplicate(true)
 	if not state.is_empty():
 		state["can_retry"] = energy_trial_retries < 1 and not bool(state.get("success", false))
-		state["summary"] = {"success": bool(state.get("success", false)), "coverage": float(state.get("coverage", 0.0)), "daytime_coverage": float(state.get("daytime_coverage", 0.0)), "night_coverage": float(state.get("night_coverage", 0.0))}
+		state["summary"] = {"success": state["success"], "renewable_plant_ids": state["renewable_plant_ids"],
+			"power_target_met": state["power_target_met"], "coverage": state["coverage"],
+			"daytime_coverage": state["daytime_coverage"], "night_coverage": state["night_coverage"]}
 		if EnergyTrial.is_complete(state):
 			var summary := EnergyTrial.summarize(state, CONSTRUCTION_PROJECTS)
 			summary["comparison"] = EnergyTrial.comparison(previous_energy_trial, summary)
@@ -2033,7 +2048,7 @@ func _finish_team_planning() -> void:
 func _start_energy_trial() -> void:
 	village_construction_active = false
 	village_ai_construction_running = false
-	energy_trial = EnergyTrial.create_state(built_project_ids, players.size())
+	energy_trial = EnergyTrial.create_state(built_project_ids, players.size(), _donated_plant_ids())
 	energy_trial["ready"] = {}
 	energy_trial["retry_available"] = energy_trial_retries < 1
 	energy_trial["retry_count"] = energy_trial_retries
@@ -2093,6 +2108,12 @@ func finish_energy_trial(player_idx: int, retry: bool = false, remove_project: i
 		energy_trial.clear()
 		energy_trial_changed.emit(get_energy_trial_state())
 		_start_village_construction_phase()
+		var assisted: Array = team_plan.get("support_recipe_ids", [])
+		if not assisted.is_empty():
+			var facility_names := PackedStringArray()
+			for id in assisted:
+				facility_names.append(CONSTRUCTION_PROJECTS[id]["name"])
+			status_message_posted.emit("모둠 창고에 부족한 건설 부품을 보충했어요. 지도에 %s 시설을 지어 보세요." % ", ".join(facility_names))
 		if support_project != -1:
 			kingdom_progress_changed.emit(projects_built, CONSTRUCTION_PROJECTS.size(), kingdom_health)
 		return
@@ -2112,20 +2133,46 @@ func _apply_trial_redesign(remove_project: int, support_project: int) -> bool:
 	var placement := VILLAGE_PLACEMENT_RULES.resolve_placement(project, VILLAGE_PLACEMENT_RULES.INVALID_POSITION, placements)
 	if placement == VILLAGE_PLACEMENT_RULES.INVALID_POSITION:
 		return false
-	# A single team redesign uses donated equipment. It gives no new player score or parts.
 	if remove_project != -1:
 		built_project_ids.erase(remove_project)
 		built_project_owners.erase(remove_project)
-	placements[support_project] = placement
+	if support_project in EnergyTrial.RENEWABLE_PROJECT_IDS and get_renewable_plant_ids().is_empty():
+		_grant_first_plant_parts(support_project)
+	else:
+		# The team may supplement its design with one donated facility, without a builder reward.
+		placements[support_project] = placement
+		built_project_ids.append(support_project)
+		built_project_owners[support_project] = -1
 	built_project_placements = placements
-	built_project_ids.append(support_project)
-	built_project_owners[support_project] = -1
 	projects_built = built_project_ids.size()
 	kingdom_health = 0
 	for id in built_project_ids:
 		kingdom_health += int(CONSTRUCTION_PROJECTS[id]["health"])
 	kingdom_health = mini(100, kingdom_health)
 	return true
+
+func _grant_first_plant_parts(project_id: int) -> void:
+	# The rescue goal requires construction, even when the class needs help getting started.
+	var recipes: Array[int] = [project_id]
+	var proposed := built_project_ids.duplicate()
+	proposed.append(project_id)
+	if not EnergyTrial.forecast(proposed)["can_cover"]:
+		# Allow an empty-handed team to design a viable grid on its one retry.
+		for companion in [3, 2, 0, 1, 4, 5, 6]:
+			if companion not in proposed and EnergyTrial.forecast(proposed + [companion])["can_cover"]:
+				recipes.append(companion)
+				break
+	var needed := {}
+	for id in recipes:
+		var requirements: Dictionary = CONSTRUCTION_PROJECTS[id]["requirements"]
+		for part in requirements:
+			needed[part] = int(needed.get(part, 0)) + int(requirements[part])
+	var inventory := get_team_inventory()
+	for part in needed:
+		var missing := int(needed[part]) - int(inventory.get(part, 0))
+		if missing > 0:
+			team_parts[part] = int(team_parts.get(part, 0)) + missing
+	team_plan["support_recipe_ids"] = recipes
 
 static func quiz_result_reading_seconds(quiz: Dictionary, grade: int = 5) -> float:
 	var reading_characters := str(quiz.get("explanation", "")).length() + str(quiz.get("answer", "")).length()
@@ -2950,6 +2997,14 @@ func _choose_ai_village_project(player_idx: int) -> int:
 			candidates.append(project_index)
 	if candidates.is_empty():
 		return -1
+	# Finish the team's chosen redesign before spending its shared materials elsewhere.
+	for project_id in team_plan.get("support_recipe_ids", []):
+		if project_id in candidates:
+			return project_id
+	if get_renewable_plant_ids().is_empty():
+		var plants := EnergyTrial.renewable_plant_ids(candidates)
+		if not plants.is_empty():
+			candidates = plants
 	var recommended := int((team_plan.get("choices", {}) as Dictionary).get(player_idx, -1))
 	if recommended in candidates:
 		return recommended

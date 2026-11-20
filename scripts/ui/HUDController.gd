@@ -1691,7 +1691,7 @@ func _on_game_over(rankings: Array) -> void:
 	if victory_dimmer:
 		victory_dimmer.visible = false
 	if victory_title:
-		victory_title.text = "이번 모험 · 마을 복원 성공!" if GameManager.kingdom_recovered else "이번 모험 · 마을 복원 결과"
+		victory_title.text = "성공! 에너지 위기에서 마을을 구했어요" if GameManager.kingdom_recovered else "마을을 구하기 위한 다음 계획"
 	if rescue_story_label:
 		rescue_story_label.visible = false
 	if victory_rankings_label:
@@ -1741,7 +1741,7 @@ func _on_village_construction_started(_inventories: Array) -> void:
 	victory_modal.modulate = Color.WHITE
 	victory_modal.scale = Vector2.ONE
 	if victory_title:
-		victory_title.text = "친환경 마을 건설"
+		victory_title.text = "모은 부품으로 마을 발전소 짓기"
 	if rescue_story_label:
 		rescue_story_label.visible = false
 	if save_status_label:
@@ -1789,7 +1789,9 @@ func _refresh_construction_choices() -> void:
 		construction_list.remove_child(child)
 		child.queue_free()
 	construction_list.add_theme_constant_override("separation", 10)
-	var recommendations: Dictionary = GameManager.get_team_plan_state().get("choices", {})
+	var team_plan := GameManager.get_team_plan_state()
+	var recommendations: Dictionary = team_plan.get("choices", {})
+	var supported_recipes: Array = team_plan.get("support_recipe_ids", [])
 	var own_recommendation := int(recommendations.get(_local_player_index(), -1))
 	var project_order: Array[int] = []
 	for idx in range(GameManager.CONSTRUCTION_PROJECTS.size()): project_order.append(idx)
@@ -1797,6 +1799,7 @@ func _refresh_construction_choices() -> void:
 		var a_built := a in GameManager.built_project_ids
 		var b_built := b in GameManager.built_project_ids
 		if a_built != b_built: return not a_built
+		if (a in supported_recipes) != (b in supported_recipes): return a in supported_recipes
 		if a == own_recommendation or b == own_recommendation: return a == own_recommendation
 		var a_recommended := a in recommendations.values()
 		var b_recommended := b in recommendations.values()
@@ -1903,7 +1906,7 @@ func _refresh_construction_choices() -> void:
 				if int(recommendations[idx]) == project_index:
 					recommendation_names.append(str(GameManager.players[int(idx)].get("name", "친구")))
 			var recommendation_text := "내 추천 · " if project_index == own_recommendation else ("%d명 추천 · " % recommendation_names.size() if not recommendation_names.is_empty() else "")
-			owner_label.text = recommendation_text + ("배치 가능" if builder_idx >= 0 else ("완공" if already_built else "재료 부족"))
+			owner_label.text = recommendation_text + ("배치 가능" if builder_idx >= 0 else ("완공" if already_built else "부품 부족"))
 			if not recommendation_names.is_empty():
 				build_button.tooltip_text += "\n추천: " + ", ".join(recommendation_names)
 		owner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1913,7 +1916,11 @@ func _refresh_construction_choices() -> void:
 		_set_descendant_mouse_filter_ignore(margin)
 		construction_list.add_child(build_button)
 	if build_instruction_label:
-		build_instruction_label.text = "시설 선택 → 빛나는 칸 클릭 · 재료: 팀 보유 / 필요"
+		build_instruction_label.text = "시설 선택 → 빛나는 칸 클릭 · 모은 부품 / 필요한 부품"
+		for project_id in supported_recipes:
+			if project_id not in GameManager.built_project_ids:
+				build_instruction_label.text = "지원 부품 도착 · %s 선택 → 빛나는 칸 클릭" % GameManager.CONSTRUCTION_PROJECTS[project_id]["name"]
+				break
 		if not GameManager.village_finished_players.is_empty():
 			var pending_names: PackedStringArray = []
 			for idx in range(GameManager.players.size()):
@@ -1924,7 +1931,7 @@ func _refresh_construction_choices() -> void:
 		build_instruction_label.add_theme_font_size_override("font_size", 19)
 		build_instruction_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		build_instruction_label.offset_bottom = 626
-		build_instruction_label.tooltip_text = "팀 재료로 함께 건설해요. 모두 마치면 낮과 밤에 전기를 보내요."
+		build_instruction_label.tooltip_text = "모은 부품으로 재생에너지 발전소를 한 곳 이상 지어요. 모두 건설을 마치면 낮과 밤에 전기를 보내요."
 	if evaluate_button:
 		evaluate_button.disabled = GameManager.village_finished_players.has(_local_player_index())
 		evaluate_button.text = "친구 건설 기다리는 중" if evaluate_button.disabled else "내 건설 마침 · 전기 보내기"
@@ -1953,9 +1960,14 @@ func _update_kingdom_visual(health: int) -> void:
 	if energy_resolution_label:
 		var trial: Dictionary = GameManager.get_energy_trial_state()
 		var summary: Dictionary = trial.get("summary", trial)
-		energy_resolution_label.text = "낮과 밤에 필요한 전기를 보내 보세요."
-		if not summary.is_empty():
-			energy_resolution_label.text = "필요한 전기 공급 · 낮 %d%% / 밤 %d%%" % [roundi(float(summary.get("daytime_coverage", 0.0)) * 100), roundi(float(summary.get("night_coverage", 0.0)) * 100)]
+		var plant_ids := GameManager.get_renewable_plant_ids()
+		var plant_status := LEARNING_VILLAGE_UI.renewable_plant_status(plant_ids)
+		if GameManager.village_construction_active:
+			energy_resolution_label.text = "목표 · 재생에너지 발전소 한 곳 이상 짓기" if plant_ids.is_empty() else plant_status + " · 낮과 밤에 전기를 보내요."
+		elif not summary.is_empty():
+			energy_resolution_label.text = "%s · 낮 %d%% / 밤 %d%% 공급" % [plant_status, roundi(float(summary.get("daytime_coverage", 0.0)) * 100), roundi(float(summary.get("night_coverage", 0.0)) * 100)]
+		else:
+			energy_resolution_label.text = plant_status
 		energy_resolution_label.add_theme_color_override("font_color", UI.GOLD)
 	if village_map:
 		village_map.set_environment_health(health)
@@ -2026,7 +2038,7 @@ func _refresh_ranking_cards(rankings: Array) -> void:
 		score_row.add_child(movement_label)
 		var contribution_label := Label.new()
 		contribution_label.name = "SessionContribution"
-		contribution_label.text = "이번 판: 퀴즈 %d · 재료 %d · 완공 %d" % [int(player.get("quiz_correct", 0)), int(player.get("construction_contribution", 0)), int(player.get("project_completion_bonus", 0))]
+		contribution_label.text = "이번 모험 · 퀴즈 %d · 부품 %d · 완공 %d" % [int(player.get("quiz_correct", 0)), int(player.get("construction_contribution", 0)), int(player.get("project_completion_bonus", 0))]
 		contribution_label.tooltip_text = "맞힌 퀴즈 · 모은 재료 · 완공한 시설. 건설자 +5, 부품 제공자 1개당 +2. 에너지 동점이면 이동·퀴즈·재료 공헌 점수로 비교해요."
 		contribution_label.add_theme_font_size_override("font_size", 18)
 		contribution_label.add_theme_color_override("font_color", UI.TEXT)
