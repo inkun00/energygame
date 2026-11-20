@@ -13,6 +13,7 @@ func _ready() -> void:
 	role = str(JavaScriptBridge.eval("new URLSearchParams(location.search).get('role') || 'host'", true))
 	code = str(JavaScriptBridge.eval("new URLSearchParams(location.search).get('code') || ''", true))
 	ProjectSettings.set_setting("network/room_directory_url", "http://127.0.0.1:19090")
+	ProjectSettings.set_setting("network/web_room_directory_url", "http://127.0.0.1:19090")
 	modal = load("res://scenes/MiniGameModal.tscn").instantiate()
 	add_child(modal)
 	overlay = load("res://scripts/ui/NetworkRecoveryOverlay.gd").new()

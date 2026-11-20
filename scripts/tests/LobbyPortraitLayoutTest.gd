@@ -34,6 +34,7 @@ func _run() -> void:
 	check(lobby.size == phone and lobby.char_option_button.selected == 5, "Hero selection returns to the full-height form and keeps the chosen character")
 	OS.set_environment("ENERGYGAME_ROOM_DIRECTORY_URL", "")
 	ProjectSettings.set_setting("network/room_directory_url", "")
+	ProjectSettings.set_setting("network/web_room_directory_url", "")
 	lobby._on_mode_selected(1)
 	await settle()
 	check(root.content_scale_size == Vector2i(1280, 720) and lobby._room_browser.visible, "Online rooms retain their full dialog canvas")
@@ -69,6 +70,7 @@ func exercise_room_browser() -> void:
 	var capture := func(code, password): joins.append([code, password])
 	browser.join_requested.disconnect(lobby._join_listed_room)
 	browser.join_requested.connect(capture)
+	check(not browser._listing and not browser._room_scroll.visible and browser._code.has_focus(), "Opening online play focuses the code and leaves the list closed")
 	for control in [browser._code, browser._join_code]:
 		check(browser.get_global_rect().encloses(control.get_global_rect()) and control.size.y >= 44, "Room code controls fit on the touch canvas")
 	browser._code.text = "12"
@@ -76,15 +78,20 @@ func exercise_room_browser() -> void:
 	check(not browser._password_dialog.visible and joins.is_empty(), "Incomplete codes do not request admission")
 	browser._code.text = "123456"
 	browser._code.text_submitted.emit(browser._code.text)
-	check(browser._password_dialog.visible, "Submitting a code opens the optional password dialog")
+	check(not browser._password_dialog.visible and joins == [["123456", ""]], "A room code requests admission immediately")
+	network.room_password_required.emit("123456")
+	check(browser._password_dialog.visible, "A private code prompts only when the room requests a password")
 	browser._join_password.text = "classroom"
 	browser._join_password.text_submitted.emit(browser._join_password.text)
-	check(joins == [["123456", "classroom"]], "Enter submits the password and code once")
+	check(joins == [["123456", ""], ["123456", "classroom"]], "Enter retries admission with the original code and password")
 	var joining_status: String = browser._status.text
 	network.room_list_failed.emit("late list error")
 	check(browser._busy and browser._status.text == joining_status, "A room-list error cannot interrupt a pending join")
 	browser._join_code.pressed.emit()
-	check(joins.size() == 1, "A pending join cannot be submitted twice")
+	check(joins.size() == 2, "A pending join cannot be submitted twice")
+	browser.show_error("wrong password")
+	browser._refresh.pressed.emit()
+	check(browser._room_scroll.visible, "The list opens only after an explicit request")
 	browser.show_error("wrong password")
 	network.room_list_received.emit([
 		{"code": "234567", "player_count": 1, "max_players": 4},
@@ -101,7 +108,6 @@ func exercise_room_browser() -> void:
 	check(joins.back() == ["567890", "correct"], "The listed private room submits the correct code and password")
 	browser.show_error("connection failed")
 	browser._join_code.pressed.emit()
-	browser._password_dialog.get_ok_button().pressed.emit()
 	check(joins.back() == ["123456", ""], "A public room code accepts an empty password")
 	browser.show_error("connection failed")
 	browser._rows.get_child(0).get_child(1).pressed.emit()

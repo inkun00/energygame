@@ -1,5 +1,8 @@
 import { scoresRoute } from "./scores.js";
 import { admissionIceServers } from "./turn.js";
+import { isValidRoomCode, passwordHash, sha256Hex } from "./room-credentials.js";
+
+export { isValidRoomCode, passwordHash, sha256Hex };
 
 const ROOM_TTL_SECONDS = 90;
 const WEBRTC_ROOM_TTL_SECONDS = 120;
@@ -15,10 +18,6 @@ const JSON_HEADERS = {
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
 };
 
-export function isValidRoomCode(value) {
-  return typeof value === "string" && /^[1-9][0-9]{5}$/.test(value);
-}
-
 export function isValidPort(value) {
   return Number.isInteger(value) && value >= 1024 && value <= 65535;
 }
@@ -27,12 +26,6 @@ export function isValidIpv4(value) {
   if (typeof value !== "string" || !/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return false;
   const parts = value.split(".").map(Number);
   return parts.every((part) => part >= 0 && part <= 255) && value !== "0.0.0.0";
-}
-
-export async function sha256Hex(value) {
-  const bytes = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function json(data, status = 200) {
@@ -92,12 +85,6 @@ async function ensureWebRtcSchema(env) {
     FOREIGN KEY (code, peer_id) REFERENCES webrtc_peers(code, peer_id) ON DELETE CASCADE
   )`).run();
   schemaReady.add(env.DB);
-}
-
-export async function passwordHash(password, salt) {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations: 100000, hash: "SHA-256"}, key, 256);
-  return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 async function listWebRtcRooms(env) {

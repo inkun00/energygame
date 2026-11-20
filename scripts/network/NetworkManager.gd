@@ -11,6 +11,7 @@ signal room_state_changed(players)
 signal game_started_signal(player_configs, duration_seconds)
 signal room_code_created(code)
 signal room_code_lookup_failed(message)
+signal room_password_required(code)
 signal external_room_ready(code)
 signal external_room_failed(message)
 signal room_list_received(rooms)
@@ -28,8 +29,11 @@ const DISCOVERY_BROADCAST_INTERVAL := 0.65
 const DISCOVERY_TIMEOUT_SECONDS := 12.0
 const DIRECTORY_HEARTBEAT_SECONDS := 20.0
 const WEB_SIGNAL_POLL_INTERVAL := 0.35
+const WEB_HOST_LOBBY_POLL_INTERVAL := 2.0
+const WEB_CONNECTED_POLL_INTERVAL := 15.0
 const WEB_SIGNAL_REPLAY_INTERVAL := 4.0
 const WEB_SIGNAL_REPLAY_LIMIT := 3
+const WEB_MAX_SIGNAL_POSTS := 2
 const WEB_HOST_ANSWER_TIMEOUT_SECONDS := 30.0
 const WEB_CHANNEL_OPEN_GRACE_SECONDS := 15.0
 const WEB_DIRECT_CHANNEL_GRACE_SECONDS := 8.0
@@ -76,6 +80,7 @@ var _upnp_gateway: UPNP
 var _external_host_ip := ""
 var _directory_registration_attempts := 0
 var _web_transport := false
+var _active_web_directory := ""
 var _web_ice_servers: Array = WEB_ICE_SERVERS
 var _web_direct_ice_servers: Array = WEB_ICE_SERVERS
 var _web_relay_peers: Dictionary = {}
@@ -121,6 +126,8 @@ var _web_peer_generations: Dictionary = {}
 var _web_early_candidates: Dictionary = {}
 var _web_received_deliveries: Dictionary = {}
 var _web_signal_replays: Dictionary = {}
+var _web_post_queue: Array[Dictionary] = []
+var _web_posts_in_flight: Dictionary = {}
 var _web_retired_attempts: Dictionary = {}
 var _web_offer_generation := 0
 var _browser_room_locked := false
@@ -163,9 +170,10 @@ func _process(delta: float) -> void:
 			_try_browser_relay()
 	if _web_transport and _web_signaling_active:
 		_replay_pending_browser_signals(delta)
-		_web_signal_poll_remaining -= delta
+		var interval := _browser_signal_interval()
+		_web_signal_poll_remaining = minf(_web_signal_poll_remaining, interval) - delta
 		if _web_signal_poll_remaining <= 0.0 and not _web_signal_poll_pending:
-			_web_signal_poll_remaining = WEB_SIGNAL_POLL_INTERVAL
+			_web_signal_poll_remaining = interval
 			_poll_browser_signals()
 	if is_online and is_host and not game_has_started and _discovery_broadcaster:
 		_discovery_broadcast_elapsed -= delta
@@ -274,7 +282,12 @@ func join_room_by_code(code: String, player_info: Dictionary = {}, password: Str
 	_room_lookup_active = true
 	_discovery_lookup_remaining = DISCOVERY_TIMEOUT_SECONDS
 	if has_directory:
-		_lookup_external_room(normalized_code)
+		if _discovery_listener:
+			# Give the local host two broadcasts before contacting the Internet.
+			get_tree().create_timer(2.0 * DISCOVERY_BROADCAST_INTERVAL).timeout.connect(
+				_lookup_external_room_if_waiting.bind(normalized_code, _network_session))
+		else:
+			_lookup_external_room(normalized_code)
 	print("[Network] 6자리 방 코드 검색 중: %s" % pending_room_code)
 	return OK
 
@@ -329,6 +342,7 @@ func disconnect_network() -> void:
 	_directory_heartbeat_remaining = 0.0
 	_host_directory_token = ""
 	_web_transport = false
+	_active_web_directory = ""
 	_web_ice_servers = WEB_ICE_SERVERS
 	_web_direct_ice_servers = WEB_ICE_SERVERS
 	_web_relay_peers.clear()
@@ -357,6 +371,8 @@ func disconnect_network() -> void:
 	_web_early_candidates.clear()
 	_web_received_deliveries.clear()
 	_web_signal_replays.clear()
+	_web_post_queue.clear()
+	_web_posts_in_flight.clear()
 	_web_retired_attempts.clear()
 	_web_offer_generation = 0
 	_saved_local_index = -1
@@ -484,7 +500,7 @@ func request_room_list() -> void:
 	if _room_list_pending:
 		return
 	_room_list_pending = true
-	if not _send_directory_request(HTTPClient.METHOD_GET, "/webrtc/rooms", {}, _on_room_list_response, false):
+	if not _send_directory_request(HTTPClient.METHOD_GET, "/webrtc/rooms", {}, _on_room_list_response, false, "", _primary_web_directory_url()):
 		_room_list_pending = false
 		room_list_failed.emit("방 목록을 가져오지 못했습니다. 새로고침을 눌러 다시 시도하세요.")
 
@@ -502,7 +518,8 @@ func _on_room_list_response(_result: int, response_code: int, _headers: PackedSt
 func _create_browser_room(player_info: Dictionary, settings: Dictionary = {}) -> Error:
 	disconnect_network()
 	_configure_room(settings)
-	if not is_external_room_directory_configured():
+	_active_web_directory = _primary_web_directory_url()
+	if _active_web_directory.is_empty():
 		return ERR_UNCONFIGURED
 	_web_transport = true
 	_web_multiplayer_peer = WebRTCMultiplayerPeer.new()
@@ -544,7 +561,7 @@ func _on_browser_room_registered(_result: int, response_code: int, _headers: Pac
 	request.queue_free()
 	if int(request.get_meta("network_session", -1)) != _network_session:
 		if response_code in [200, 201]:
-			_delete_browser_room(code, token)
+			_delete_browser_room(code, token, str(request.get_meta("directory_url")))
 		return
 	if not _web_transport or not is_online or not is_host or game_has_started:
 		return
@@ -571,7 +588,8 @@ func _on_browser_room_registered(_result: int, response_code: int, _headers: Pac
 
 func _join_browser_room(code: String, player_info: Dictionary, password: String = "") -> Error:
 	disconnect_network()
-	if not is_external_room_directory_configured():
+	_active_web_directory = _primary_web_directory_url()
+	if _active_web_directory.is_empty():
 		return ERR_UNCONFIGURED
 	_web_transport = true
 	pending_local_player_info = _sanitize_player_info(player_info)
@@ -596,19 +614,32 @@ func _request_browser_join(code: String, payload: Dictionary, can_retry: bool) -
 		_on_browser_room_joined.bind(code, payload, can_retry), false)
 
 
-func _leave_pending_web_seat(code: String, token: String) -> void:
+func _leave_pending_web_seat(code: String, token: String, directory: String = "") -> void:
 	if not token.is_empty():
 		_send_directory_request(HTTPClient.METHOD_POST, "/webrtc/rooms/%s/leave" % code.uri_encode(), {},
-			_on_directory_room_unregistered, true, token)
+			_on_directory_room_unregistered, true, token, directory)
 
 
 func _on_browser_room_joined(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest, code: String, payload: Dictionary, can_retry: bool) -> void:
 	request.queue_free()
 	if int(request.get_meta("network_session", -1)) != _network_session:
 		if response_code in [200, 201]:
-			_leave_pending_web_seat(code, str(payload["peer_token"]))
+			_leave_pending_web_seat(code, str(payload["peer_token"]), str(request.get_meta("directory_url")))
 		return
 	if not _web_transport or not _room_lookup_active:
+		return
+	var legacy := _room_directory_url()
+	if result == HTTPRequest.RESULT_SUCCESS and response_code == 404 and not legacy.is_empty() and legacy != _active_web_directory:
+		# Old builds hosted their rooms at the native directory. Keep separate credentials.
+		_active_web_directory = legacy
+		_host_directory_token = Crypto.new().generate_random_bytes(24).hex_encode()
+		payload = {"peer_token": _host_directory_token, "password": payload["password"]}
+		_discovery_lookup_remaining = DISCOVERY_TIMEOUT_SECONDS
+		if not _request_browser_join(code, payload, true):
+			_stop_room_discovery()
+			_web_transport = false
+			_host_directory_token = ""
+			room_code_lookup_failed.emit("이전 버전의 방에 연결할 수 없습니다. 방 코드를 다시 확인해 주세요.")
 		return
 	if _temporary_directory_failure(result, response_code):
 		if can_retry and _request_browser_join(code, payload, false):
@@ -621,7 +652,10 @@ func _on_browser_room_joined(result: int, response_code: int, _headers: PackedSt
 		_stop_room_discovery()
 		_web_transport = false
 		_host_directory_token = ""
-		room_code_lookup_failed.emit(detail)
+		if response_code == 403:
+			room_password_required.emit(code)
+		else:
+			room_code_lookup_failed.emit(detail)
 		return
 	var parsed = JSON.parse_string(body.get_string_from_utf8())
 	if not (parsed is Dictionary):
@@ -817,24 +851,47 @@ func _replay_pending_browser_signals(delta: float) -> void:
 
 
 func _post_browser_signal(payload: Dictionary, retries_left: int) -> void:
-	if not _send_directory_request(HTTPClient.METHOD_POST, "/webrtc/rooms/%s/signals" % room_code.uri_encode(),
-		payload, _on_browser_signal_sent.bind(payload, retries_left), true):
-		_report_signal_failure(payload, PackedByteArray())
+	var delivery: String = payload.data.delivery_id
+	if _web_posts_in_flight.has(delivery):
+		return
+	for queued in _web_post_queue:
+		if queued.payload.data.delivery_id == delivery:
+			return
+	var entry := {"payload": payload, "retries": retries_left}
+	if payload.type == "candidate":
+		_web_post_queue.push_back(entry)
+	else:
+		_web_post_queue.push_front(entry)
+	_drain_browser_posts()
+
+
+func _drain_browser_posts() -> void:
+	while _web_signaling_active and _web_posts_in_flight.size() < WEB_MAX_SIGNAL_POSTS and not _web_post_queue.is_empty():
+		var entry: Dictionary = _web_post_queue.pop_front()
+		var payload: Dictionary = entry.payload
+		if _web_connection_attempts.get(payload.to_peer) != payload.data.attempt:
+			continue
+		var delivery: String = payload.data.delivery_id
+		_web_posts_in_flight[delivery] = true
+		if not _send_directory_request(HTTPClient.METHOD_POST, "/webrtc/rooms/%s/signals" % room_code.uri_encode(),
+			payload, _on_browser_signal_sent.bind(payload, entry.retries), true):
+			_web_posts_in_flight.erase(delivery)
+			_report_signal_failure(payload, PackedByteArray())
 
 
 func _on_browser_signal_sent(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest, payload: Dictionary, retries_left: int) -> void:
 	request.queue_free()
-	if int(request.get_meta("network_session", -1)) != _network_session or not _web_signaling_active:
+	if int(request.get_meta("network_session", -1)) != _network_session:
 		return
-	if _web_connection_attempts.get(payload["to_peer"]) != payload["data"]["attempt"]:
-		return
-	if result == HTTPRequest.RESULT_SUCCESS and response_code >= 200 and response_code < 300:
-		return
-	if _temporary_directory_failure(result, response_code):
-		if retries_left > 0:
-			_post_browser_signal(payload, retries_left - 1)
-	else:
-		_report_signal_failure(payload, body)
+	_web_posts_in_flight.erase(payload.data.delivery_id)
+	var delivered := result == HTTPRequest.RESULT_SUCCESS and response_code >= 200 and response_code < 300
+	if not delivered and _web_signaling_active and _web_connection_attempts.get(payload.to_peer) == payload.data.attempt:
+		if _temporary_directory_failure(result, response_code):
+			if retries_left > 0:
+				_post_browser_signal(payload, retries_left - 1)
+		else:
+			_report_signal_failure(payload, body)
+	_drain_browser_posts()
 
 
 func _temporary_directory_failure(result: int, response_code: int) -> bool:
@@ -852,6 +909,14 @@ func _report_signal_failure(payload: Dictionary, body: PackedByteArray) -> void:
 		else:
 			disconnect_network()
 			room_code_lookup_failed.emit(message)
+
+
+func _browser_signal_interval() -> float:
+	if _web_connect_remaining > 0.0 or _reconnecting or not _pending_reconnects.is_empty() or not _web_signal_replays.is_empty():
+		return WEB_SIGNAL_POLL_INTERVAL
+	if is_host and not game_has_started:
+		return WEB_HOST_LOBBY_POLL_INTERVAL
+	return WEB_CONNECTED_POLL_INTERVAL
 
 
 func _poll_browser_signals() -> void:
@@ -882,7 +947,7 @@ func _on_browser_signals_polled(result: int, response_code: int, _headers: Packe
 			external_room_failed.emit("브라우저 게임방의 연결 시간이 만료되었습니다. 방을 다시 만들어 주세요.")
 		elif _web_connect_remaining > 0.0:
 			disconnect_network()
-			room_code_lookup_failed.emit("게임방이 닫혔습니다. 방 목록에서 다시 선택해 주세요.")
+			room_code_lookup_failed.emit("게임방이 닫혔습니다. 방장에게 새 방 코드를 확인해 주세요.")
 		return
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 		return
@@ -1099,6 +1164,8 @@ func _stop_room_discovery() -> void:
 
 
 func is_external_room_directory_configured() -> bool:
+	if _uses_browser_webrtc():
+		return not _primary_web_directory_url().is_empty()
 	return not _room_directory_url().is_empty()
 
 
@@ -1107,6 +1174,15 @@ func _room_directory_url() -> String:
 	if not environment_url.is_empty():
 		return environment_url.trim_suffix("/")
 	return str(ProjectSettings.get_setting("network/room_directory_url", "")).strip_edges().trim_suffix("/")
+
+
+func _primary_web_directory_url() -> String:
+	var address := OS.get_environment("ENERGYGAME_WEB_ROOM_DIRECTORY_URL").strip_edges()
+	if address.is_empty():
+		address = OS.get_environment("ENERGYGAME_ROOM_DIRECTORY_URL").strip_edges()
+	if address.is_empty():
+		address = str(ProjectSettings.get_setting("network/web_room_directory_url", _room_directory_url())).strip_edges()
+	return address.trim_suffix("/")
 
 
 func _begin_external_room_setup() -> void:
@@ -1191,6 +1267,11 @@ func _on_directory_room_registered(_result: int, response_code: int, _headers: P
 	external_room_failed.emit("%s 같은 네트워크 접속은 계속 사용할 수 있습니다." % detail)
 
 
+func _lookup_external_room_if_waiting(code: String, session: int) -> void:
+	if session == _network_session and _room_lookup_active and pending_room_code == code:
+		_lookup_external_room(code)
+
+
 func _lookup_external_room(code: String) -> void:
 	if _directory_lookup_pending:
 		return
@@ -1201,6 +1282,8 @@ func _lookup_external_room(code: String) -> void:
 
 func _on_directory_room_lookup(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest) -> void:
 	request.queue_free()
+	if int(request.get_meta("network_session", -1)) != _network_session:
+		return
 	_directory_lookup_pending = false
 	if not _room_lookup_active or response_code != 200:
 		return
@@ -1254,21 +1337,24 @@ func _unregister_external_room() -> void:
 	_external_room_registered = false
 
 
-func _delete_browser_room(code: String, token: String) -> void:
+func _delete_browser_room(code: String, token: String, directory: String = "") -> void:
 	_send_directory_request(HTTPClient.METHOD_DELETE, "/webrtc/rooms/%s" % code.uri_encode(), {},
-		_on_directory_room_unregistered, true, token)
+		_on_directory_room_unregistered, true, token, directory)
 
 
 func _on_directory_room_unregistered(_result: int, _response_code: int, _headers: PackedStringArray, _body: PackedByteArray, request: HTTPRequest) -> void:
 	request.queue_free()
 
 
-func _send_directory_request(method: int, path: String, payload: Dictionary, callback: Callable, authenticated: bool, token_override: String = "") -> bool:
-	var base_url := _room_directory_url()
+func _send_directory_request(method: int, path: String, payload: Dictionary, callback: Callable, authenticated: bool, token_override: String = "", directory: String = "") -> bool:
+	var base_url := directory
+	if base_url.is_empty():
+		base_url = _active_web_directory if path.begins_with("/webrtc/") else _room_directory_url()
 	if base_url.is_empty():
 		return false
 	var request := HTTPRequest.new()
 	request.set_meta("network_session", _network_session)
+	request.set_meta("directory_url", base_url)
 	request.timeout = 5.0
 	add_child(request)
 	request.request_completed.connect(callback.bind(request), CONNECT_ONE_SHOT)
@@ -1456,6 +1542,7 @@ func _close_client_transport() -> void:
 	_web_remote_description_set.clear()
 	_web_connection_attempts.clear()
 	_web_signal_replays.clear()
+	_web_post_queue.clear()
 
 
 func _attempt_reconnect() -> void:

@@ -44,6 +44,7 @@ theme/custom_font="res://assets/fonts/Pretendard-Medium.otf"
 [network]
 
 room_directory_url="https://energygame-room-directory.energygame-room-directory.workers.dev"
+web_room_directory_url="https://energygame-minigames-demo.vercel.app/api"
 leaderboard_url="https://energygame-minigames-demo.vercel.app/api"
 
 [rendering]

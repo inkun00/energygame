@@ -97,6 +97,8 @@ func _test_browser_directory() -> void:
 	var checks_before := failures.size()
 	var probe: Node = load("res://scripts/tests/WebRoomDirectoryProbe.gd").new()
 	root.add_child(probe)
+	_test_room_code_routes(probe)
+	_test_signal_send_queue(probe)
 	_test_connection_heartbeats(probe)
 	_test_guest_connection_deadlines()
 	var relay := {"urls": ["turn:relay.example:3478?transport=udp", "turns:relay.example:443?transport=tcp"],
@@ -136,8 +138,11 @@ func _test_browser_directory() -> void:
 	_expect(probe._room_lookup_active and probe.pending_room_code == "345678", "late admission preserves the new join")
 	_expect(probe._web_ice_servers == probe.WEB_ICE_SERVERS, "late admission cannot install a previous seat's relay credentials")
 	var call_count: int = probe.sent.size()
+	var protected_codes: Array[String] = []
+	probe.room_password_required.connect(func(code): protected_codes.append(code), CONNECT_ONE_SHOT)
 	probe.respond(new_admission, HTTPRequest.RESULT_SUCCESS, 403, {"error": "wrong password"})
-	_expect(probe.sent.size() == call_count and not probe._room_lookup_active, "invalid password ends the lookup immediately")
+	_expect(probe.sent.size() == call_count and not probe._room_lookup_active and protected_codes == ["345678"],
+		"a private room requests its password without trying another directory")
 	probe._join_browser_room("345678", {}, "")
 	probe.respond(probe.sent.back(), HTTPRequest.RESULT_SUCCESS, 201, {"peer_id": 2, "ice_servers": provisioned})
 	_expect(probe.online_frames and probe._web_signaling_active, "admitted guest keeps signaling in a background tab")
@@ -191,6 +196,68 @@ func _test_browser_directory() -> void:
 	probe.queue_free()
 	if failures.size() == checks_before:
 		print("[PASS] Browser admission, seat reuse, delayed responses, lost SDP/ICE batches, retries and acknowledgement")
+
+
+func _test_room_code_routes(probe: Node) -> void:
+	probe._join_browser_room("456789", {}, "")
+	var primary: Dictionary = probe.sent.back()
+	_expect(primary.directory == probe._primary_web_directory_url() and primary.path == "/webrtc/rooms/456789/join",
+		"code join goes directly to the primary service")
+	probe.respond(primary, HTTPRequest.RESULT_SUCCESS, 404)
+	var legacy: Dictionary = probe.sent.back()
+	_expect(legacy.directory == probe._room_directory_url() and legacy.payload.peer_token != primary.payload.peer_token,
+		"missing primary room tries an old build with a fresh credential")
+	probe.request_room_list()
+	var listing: Dictionary = probe.sent.back()
+	_expect(listing.directory == primary.directory, "the optional room list always uses the primary service")
+	probe.respond(listing, HTTPRequest.RESULT_SUCCESS, 200, {"rooms": []})
+	probe.disconnect_network()
+	probe._create_browser_room({})
+	var create: Dictionary = probe.sent.back()
+	_expect(create.directory == primary.directory, "creating the next room starts on the primary service")
+	probe.respond(legacy, HTTPRequest.RESULT_SUCCESS, 201, {"peer_id": 2})
+	_expect(probe.sent.back().directory == legacy.directory and probe.sent.back().token == legacy.payload.peer_token,
+		"late admission cleans up only the old provider's seat")
+	probe.respond(create, HTTPRequest.RESULT_SUCCESS, 201)
+	probe._poll_browser_signals()
+	_expect(probe.sent.back().directory == primary.directory, "late cleanup does not reroute a new room's signals")
+	_expect(probe._browser_signal_interval() == probe.WEB_HOST_LOBBY_POLL_INTERVAL, "an idle lobby checks for offers within seconds")
+	probe.game_has_started = true
+	_expect(probe._browser_signal_interval() == probe.WEB_CONNECTED_POLL_INTERVAL, "connected players idle between renewals")
+	probe._pending_reconnects[1] = 1
+	_expect(probe._browser_signal_interval() == probe.WEB_SIGNAL_POLL_INTERVAL, "a missing player triggers fast signaling")
+	probe.disconnect_network()
+	probe.sent.clear()
+
+
+func _test_signal_send_queue(probe: Node) -> void:
+	probe._create_browser_room({})
+	probe.respond(probe.sent.back(), HTTPRequest.RESULT_SUCCESS, 201)
+	probe.sent.clear()
+	probe._web_connection_attempts[2] = "old"
+	for index in range(6):
+		probe._send_browser_signal(2, "candidate", {"sdp": str(index)})
+	var first: Dictionary = probe.sent[0]
+	var second: Dictionary = probe.sent[1]
+	_expect(probe.sent.size() == 2 and probe._web_post_queue.size() == 4, "only two simultaneous ICE writes per browser")
+	probe._replay_pending_browser_signals(4.1)
+	_expect(probe._web_post_queue.size() == 4, "a replay cannot queue another copy of an outstanding signal")
+	probe._web_connection_attempts[2] = "new"
+	probe._send_browser_signal(2, "answer", {"sdp": "replacement"})
+	probe.respond(first, HTTPRequest.RESULT_SUCCESS, 202)
+	_expect(probe.sent.size() == 3 and probe.sent.back().payload.data.sdp == "replacement", "a new SDP takes priority over queued ICE")
+	probe.respond(second, HTTPRequest.RESULT_SUCCESS, 503)
+	_expect(probe.sent.size() == 3 and probe._web_post_queue.is_empty(), "replaced attempts are discarded without retrying their old ICE")
+	var old_answer: Dictionary = probe.sent.back()
+	probe.disconnect_network()
+	probe._create_browser_room({})
+	probe.respond(probe.sent.back(), HTTPRequest.RESULT_SUCCESS, 201)
+	probe._web_connection_attempts[2] = "another"
+	probe._send_browser_signal(2, "answer", {"sdp": "current"})
+	probe.respond(old_answer, HTTPRequest.RESULT_SUCCESS, 503)
+	_expect(probe._web_posts_in_flight.size() == 1, "late replies leave the new session's send slots intact")
+	probe.disconnect_network()
+	probe.sent.clear()
 
 
 func _test_connection_heartbeats(probe: Node) -> void:
@@ -365,7 +432,11 @@ func _test_dropped_legacy_batches(host: Node) -> void:
 	var sent_after_connect: int = host.sent.size()
 	host._replay_pending_browser_signals(4.1)
 	_expect(host.sent.size() == sent_after_connect, "connected peers stop replaying handshakes")
+	var confirmed := 2
 	for index in range(5):
+		while confirmed < guest.sent.size():
+			guest.respond(guest.sent[confirmed], HTTPRequest.RESULT_SUCCESS, 202)
+			confirmed += 1
 		guest._replay_pending_browser_signals(4.1)
 	_expect(guest.sent.size() == 8, "an unanswered handshake stops after three timed replays")
 	guest.queue_free()

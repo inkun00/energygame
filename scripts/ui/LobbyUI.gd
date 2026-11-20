@@ -699,7 +699,7 @@ func reset_network_controls(message: String = "") -> void:
 	game_time_option_button.disabled = false
 	if _room_browser:
 		_room_browser.set_busy(false)
-	host_button.text = "방 목록 / 만들기"
+	host_button.text = "방 만들기"
 	host_button.disabled = false
 	join_button.disabled = false
 	nickname_edit.editable = true

@@ -5,9 +5,11 @@ signal join_requested(code, password)
 
 const UI = preload("res://scripts/ui/CommercialUI.gd")
 var _rows: VBoxContainer
+var _room_scroll: ScrollContainer
 var _status: Label
 var _refresh: Button
 var _code: LineEdit
+var _native_password: LineEdit
 var _join_code: Button
 var _available_seats: Array[Button] = []
 var _listing := false
@@ -43,13 +45,12 @@ func _ready() -> void:
 	panel.add_child(content)
 	var header := HBoxContainer.new()
 	content.add_child(header)
-	var heading := _label("온라인 모험 · 방 목록", 30)
+	var heading := _label("친구와 온라인 모험", 30)
 	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(heading)
 	_back = _button("돌아가기", false)
 	_back.pressed.connect(_close_browser)
 	header.add_child(_back)
-	content.add_child(_label("목록에서 참가할 방을 고르거나 방장이 알려 준 6자리 코드를 입력하세요.", 17))
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 24)
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -58,13 +59,12 @@ func _ready() -> void:
 	list_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	list_column.add_theme_constant_override("separation", 12)
 	columns.add_child(list_column)
+	list_column.add_child(_label("방 코드로 참가", 25))
+	list_column.add_child(_label("친구가 알려 준 숫자 6자리를 입력하세요.", 18))
 	var join_tools := HBoxContainer.new()
 	join_tools.custom_minimum_size.y = 48
 	join_tools.add_theme_constant_override("separation", 10)
 	list_column.add_child(join_tools)
-	_refresh = _button("새로고침", false)
-	_refresh.pressed.connect(_request_refresh)
-	join_tools.add_child(_refresh)
 	_code = LineEdit.new()
 	_code.placeholder_text = "6자리 방 코드"
 	_code.max_length = 6
@@ -72,23 +72,35 @@ func _ready() -> void:
 	_code.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	UI.apply_input(_code)
 	join_tools.add_child(_code)
-	_join_code = _button("코드로 참가", false)
+	_join_code = _button("코드로 참가", true)
 	_join_code.pressed.connect(func(): prompt_code_join(_code.text))
 	_code.text_submitted.connect(prompt_code_join)
 	join_tools.add_child(_join_code)
-	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(680, 360)
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	list_column.add_child(scroll)
-	_rows = VBoxContainer.new()
-	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rows.add_theme_constant_override("separation", 10)
-	scroll.add_child(_rows)
+	if not OS.has_feature("web"):
+		_native_password = LineEdit.new()
+		_native_password.secret = true
+		_native_password.max_length = 64
+		_native_password.placeholder_text = "방 비밀번호 (있는 방만 입력)"
+		UI.apply_input(_native_password)
+		list_column.add_child(_native_password)
+		_native_password.text_submitted.connect(func(_value: String): prompt_code_join(_code.text))
 	_status = _label("", 16)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.custom_minimum_size.y = 42
 	list_column.add_child(_status)
+	_refresh = _button("열린 방 목록 보기", false)
+	_refresh.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_refresh.pressed.connect(_request_refresh)
+	list_column.add_child(_refresh)
+	_room_scroll = ScrollContainer.new()
+	_room_scroll.custom_minimum_size.x = 680
+	_room_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_room_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	list_column.add_child(_room_scroll)
+	_rows = VBoxContainer.new()
+	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rows.add_theme_constant_override("separation", 10)
+	_room_scroll.add_child(_rows)
 	var form := VBoxContainer.new()
 	form.custom_minimum_size.x = 340
 	form.add_theme_constant_override("separation", 12)
@@ -147,6 +159,7 @@ func _ready() -> void:
 	_password_dialog.confirmed.connect(_confirm_password)
 	NetworkManager.room_list_received.connect(_receive_rooms)
 	NetworkManager.room_list_failed.connect(_on_list_failed)
+	NetworkManager.room_password_required.connect(_ask_for_password)
 	hide()
 
 func _label(value: String, font_size: int) -> Label:
@@ -168,9 +181,15 @@ func _button(value: String, primary: bool) -> Button:
 func open_browser() -> void:
 	if not visible:
 		_return_focus = get_viewport().gui_get_focus_owner()
+	_clear_rows()
+	_show_list_status = false
+	_room_scroll.hide()
+	_refresh.text = "열린 방 목록 보기"
+	_status.text = ""
+	if _native_password:
+		_native_password.clear()
 	show()
-	_back.grab_focus()
-	_request_refresh()
+	_code.grab_focus()
 
 func _close_browser() -> void:
 	if _busy:
@@ -181,9 +200,11 @@ func _close_browser() -> void:
 		_return_focus.grab_focus()
 
 func _request_refresh() -> void:
-	if _busy:
+	if _busy or _listing:
 		return
 	_clear_rows()
+	_room_scroll.show()
+	_refresh.text = "목록 새로고침"
 	_listing = true
 	_show_list_status = true
 	_refresh.disabled = true
@@ -205,6 +226,8 @@ func _on_list_failed(message: String) -> void:
 func _receive_rooms(rooms: Array) -> void:
 	_listing = false
 	_refresh.disabled = _busy
+	if not _room_scroll.visible:
+		return
 	_clear_rows()
 	for room in rooms:
 		if not (room is Dictionary):
@@ -247,10 +270,7 @@ func _select_room(code: String, locked: bool) -> void:
 		return
 	_selected_code = code
 	if locked:
-		_password_dialog.title = "비밀번호가 있는 방"
-		_join_password.clear()
-		_password_dialog.popup_centered(Vector2i(420, 150))
-		_join_password.grab_focus()
+		_ask_for_password(code)
 	else:
 		_join(code, "")
 
@@ -262,9 +282,21 @@ func prompt_code_join(code: String) -> void:
 		show_error("방장이 알려 준 숫자 6자리를 정확히 입력하세요.")
 		_code.grab_focus()
 		return
-	_password_dialog.title = "방 참가 · 비밀번호가 없으면 비워 두세요"
+	var password := ""
+	if _native_password:
+		if _native_password.has_ime_text():
+			_native_password.apply_ime()
+		password = _native_password.text
+		_native_password.clear()
+	_join(_selected_code, password)
+
+func _ask_for_password(code: String) -> void:
+	if not visible or code != _selected_code:
+		return
+	set_busy(false)
+	_status.text = "이 방은 비밀번호가 필요해요. 방장이 알려 준 비밀번호를 입력하세요."
 	_join_password.clear()
-	_password_dialog.popup_centered(Vector2i(480, 150))
+	_password_dialog.popup_centered(Vector2i(420, 150))
 	_join_password.grab_focus()
 
 func _confirm_password() -> void:
@@ -304,6 +336,8 @@ func set_busy(value: bool) -> void:
 	_create.disabled = value
 	_join_code.disabled = value
 	_code.editable = not value
+	if _native_password:
+		_native_password.editable = not value
 	_refresh.disabled = value or _listing
 	for button in _available_seats:
 		button.disabled = value

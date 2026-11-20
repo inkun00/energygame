@@ -14,6 +14,7 @@ var last_local_claim: Dictionary = {}
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	ProjectSettings.set_setting("network/room_directory_url", "http://127.0.0.1:19395")
+	ProjectSettings.set_setting("network/web_room_directory_url", "http://127.0.0.1:19395/api")
 	main = load("res://scenes/Main.tscn").instantiate()
 	# The observer must run while paused; the real game must retain its ordinary
 	# pausable root instead of inheriting this test observer's ALWAYS mode.
@@ -41,13 +42,10 @@ func _process(delta: float) -> void:
 func _execute(command: Dictionary) -> void:
 	var action := str(command.get("action", ""))
 	match action:
-		"create", "join":
+		"open_online":
 			main.lobby_ui.nickname_edit.text = str(command.get("name", "검증"))
 			main.lobby_ui.char_option_button.select(int(command.get("character", 0)))
-			if action == "create":
-				main.lobby_ui._create_configured_room({"name": "로컬 4인 검증"})
-			else:
-				main.lobby_ui._join_listed_room(str(command["code"]), "")
+			main.lobby_ui._on_mode_selected(1)
 		"minigame_fixture":
 			if NetworkManager.is_host:
 				GameManager.active_quiz_data.clear()
@@ -85,6 +83,9 @@ func _publish() -> void:
 	var quiz: Node = board.quiz_modal
 	var learning: Node = hud.learning_village_ui
 	var buttons := {
+		"create": _button(main.lobby_ui._room_browser._create),
+		"room_code": _button(main.lobby_ui._room_browser._code),
+		"join": _button(main.lobby_ui._room_browser._join_code),
 		"start": _button(main.lobby_ui._room_start_button),
 		"ready": _button(hud.adventure_planner.tutorial_button),
 		"dice": _button(hud.center_dice_button),
@@ -123,6 +124,7 @@ func _publish() -> void:
 		players.append({"name": player.get("name"), "energy": player.get("energy"), "tile": player.get("tile_index"), "ai": player.get("is_ai"), "inventory": player.get("inventory")})
 	var state := {
 		"sequence": sequence, "error": last_error, "code": NetworkManager.room_code,
+		"registered": NetworkManager._external_room_registered,
 		"peers": NetworkManager.connected_players.size(), "local": NetworkManager.get_local_player_index(),
 		"online": NetworkManager.is_online, "host": NetworkManager.is_host, "paused": get_tree().paused,
 		"restored": restored, "session": main.session_open, "lobby": main.lobby_ui.visible,

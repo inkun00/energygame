@@ -3,9 +3,12 @@
   "outputDirectory": "public",
   "regions": ["icn1"],
   "functions": {
-    "api/records.mjs": {"maxDuration": 30}
+    "api/records.mjs": {"maxDuration": 30},
+    "api/rooms.mjs": {"maxDuration": 30}
   },
   "rewrites": [
-    {"source": "/api/scores/:route*", "destination": "/api/records?gamePath=:route*"}
+    {"source": "/api/scores/:route*", "destination": "/api/records?gamePath=:route*"},
+    {"source": "/api/webrtc/rooms", "destination": "/api/rooms"},
+    {"source": "/api/webrtc/rooms/:path*", "destination": "/api/rooms?roomPath=:path*"}
   ]
 }

@@ -1,4 +1,4 @@
-const CREDENTIAL_TTL_SECONDS = 2 * 60 * 60;
+export const CREDENTIAL_TTL_SECONDS = 2 * 60 * 60;
 const PROVIDER_TIMEOUT_MS = 1800;
 
 // Only retain the documented browser transports, including TLS on port 443.
@@ -32,7 +32,7 @@ function unavailable(env, stage, details = {}) {
     token64: env.TURN_KEY_API_TOKEN?.length === 64, ...details } };
 }
 
-async function mintCredentials(env) {
+export async function mintCredentials(env) {
   const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(env.TURN_KEY_ID)}/credentials/generate-ice-servers`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);

@@ -1,6 +1,7 @@
 // Four isolated browser sessions, real WebRTC and actual game UI controls.
 // Fixtures only select scenario boundaries/materials; competitive clocks/scores are real.
 // Run export_four_player_web.cjs first. Node 22+ and Playwright required.
+// With a local FIRESTORE_EMULATOR_HOST, --code-room-smoke verifies code entry without D1.
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -144,12 +145,38 @@ async function main() {
   fs.mkdirSync(output, { recursive: true });
   fs.writeFileSync(path.join(output, 'network.log'), '');
   const { default: worker } = await import(pathToFileURL(path.join(repo, 'services/room-directory/src/index.js')));
-  const env = { DB: new SqliteD1() };
+  const codeSmoke = process.argv.includes('--code-room-smoke');
+  const env = codeSmoke ? {} : { DB: new SqliteD1() };
+  let roomHandler, firestore;
+  const pendingRoomRequests = new Set();
+  let blockedRequests = 0;
+  if (codeSmoke) {
+    assert.match(process.env.FIRESTORE_EMULATOR_HOST || '', /^(127\.0\.0\.1|localhost):\d+$/, 'start a local Firestore emulator');
+    delete process.env.TURN_KEY_API_TOKEN;
+    process.env.FIREBASE_PROJECT_ID = 'demo-code-' + require('node:crypto').randomBytes(5).toString('hex');
+    ({ default: roomHandler } = await import(pathToFileURL(path.join(repo, 'services/room-directory/api/rooms.mjs'))));
+    const connection = await import(pathToFileURL(path.join(repo, 'services/room-directory/src/firestore-connection.js')));
+    firestore = connection.getScoreFirestore();
+  }
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, origin);
-      if (url.pathname.startsWith('/webrtc/')) {
+      if (codeSmoke && (url.pathname.startsWith('/webrtc/') || (req.method === 'GET' && url.pathname === '/api/webrtc/rooms'))) {
+        blockedRequests++;
+        res.writeHead(503); res.end(); return;
+      }
+      if (url.pathname.startsWith('/api/webrtc/') || url.pathname.startsWith('/webrtc/')) {
         const chunks = []; for await (const chunk of req) chunks.push(chunk);
+        if (codeSmoke) {
+          req.body = Buffer.concat(chunks);
+          res.status = code => { res.statusCode = code; return res; };
+          res.json = data => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); };
+          const pending = roomHandler(req, res);
+          pendingRoomRequests.add(pending);
+          try { await pending; } finally { pendingRoomRequests.delete(pending); }
+          return;
+        }
+        url.pathname = url.pathname.replace(/^\/api\//, '/');
         const response = await worker.fetch(new Request(url, { method: req.method, headers: req.headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks) }), env);
         res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(Buffer.from(await response.arrayBuffer())); return;
       }
@@ -168,6 +195,7 @@ async function main() {
       args: [...(process.platform === 'win32' ? ['--use-angle=d3d11', '--ignore-gpu-blocklist'] : ['--enable-unsafe-swiftshader']), '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] });
     for (let i = 0; i < 4; i++) {
       const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+      if (codeSmoke) await context.route('https://**.workers.dev/**', route => { blockedRequests++; return route.abort(); });
       const page = await context.newPage(); pages.push(page);
       page.on('console', message => {
         if (message.text().includes('[Network]')) fs.appendFileSync(path.join(output, 'network.log'), `player${i + 1}: ${message.text()}\n`);
@@ -184,10 +212,15 @@ async function main() {
       await page.waitForFunction(() => window.fourPlayerState && !document.getElementById('loading'), null, { timeout: 90000 });
       console.log(`[READY] player ${index + 1}`);
     }
-    await command(0, 'create', { name: '검증1', character: 0 });
-    let ss = await waitFor(all => all[0]?.code?.length === 6 && all[0].peers === 1, 'host code');
+    await Promise.all(pages.map((_, i) => command(i, 'open_online', { name: `검증${i + 1}`, character: i })));
+    await click(0, 'create');
+    let ss = await waitFor(all => all[0]?.registered && all[0].code.length === 6 && all[0].peers === 1, 'registered host code');
     const code = ss[0].code;
-    await Promise.all([1, 2, 3].map(i => command(i, 'join', { code, name: `검증${i + 1}`, character: i })));
+    await Promise.all([1, 2, 3].map(async i => {
+      await click(i, 'room_code');
+      await pages[i].keyboard.type(code);
+      await click(i, 'join');
+    }));
     ss = await waitFor(all => all.every(s => s.peers === 4), 'three simultaneous joins');
     await capture('01-lobby'); passed('Three concurrent joins, four registered participants');
     await click(0, 'start');
@@ -198,6 +231,17 @@ async function main() {
     ss = await waitFor(all => all.every(s => !s.preparation) && all.some(s => s.buttons.dice?.x !== undefined && !s.buttons.dice.disabled), 'all four ready');
     assert(ss.every(s => s.players.every(p => !p.ai)), 'all four remain human');
     assert.equal(ss.filter(s => s.buttons.dice?.x !== undefined && !s.buttons.dice.disabled).length, 1, 'only current player can roll');
+    if (codeSmoke) {
+      const before = ss[1];
+      await command(1, 'drop');
+      ss = await waitFor(all => all[1].restored > before.restored && all[0].peers === 4 && all.every(s => !s.paused), 'code room reconnect');
+      assert.equal(ss[1].local, before.local, 'reattached to the original seat');
+      assert.ok(ss.every(s => s.players.length === 4 && s.players.every(p => !p.ai)));
+      assert.equal(blockedRequests, 0, 'opening and joining by code must never request D1 or the room list');
+      assert.equal(errors.length, 0, errors.join('\n'));
+      passed('Four humans entered, started and reconnected with D1 and room lists unavailable');
+      return;
+    }
     const actor = ss.findIndex(s => s.buttons.dice?.x !== undefined && !s.buttons.dice.disabled);
     await click(actor, 'dice');
     await waitFor(all => all.some(s => s.state !== 0 || s.turns > 0), 'real dice action');
@@ -279,7 +323,12 @@ async function main() {
   } finally {
     fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ steps, errors }, null, 2));
     if (browser) await browser.close();
-    await new Promise(resolve => server.close(resolve)); env.DB.db.close();
+    await new Promise(resolve => server.close(resolve));
+    if (firestore) {
+      await Promise.allSettled(pendingRoomRequests);
+      await firestore.terminate();
+    }
+    else env.DB.db.close();
   }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,4 +1,4 @@
-"""Stage the exported Godot game and its ranking function in one Vercel project."""
+"""Stage the exported Godot game and its API functions in one Vercel project."""
 import argparse
 from pathlib import Path
 from shutil import copy2
@@ -16,7 +16,8 @@ def stage(web: Path, output: Path) -> None:
         if source.is_file() and not source.name.startswith(".") and source.suffix != ".import":
             copy2(source, public / source.name)
     for name in ("package.json", "package-lock.json", "vercel.json",
-                 "api/records.mjs", "src/scores.js", "src/firestore-connection.js", "src/firebase-scores.js"):
+                 "api/records.mjs", "api/rooms.mjs", "src/scores.js", "src/firestore-connection.js",
+                 "src/firebase-scores.js", "src/firebase-rooms.js", "src/room-credentials.js", "src/turn.js"):
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
         copy2(service / name, target)

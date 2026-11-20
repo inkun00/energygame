@@ -21,11 +21,20 @@ func _browser_peer_is_connected(peer_id: int) -> bool:
 func _set_browser_online_frames(active: bool) -> void:
 	online_frames = active
 
-func _send_directory_request(method: int, path: String, payload: Dictionary, callback: Callable, authenticated: bool, token_override: String = "") -> bool:
+func _primary_web_directory_url() -> String:
+	return "https://rooms.example/api"
+
+func _room_directory_url() -> String:
+	return "https://legacy.example"
+
+func _send_directory_request(method: int, path: String, payload: Dictionary, callback: Callable, authenticated: bool, token_override: String = "", directory: String = "") -> bool:
 	var request := HTTPRequest.new()
 	request.set_meta("network_session", _network_session)
+	var base_url := directory if not directory.is_empty() else _active_web_directory
+	request.set_meta("directory_url", base_url)
 	add_child(request)
 	sent.append({"method": method, "path": path, "payload": payload, "callback": callback.bind(request),
+		"directory": base_url,
 		"token": token_override if not token_override.is_empty() else (_host_directory_token if authenticated else "")})
 	return true
 
