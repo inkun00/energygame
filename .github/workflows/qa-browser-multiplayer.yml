@@ -1,0 +1,95 @@
+name: Four virtual browsers QA
+on:
+  push:
+    branches: ['qa/browser-multiplayer-21d4f08-20261120']
+permissions:
+  contents: read
+jobs:
+  isolated:
+    if: "!contains(github.event.head_commit.message, 'Live smoke')"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: chickensoft-games/setup-godot@v1
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: true
+      - name: Install four-client browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qa" playwright@1.55.0
+          "$RUNNER_TEMP/qa/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Build isolated game with real UI and fixture room services
+        run: |
+          godot --headless --editor --path . --import > "$RUNNER_TEMP/import.log" 2>&1
+          node scripts/tests/export_four_player_web.cjs
+      - name: Point local score traffic to the matching local Worker
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/tests/run_four_player_web_test.cjs')
+          s = p.read_text()
+          check = "if (url.pathname.startsWith('/webrtc/'))"
+          hook = 'const page = await context.newPage(); pages.push(page);'
+          assert s.count(check) == s.count(hook) == 1
+          s = s.replace(check, "if (url.pathname.startsWith('/webrtc/') || url.pathname.startsWith('/scores/'))")
+          s = s.replace(hook, """await context.route('http://127.0.0.1:8787/scores/**', async route => {
+                const response = await route.fetch({ url: route.request().url().replace(':8787/', ':19395/') });
+                await route.fulfill({ response });
+              });
+              """ + hook)
+          p.write_text(s)
+          PY
+      - name: Four-browser WebRTC game including reconnect and shared ending
+        run: PLAYWRIGHT_MODULE_PATH="$RUNNER_TEMP/qa/node_modules/playwright" node scripts/tests/run_four_player_web_test.cjs
+      - name: Save test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: four-browser-results
+          path: |
+            .godot/four-player-web/evidence/report.json
+            .godot/four-player-web/evidence/failure-state.json
+          retention-days: 1
+  live:
+    if: "contains(github.event.head_commit.message, 'Live smoke')"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Chromium
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qa" playwright@1.55.0
+          "$RUNNER_TEMP/qa/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Exercise deployed client with a private room and four browsers
+        run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node qa/production.cjs
+      - name: Read the private test screens
+        if: always()
+        run: |
+          if [ -d qa-pictures ]; then
+            sudo apt-get install -y tesseract-ocr-kor >/dev/null
+            for picture in qa-pictures/*.png; do
+              echo "QA screenshot $(basename "$picture")"
+              tesseract "$picture" stdout -l kor+eng 2>/dev/null | sed -E 's/[0-9]{6}/[room]/g'
+            done
+          fi
+      - name: Save the private test screens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: private-room-screens
+          path: qa-pictures/*.png
+          if-no-files-found: ignore
+          retention-days: 1
