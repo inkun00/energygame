@@ -3,6 +3,7 @@ class_name MiniGameInput
 
 ## Keyboard and touch buttons share the same gameplay conditions.
 static var touch_keys: Dictionary = {}
+static var _demonstration_keys: Variant = null
 
 static func canonical_key(key: int) -> int:
 	match key:
@@ -13,7 +14,18 @@ static func canonical_key(key: int) -> int:
 	return key
 
 static func is_pressed(key: int) -> bool:
+	if _demonstration_keys != null:
+		return canonical_key(key) in _demonstration_keys
 	return Input.is_key_pressed(key) or bool(touch_keys.get(canonical_key(key), false))
+
+static func horizontal_axis() -> float:
+	return 0.0 if _demonstration_keys != null else Input.get_axis("ui_left", "ui_right")
+
+## The private demonstration supplies input only during its own simulation step.
+static func simulate_demonstration(arcade: Node, tick: StringName, delta: float, keys: Array) -> void:
+	_demonstration_keys = keys
+	arcade.call(tick, delta)
+	_demonstration_keys = null
 
 static func set_touch(key: int, down: bool) -> void:
 	touch_keys[canonical_key(key)] = down

@@ -99,6 +99,23 @@ func setup(player_data: Dictionary, round_seed: int) -> void:
 	_update_overlay()
 	running = true
 
+func tutorial_demo_step(demo_time: float) -> Dictionary:
+	if closed_count >= 3:
+		return {"keys": [], "hint": "더운 공기가 들어오는 창을 닫을 때마다 에어컨의 전기 사용량이 줄었어요.", "done": demo_time >= 9.0}
+	if demo_time < 1.3:
+		return {"keys": [], "hint": "열린 창에서 빨간 바람이 들어와요. 화면의 냉방 전기 사용량을 살펴봐요."}
+	var nearest_gap := INF
+	for window in windows:
+		if bool(window["open"]):
+			var gap := float(window["x"]) - hero_x
+			if absf(gap) < absf(nearest_gap):
+				nearest_gap = gap
+	if absf(nearest_gap) > CLOSE_REACH * 0.75:
+		return {"keys": [KEY_A if nearest_gap < 0 else KEY_D], "hint": "빨간 바람이 들어오는 가까운 창으로 이동해요."}
+	if demo_time < 2.5 + closed_count * 2.2:
+		return {"keys": [], "hint": "열린 창 앞에 멈췄어요. 창을 닫으면 냉방 전력은 어떻게 달라질까요?"}
+	return {"keys": [KEY_SPACE], "hint": "닫기 키를 눌러 바람을 막고 전기 사용량의 변화를 봐요."}
+
 func set_running(value: bool) -> void:
 	running = value
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if value else SubViewport.UPDATE_DISABLED

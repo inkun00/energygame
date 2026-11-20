@@ -11,6 +11,82 @@ function client(env) {
   }), env);
 }
 
+test("only admitted WebRTC seats receive per-seat TURN credentials and retries reuse them", async t => {
+  const env = { DB: new SqliteD1(), TURN_KEY_ID: "test-id", TURN_KEY_API_TOKEN: "provider-only" };
+  const req = client(env);
+  const tls = "turns:turn.cloudflare.com:443?transport=tcp";
+  const udp = "turn:turn.cloudflare.com:3478?transport=udp";
+  const stun = "stun:stun.cloudflare.com:3478";
+  const mint = t.mock.method(globalThis, "fetch", async () => {
+    const name = crypto.randomUUID();
+    return Response.json({ iceServers: [
+      { urls: stun }, { urls: [tls, udp, "turn:turn.cloudflare.com:53?transport=udp", "https://invalid.test"],
+        username: name, credential: "temporary" }, { urls: tls }, { urls: [stun], internal: "provider-only" },
+    ] }, { status: 201 });
+  });
+  const created = await req("", "POST", { code: "345678", host_token: host, password: "private", max_players: 2 });
+  assert.equal(created.status, 201);
+  const room = await created.json();
+  const relay = room.ice_servers.find(server => server.credential);
+  assert.deepEqual(relay.urls, [tls, udp]);
+  assert.equal(relay.credential, "temporary");
+  assert.ok(!JSON.stringify(room).includes(env.TURN_KEY_API_TOKEN));
+  const [url, options] = mint.mock.calls[0].arguments;
+  assert.equal(url, "https://rtc.live.cloudflare.com/v1/turn/keys/test-id/credentials/generate-ice-servers");
+  assert.equal(options.method, "POST");
+  assert.equal(options.headers.Authorization, "Bearer " + env.TURN_KEY_API_TOKEN);
+  assert.equal(JSON.parse(options.body).ttl, 7200);
+  assert.ok(options.signal instanceof AbortSignal);
+  assert.equal(options.redirect, "error");
+
+  const join = (peer_token, password = "private") => req("/345678/join", "POST", { peer_token, password });
+  assert.equal((await join(guest, "wrong")).status, 403);
+  assert.equal((await req("", "POST", { code: "345678", host_token: host })).status, 409);
+  const list = await (await req("")).json();
+  assert.ok(!JSON.stringify(list).includes("ice_servers"));
+  const signals = await (await req("/345678/signals?ack=0", "GET", undefined, host)).json();
+  assert.ok(!Object.hasOwn(signals, "ice_servers"));
+  assert.equal(mint.mock.callCount(), 1);
+
+  const admissions = await Promise.all([join(guest), join(guest)]);
+  const [one, retry] = await Promise.all(admissions.map(response => response.json()));
+  assert.deepEqual(one.ice_servers, retry.ice_servers);
+  assert.notEqual(one.ice_servers.find(s => s.credential).username, relay.username);
+  assert.deepEqual((await (await join(guest)).json()).ice_servers, one.ice_servers);
+  assert.equal((await join("w".repeat(48))).status, 409);
+  assert.equal(mint.mock.callCount(), 2);
+  env.DB.db.prepare("UPDATE webrtc_turn_grants SET usable_until = 0 WHERE peer_id = 2").run();
+  assert.notDeepEqual((await (await join(guest)).json()).ice_servers, one.ice_servers);
+  assert.equal(mint.mock.callCount(), 3);
+  await req("/345678/leave", "POST", {}, guest);
+  assert.equal(env.DB.db.prepare("SELECT COUNT(*) AS n FROM webrtc_turn_grants").get().n, 1);
+  await req("/345678", "DELETE", undefined, host);
+  assert.equal(env.DB.db.prepare("SELECT COUNT(*) AS n FROM webrtc_turn_grants").get().n, 0);
+});
+
+test("absent, timed-out or unusable TURN provisioning leaves admission available", async t => {
+  const env = { DB: new SqliteD1(), TURN_KEY_ID: "test-id" };
+  const req = client(env);
+  const failureResponses = [
+    () => { throw new DOMException("test timeout", "TimeoutError"); },
+    () => new Response("provider error", { status: 503 }),
+    () => Response.json({ iceServers: [{ urls: "turns:turn.cloudflare.com:443?transport=tcp" }] }),
+  ];
+  const provider = t.mock.method(globalThis, "fetch", () => failureResponses.shift()());
+  const create = code => req("", "POST", { code, host_token: host });
+  const disabled = await create("345678");
+  assert.equal(disabled.status, 201);
+  assert.ok(!Object.hasOwn(await disabled.json(), "ice_servers"));
+  assert.equal(provider.mock.callCount(), 0);
+  env.TURN_KEY_API_TOKEN = "provider-only";
+  for (const code of ["345679", "345680", "345681"]) {
+    const response = await create(code);
+    assert.equal(response.status, 201);
+    assert.ok(!Object.hasOwn(await response.json(), "ice_servers"));
+  }
+  assert.equal(provider.mock.callCount(), 3);
+});
+
 test("a lost poll is replayed until acknowledged while legacy peers consume their own inbox once", async () => {
   const env = { DB: new SqliteD1() }, req = client(env);
   await req("", "POST", {code: "345678", host_token: host});

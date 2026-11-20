@@ -123,6 +123,35 @@ func set_running(value: bool) -> void:
 	if is_instance_valid(hero) and hero.has_method("_set_avatar_animation_state"):
 		hero.call("_set_avatar_animation_state", false)
 
+func setup_tutorial_demo() -> void:
+	demand = 76.0
+	demand_target = demand
+	supply = 48.0
+	# The next ordinary demand event is the school's lunchtime energy saving.
+	rng.seed = 4
+
+
+func tutorial_demo_step(demo_time: float) -> Dictionary:
+	var keys: Array[int] = []
+	var hint := "수요 막대가 공급 막대보다 높아요. 도시가 쓸 전기가 더 필요해요."
+	if demo_time >= 0.85 and phase_elapsed >= 0.65:
+		if demand - supply > 2.0:
+			keys.append(KEY_W)
+		elif supply - demand > 2.0:
+			keys.append(KEY_S)
+		if phase_scored:
+			hint = "두 막대를 비슷하게 유지하니 도시의 전력 공급이 안정됐어요."
+		elif phase_index == 1:
+			hint = "W로 공급을 늘리고 수요와 비슷해지면 키를 놓아요."
+		else:
+			hint = "S로 공급을 줄여 낮아진 수요에 다시 맞춰요."
+	elif phase_index > 1:
+		hint = "점심시간 절전으로 수요가 줄었어요. 공급 막대와 비교해요."
+	if demo_time >= 8.2:
+		return {"keys": [], "hint": "수요가 늘면 공급도 늘리고, 수요가 줄면 공급도 줄여요.", "done": true}
+	return {"keys": keys, "hint": hint}
+
+
 func _build_viewport() -> void:
 	viewport = SubViewport.new()
 	viewport.name = "SmartGridViewport"

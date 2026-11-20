@@ -111,6 +111,33 @@ func set_running(value: bool) -> void:
 	if is_instance_valid(hero) and hero.has_method("_set_avatar_animation_state"):
 		hero.call("_set_avatar_animation_state", false)
 
+
+func setup_tutorial_demo() -> void:
+	# Start one ordinary phase before the game's regular fourth-phase gust.
+	phase_index = 3
+	wind_angle = -28.0
+	turbine_yaw = 28.0
+
+
+func tutorial_demo_step(demo_time: float) -> Dictionary:
+	var keys: Array[int] = []
+	var hint := "풍향계와 터빈이 어느 방향을 가리키는지 비교해요."
+	if storm_phase:
+		hint = "빨간 돌풍 경보가 떴어요. 잠시 발전을 멈출 때예요."
+		if phase_elapsed >= 0.75:
+			keys.append(KEY_SPACE)
+			hint = "Space로 브레이크를 걸어 강한 바람에서 날개를 지켜요."
+	elif demo_time >= 0.8:
+		var offset := wind_angle - turbine_yaw
+		if absf(offset) > 1.5:
+			keys.append(KEY_A if offset < 0.0 else KEY_D)
+			hint = "A로 터빈을 왼쪽 풍향에 맞춰요." if offset < 0.0 else "D로 터빈을 오른쪽 풍향에 맞춰요."
+		else:
+			hint = "풍향과 터빈이 맞았어요. 발전량이 올라가는 모습을 보세요."
+	if demo_time >= 10.5:
+		return {"keys": [], "hint": "돌풍이 지나가면 브레이크를 놓고 새 풍향에 맞춰 다시 발전해요.", "done": true}
+	return {"keys": keys, "hint": hint}
+
 func _build_viewport() -> void:
 	viewport = SubViewport.new()
 	viewport.name = "WindPilotViewport"

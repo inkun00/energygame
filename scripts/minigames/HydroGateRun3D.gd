@@ -206,6 +206,32 @@ func set_practice_mode(value: bool) -> void:
 		notice_remaining = 4.0
 	_update_visuals()
 
+
+func tutorial_demo_step(demo_time: float) -> Dictionary:
+	var keys: Array[int] = []
+	var hint := "물이 중단 수문보다 높아요. A로 점프할 자리에 서요."
+	if demo_time >= 1.25:
+		hint = "W로 뛰고 D로 움직여 중단 발판의 레버에 다가가요."
+	if demo_time >= 0.55 and demo_time < 0.85:
+		keys.append(KEY_A)
+	elif demo_time >= 1.35 and demo_time < 1.55:
+		keys.append(KEY_W)
+	elif demo_time >= 1.55 and hero_x < LEVER_X[1] - 0.12:
+		keys.append(KEY_D)
+	elif open_gate >= 0:
+		hint = "열린 수문에서 떨어지는 물이 터빈을 돌려요. 발전량이 늘고 있어요."
+		if water_level <= last_open_level - 20.0:
+			keys.append(KEY_E)
+			hint = "E로 수문을 닫아 물을 다시 모아요."
+	elif selected_gate == 1 and not practice_opened_gate and demo_time >= 2.8:
+		# Release between presses so the real lever receives three distinct taps.
+		if fmod(demo_time - 2.8, 0.55) < 0.15:
+			keys.append(KEY_SPACE)
+		hint = "레버 앞에서 Space를 세 번 눌러 수문을 열어요."
+	elif practice_closed_gate:
+		return {"keys": [], "hint": "E로 수문을 닫았어요. 물이 차오르면 다시 낙차를 이용할 수 있어요.", "done": demo_time >= 7.5}
+	return {"keys": keys, "hint": hint}
+
 func get_practice_progress() -> Dictionary:
 	var checks := [practice_reached_lever, practice_opened_gate, practice_generated_power, practice_closed_gate]
 	var step := 0

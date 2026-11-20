@@ -128,6 +128,24 @@ func setup(player_data: Dictionary, game_seed: int) -> void:
 	_build_house_course()
 	running = true
 
+func tutorial_demo_step(demo_time: float) -> Dictionary:
+	if demo_time < 2.0:
+		return {"keys": [], "hint": "스피커 옆에 ‘사용 중’이 보여요. 음악이 재생 중이라 플러그를 그대로 둬요."}
+	if saved_watts == 0:
+		var target := _nearest_unresolved_device()
+		if target.is_empty() or not bool(target["waste"]):
+			return {"keys": [KEY_D], "hint": "오른쪽으로 걸어가서 TV에 표시된 전력을 살펴봐요."}
+		if demo_time < 4.4:
+			return {"keys": [], "hint": "TV 화면은 꺼져 있어도 ‘대기 중 · %d W’가 보여요." % int(target["watt"])}
+		return {"keys": [KEY_SPACE], "hint": "TV 앞에서 차단 키를 눌러 대기전력을 줄여요."}
+	if demo_time < 6.2:
+		return {"keys": [], "hint": "플러그를 빼니 TV가 0 W가 됐어요. 음악은 계속 들을 수 있어요."}
+	if hero.position.x < 8.8:
+		if hero.position.x >= 5.5 and is_zero_approx(vertical_velocity) and not jump_was_down:
+			return {"keys": [KEY_D, KEY_W], "hint": "앞에 탁자가 있어요. 오른쪽으로 달리며 점프해요."}
+		return {"keys": [KEY_D], "hint": "탁자 너머로 이동해 다음 기기의 표시를 살펴봐요."}
+	return {"keys": [], "hint": "사용 중인 기기는 두고, 쓰지 않는 기기의 대기전력만 줄여요.", "done": demo_time >= 9.5}
+
 func set_running(value: bool) -> void:
 	running = value
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if value else SubViewport.UPDATE_DISABLED
@@ -367,7 +385,7 @@ func _process(delta: float) -> void:
 	if not running or not is_instance_valid(hero):
 		return
 	play_elapsed += delta
-	var direction := Input.get_axis("ui_left", "ui_right")
+	var direction := MINIGAME_INPUT.horizontal_axis()
 	if MINIGAME_INPUT.is_pressed(KEY_A): direction -= 1.0
 	if MINIGAME_INPUT.is_pressed(KEY_D): direction += 1.0
 	direction = clampf(direction, -1.0, 1.0)

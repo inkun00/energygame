@@ -5,9 +5,17 @@ var sent: Array[Dictionary] = []
 var remote_descriptions: Array[String] = []
 var remote_candidates: Array[String] = []
 var online_frames := false
+var heartbeat_peers: Array[int] = []
+var connected_browser_peer := 0
 
 func _ready() -> void:
 	set_process(false)
+
+func _send_connection_heartbeat(peer_id: int) -> void:
+	heartbeat_peers.append(peer_id)
+
+func _browser_peer_is_connected(peer_id: int) -> bool:
+	return peer_id == connected_browser_peer
 
 func _set_browser_online_frames(active: bool) -> void:
 	online_frames = active

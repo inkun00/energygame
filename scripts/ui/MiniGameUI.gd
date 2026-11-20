@@ -21,6 +21,7 @@ const LEARNING_FEEDBACK = preload("res://scripts/minigames/MiniGameLearningFeedb
 const MINIGAME_INPUT = preload("res://scripts/minigames/MiniGameInput.gd")
 const PRACTICE = preload("res://scripts/minigames/MiniGamePractice.gd")
 const GUIDE_PREVIEW = preload("res://scripts/ui/MiniGameGuidePreview.gd")
+const DEMONSTRATION = preload("res://scripts/ui/MiniGameDemonstration.gd")
 
 const STANDBY_DEVICES := [
 	{"name": "꺼진 TV", "watt": 3, "waste": true},
@@ -71,7 +72,12 @@ var guide_tip_label: Label
 var guide_rewards_label: Label
 var guide_start_button: Button
 var guide_practice_button: Button
+var guide_demo_button: Button
 var practice_actions: HBoxContainer
+var practice_end_button: Button
+var demo_replay_button: Button
+var demo_practice_button: Button
+var demonstration := DEMONSTRATION.new()
 var practice_active := false
 var practice_elapsed := 0.0
 var practice_completed_at := -1.0
@@ -203,6 +209,8 @@ func _build_ui() -> void:
 	score_label.add_theme_font_size_override("font_size", 23)
 	score_label.add_theme_color_override("font_color", Color("ffe06b"))
 	status_row.add_child(score_label)
+	status_row.add_child(demonstration)
+	demonstration.hide()
 
 	arena_panel = PanelContainer.new()
 	arena_panel.custom_minimum_size = Vector2(0, 400)
@@ -254,7 +262,15 @@ func _build_ui() -> void:
 	practice_actions.alignment = BoxContainer.ALIGNMENT_CENTER
 	practice_actions.visible = false
 	content.add_child(practice_actions)
-	var practice_end_button := _make_button("연습 마치기 · 안내로" if MINIGAME_INPUT.uses_touch() else "연습 마치기 · 안내로 (Esc)", Color("287ca8"))
+	demo_replay_button = _make_button("다시 보기", UI.TEAL_DARK)
+	demo_replay_button.custom_minimum_size = Vector2(120, 46)
+	demo_replay_button.pressed.connect(_switch_from_demo.bind(true))
+	practice_actions.add_child(demo_replay_button)
+	demo_practice_button = _make_button("직접 연습", UI.TEAL_DARK)
+	demo_practice_button.custom_minimum_size = Vector2(120, 46)
+	demo_practice_button.pressed.connect(_switch_from_demo.bind(false))
+	practice_actions.add_child(demo_practice_button)
+	practice_end_button = _make_button("안내로", Color("287ca8"))
 	# Space is a repeated gate action here, never a GUI button activation.
 	# The keyboard exit remains Esc; this button is a pointer alternative.
 	practice_end_button.focus_mode = Control.FOCUS_NONE
@@ -293,6 +309,7 @@ func _fit_arcade_layout() -> void:
 	guide_controls_container.columns = 1 if narrow else 2
 	guide_start_button.custom_minimum_size.y = 80 if narrow else 48
 	guide_practice_button.custom_minimum_size.y = 80 if narrow else 48
+	guide_demo_button.custom_minimum_size.y = 80 if narrow else 48
 	goal_label.add_theme_font_size_override("font_size", 23 if narrow else 17)
 	feedback_label.add_theme_font_size_override("font_size", 22 if narrow else 17)
 	guide_objective_label.add_theme_font_size_override("font_size", 24 if narrow else 18)
@@ -316,6 +333,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not visible or not is_guide_open():
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_T:
+			get_viewport().set_input_as_handled()
+			_start_practice(true)
+			return
 		if event.keycode == KEY_P:
 			get_viewport().set_input_as_handled()
 			_start_practice()
@@ -324,6 +345,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			if get_viewport().gui_get_focus_owner() == guide_practice_button:
 				_start_practice()
+			elif get_viewport().gui_get_focus_owner() == guide_demo_button:
+				_start_practice(true)
 			else:
 				dismiss_guide()
 
@@ -416,6 +439,17 @@ func _process(delta: float) -> void:
 		var practice_seconds: float = PRACTICE.seconds_for(game_id)
 		if not is_instance_valid(solar_arcade):
 			_advance_arcade_simulation(minf(practice_seconds, practice_elapsed))
+		if demonstration.visible:
+			goal_label.text = MINIGAME_INPUT.hint(game_id, demonstration.hint)
+			timer_label.text = "자동 시연"
+			if practice_completed_at < 0.0 and (demonstration.finished or simulation_elapsed >= practice_seconds - 0.001):
+				practice_completed_at = practice_elapsed
+				_set_arcades_running(false)
+				timer_label.text = "시연 마침"
+				demo_practice_button.grab_focus()
+			elif practice_completed_at >= 0.0:
+				timer_label.text = "시연 마침"
+			return
 		var progress: Dictionary = practice_plan.progress(practice_arcade)
 		var practice_steps := 4 if game_id == "hydro_gate" else 2
 		goal_label.text = "조작 연습 %d/%d  |  %s" % [mini(practice_steps, int(progress.get("step", 0)) + 1), practice_steps, MINIGAME_INPUT.hint(game_id, str(progress.get("hint", "")))]
@@ -477,10 +511,16 @@ func _advance_arcade_simulation(target_time: float) -> void:
 	var step_size := get_physics_process_delta_time() if is_instance_valid(solar_arcade) else 1.0 / 60.0
 	step_size = maxf(0.001, step_size)
 	while target_time - simulation_elapsed >= step_size - 0.000001:
+		if demonstration.visible and (demonstration.finished or practice_completed_at >= 0.0):
+			break
 		simulation_elapsed += step_size
 		for arcade in arcades:
 			if is_instance_valid(arcade):
-				arcade.call("_physics_process" if arcade == solar_arcade else "_process", step_size)
+				var tick := &"_physics_process" if arcade == solar_arcade else &"_process"
+				if demonstration.visible:
+					demonstration.advance(arcade, tick, step_size, simulation_elapsed)
+				else:
+					arcade.call(tick, step_size)
 
 func _on_minigame_started(data: Dictionary) -> void:
 	if not surface_enabled:
@@ -548,7 +588,8 @@ func _on_submission_changed(state: Dictionary) -> void:
 		var player_count := int(state.get("player_count", 4))
 		var guide_seconds := ceili(float(state.get("guide_remaining", 0.0)))
 		if practice_active:
-			submission_label.text = "조작 연습 · %d초 뒤 전체 자동 시작" % guide_seconds if NetworkManager.is_online else ("한 단계씩 직접 해봐요" if MINIGAME_INPUT.uses_touch() else "한 단계씩 해봐요 · Esc로 안내로 돌아가기")
+			if NetworkManager.is_online:
+				submission_label.text = "%d초 뒤 모두 함께 시작해요." % guide_seconds
 		elif is_guide_open():
 			guide_badge_label.text = "게임 방법 · %d명 준비 · %d초 뒤 자동 시작" % [ready_count, guide_seconds]
 			if GameManager.guided_tutorial_active:
@@ -757,7 +798,7 @@ func _set_arcades_running(running_state: bool) -> void:
 	else:
 		get_viewport().gui_release_focus()
 	if is_instance_valid(touch_controls):
-		touch_controls.visible = running_state and MINIGAME_INPUT.uses_touch()
+		touch_controls.visible = running_state and not demonstration.visible and MINIGAME_INPUT.uses_touch()
 		arena_panel.custom_minimum_size.y = 290 if touch_controls.visible else 400
 	var arcades := [
 		solar_arcade, wind_arcade, grid_arcade, standby_arcade,
@@ -829,9 +870,17 @@ func _build_guide_ui() -> void:
 	var footer := HBoxContainer.new()
 	footer.add_theme_constant_override("separation", 12)
 	content.add_child(footer)
+	guide_demo_button = Button.new()
+	guide_demo_button.text = "자동 시연"
+	guide_demo_button.custom_minimum_size = Vector2(0, 48)
+	guide_demo_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	guide_demo_button.pressed.connect(_start_practice.bind(true))
+	UI.apply_secondary_button(guide_demo_button)
+	footer.add_child(guide_demo_button)
 	guide_practice_button = Button.new()
 	guide_practice_button.text = "직접 연습 (P)"
-	guide_practice_button.custom_minimum_size = Vector2(190, 48)
+	guide_practice_button.custom_minimum_size = Vector2(0, 48)
+	guide_practice_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	guide_practice_button.add_theme_font_size_override("font_size", 18)
 	guide_practice_button.pressed.connect(_start_practice)
 	UI.apply_secondary_button(guide_practice_button)
@@ -876,7 +925,8 @@ func _populate_guide_content() -> void:
 	var title := str(game_data.get("title", "에너지 미니게임"))
 	var duration_val := int(game_data.get("duration", 30))
 	guide_title_label.text = title
-	guide_start_button.text = "준비 완료" if MINIGAME_INPUT.uses_touch() else "준비 완료  (Space / Enter)"
+	guide_demo_button.text = "자동 시연" if MINIGAME_INPUT.uses_touch() else "자동 시연 (T)"
+	guide_start_button.text = "준비 완료" if MINIGAME_INPUT.uses_touch() or size.y > size.x else "준비 완료  (Space / Enter)"
 	guide_practice_button.text = "직접 연습" if MINIGAME_INPUT.uses_touch() else "직접 연습 (P)"
 	guide_badge_label.text = "게임 방법 · %d초" % duration_val
 	guide_objective_label.text = str(GUIDE_PREVIEW.OBJECTIVES.get(game_id, game_data.get("objective", "제한시간 안에 최고 점수를 달성하세요.")))
@@ -987,8 +1037,8 @@ func _start_hydro_practice() -> void:
 	# Kept for the existing hydro entry point and older practice links/tests.
 	_start_practice()
 
-func _start_practice() -> void:
-	if not is_guide_open() or round_started_locally or not active:
+func _start_practice(automatic: bool = false) -> void:
+	if not guide_open or practice_active or round_started_locally or not active:
 		return
 	guide_preview.call("clear")
 	practice_arcade = _current_arcade()
@@ -1018,9 +1068,29 @@ func _start_practice() -> void:
 	submission_label.text = "한 단계씩 직접 해봐요" if MINIGAME_INPUT.uses_touch() else "Esc로 안내로 돌아가기"
 	if game_id == "hydro_gate":
 		hydro_arcade.call("set_practice_mode", true)
+	demo_replay_button.visible = automatic
+	demo_practice_button.visible = automatic
+	practice_end_button.text = "안내로" if automatic else ("연습 마치기 · 안내로" if MINIGAME_INPUT.uses_touch() else "연습 마치기 · 안내로 (Esc)")
+	practice_end_button.focus_mode = Control.FOCUS_ALL if automatic else Control.FOCUS_NONE
+	practice_end_button.custom_minimum_size.x = 120 if automatic else 320
+	if automatic:
+		if practice_arcade.has_method("setup_tutorial_demo"):
+			practice_arcade.call("setup_tutorial_demo")
+		demonstration.begin(game_id)
+		timer_bar.hide()
+		score_label.hide()
+		mode_label.text = "튜토리얼"
+		timer_label.text = "자동 시연"
+		feedback_label.text = ""
+		submission_label.text = ""
 	_set_arcades_running(true)
 	if NetworkManager.is_online:
 		_on_submission_changed(GameManager.get_minigame_state())
+
+func _switch_from_demo(automatic: bool) -> void:
+	if demonstration.visible:
+		_finish_practice(false)
+		_start_practice(automatic)
 
 func _finish_hydro_practice(show_guide: bool = true) -> void:
 	_finish_practice(show_guide)
@@ -1060,6 +1130,11 @@ func _current_arcade() -> Node:
 	return null
 
 func _disconnect_practice() -> void:
+	if is_instance_valid(demonstration):
+		demonstration.hide()
+	if is_instance_valid(timer_bar):
+		timer_bar.show()
+		score_label.show()
 	if is_instance_valid(practice_arcade) and practice_arcade.is_connected("arcade_event", _on_practice_event):
 		practice_arcade.disconnect("arcade_event", _on_practice_event)
 	practice_arcade = null

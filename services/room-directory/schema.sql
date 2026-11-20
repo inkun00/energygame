@@ -53,6 +53,13 @@ CREATE TABLE IF NOT EXISTS webrtc_started_rooms (
   code TEXT PRIMARY KEY REFERENCES webrtc_rooms(code) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS webrtc_turn_grants (
+  code TEXT NOT NULL, peer_id INTEGER NOT NULL, token_hash TEXT NOT NULL,
+  key_id TEXT NOT NULL, claim TEXT NOT NULL, usable_until INTEGER NOT NULL, servers TEXT,
+  PRIMARY KEY (code, peer_id),
+  FOREIGN KEY (code, peer_id) REFERENCES webrtc_peers(code, peer_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS score_attempts (
   id TEXT PRIMARY KEY, owner TEXT NOT NULL, game TEXT NOT NULL,
   round_key TEXT NOT NULL, started INTEGER NOT NULL, network TEXT NOT NULL,
