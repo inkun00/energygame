@@ -102,6 +102,7 @@ func _test_browser_directory() -> void:
 	var relay := {"urls": ["turn:relay.example:3478?transport=udp", "turns:relay.example:443?transport=tcp"],
 		"username": "test-session", "credential": "temporary-example"}
 	var provisioned := [{"urls": ["stun:relay.example:3478"]}, relay]
+	_test_direct_first_ice(provisioned)
 	probe._create_browser_room({})
 	var old_registration: Dictionary = probe.sent.back()
 	probe.disconnect_network()
@@ -239,6 +240,79 @@ func _test_guest_connection_deadlines() -> void:
 		"a known host reply distinguishes direct-link failure and cannot renew the deadline twice")
 	guest.room_code_lookup_failed.disconnect(on_failure)
 	guest.queue_free()
+
+
+func _test_direct_first_ice(servers: Array) -> void:
+	var host: Node = load("res://scripts/tests/WebRoomDirectoryProbe.gd").new()
+	var guest: Node = load("res://scripts/tests/WebRoomDirectoryProbe.gd").new()
+	root.add_child(host)
+	root.add_child(guest)
+	host._create_browser_room({})
+	host.respond(host.sent.back(), HTTPRequest.RESULT_SUCCESS, 201, {"ice_servers": servers})
+	var admitted := {"peer_id": 2, "ice_servers": servers}
+	var direct := [servers[0]]
+	guest._join_browser_room("345678", {})
+	guest.respond(guest.sent.back(), HTTPRequest.RESULT_SUCCESS, 201, admitted)
+	guest._process(30.1)
+	_expect(guest.ice_configs.size() == 1 and guest.ice_configs[0].servers == direct and not guest.is_online,
+		"a silent host consumes no relay allocation even when credentials were issued")
+	guest.ice_configs.clear()
+	guest._join_browser_room("345678", {})
+	guest.respond(guest.sent.back(), HTTPRequest.RESULT_SUCCESS, 201, admitted)
+	var seat_token: String = guest._host_directory_token
+	guest._send_browser_signal(1, "offer", {"sdp": "direct"})
+	var initial: Dictionary = guest.sent.back().payload
+	_expect(initial.data.relay_fallback == false, "the first offer explicitly requests direct connectivity")
+	host._apply_browser_signal({"from_peer": 2, "type": "offer", "data": initial.data})
+	var answer: Dictionary = host.sent.back().payload
+	guest._apply_browser_signal({"from_peer": 1, "type": "answer", "data": answer.data})
+	_expect(guest.ice_configs[0].servers == direct and host.ice_configs[0].servers == direct,
+		"neither endpoint gives TURN credentials to the browser on its direct attempt")
+	guest.connected_browser_peer = 1
+	guest._process(8.1)
+	_expect(guest.is_online and guest.ice_configs.size() == 1, "a connected direct peer can finish opening its channels without TURN")
+	guest.connected_browser_peer = 0
+	guest._drop_browser_connection(1)
+	guest._on_connection_failed()
+	_expect(guest.ice_configs.size() == 2 and guest.ice_configs.back().servers == servers and guest._host_directory_token == seat_token,
+		"a failed direct connection retries with TURN once in its original seat")
+	guest._send_browser_signal(1, "offer", {"sdp": "fallback"})
+	var retry: Dictionary = guest.sent.back().payload
+	_expect(retry.data.relay_fallback and retry.data.attempt != initial.data.attempt and retry.data.generation > initial.data.generation,
+		"fallback offers use a fresh generation")
+	host._apply_browser_signal({"from_peer": 2, "type": "candidate", "data": {"attempt": retry.data.attempt, "generation": retry.data.generation, "sdp": "early-relay"}})
+	host._apply_browser_signal({"from_peer": 2, "type": "offer", "data": retry.data})
+	_expect(host.ice_configs.back().servers == servers and host.remote_candidates.has("early-relay"),
+		"the host enables TURN for this peer and applies its early ICE candidates")
+	var fallback_answer: Dictionary = host.sent.back().payload
+	guest._apply_browser_signal({"from_peer": 1, "type": "answer", "data": fallback_answer.data})
+	_expect(not guest._try_browser_relay(), "a failed relay attempt cannot recursively request another allocation")
+	host._apply_browser_signal({"from_peer": 2, "type": "offer", "data": initial.data})
+	_expect(host.ice_configs.size() == 2, "replayed direct offers cannot downgrade the replacement")
+	host._apply_browser_signal({"from_peer": 3, "type": "offer", "data": {"sdp": "second-direct", "attempt": "other-seat", "relay_fallback": false}})
+	_expect(host.ice_configs.back().servers == direct and host._browser_ice_servers_for(2) == servers, "only the peer needing fallback gets TURN")
+	host._apply_browser_signal({"from_peer": 4, "type": "offer", "data": {"sdp": "legacy", "attempt": "legacy-seat"}})
+	_expect(host.ice_configs.back().servers == servers, "old clients without two-stage signaling retain the legacy ICE choices")
+	guest._reconnecting = true
+	guest._reconnect_deadline = Time.get_ticks_msec() + 30000
+	guest._attempt_reconnect()
+	_expect(guest.ice_configs.back().servers == servers and guest._next_reconnect_attempt == guest._reconnect_deadline,
+		"recovery retains a necessary relay route without resetting its bounded deadline")
+	guest._join_browser_room("345678", {})
+	guest.ice_configs.clear()
+	guest.respond(guest.sent.back(), HTTPRequest.RESULT_SUCCESS, 201, admitted)
+	guest._apply_browser_signal({"from_peer": 1, "type": "answer", "data": {"attempt": "stale", "sdp": "old"}})
+	guest._process(8.2)
+	_expect(guest.ice_configs.size() == 1, "a stale host answer cannot start the relay grace period")
+	guest._apply_browser_signal({"from_peer": 1, "type": "answer", "data": {"attempt": guest._web_connection_attempts[1], "sdp": "new"}})
+	guest._process(7.9)
+	_expect(guest.ice_configs.size() == 1, "direct ICE gets its full connection window after the matched answer")
+	guest._process(0.2)
+	_expect(guest.ice_configs.size() == 2 and guest.ice_configs.back().servers == servers, "stalled direct ICE triggers one bounded automatic relay retry")
+	guest.disconnect_network()
+	host.disconnect_network()
+	guest.queue_free()
+	host.queue_free()
 
 
 func _test_dropped_legacy_batches(host: Node) -> void:

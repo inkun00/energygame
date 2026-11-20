@@ -32,6 +32,7 @@ const WEB_SIGNAL_REPLAY_INTERVAL := 4.0
 const WEB_SIGNAL_REPLAY_LIMIT := 3
 const WEB_HOST_ANSWER_TIMEOUT_SECONDS := 30.0
 const WEB_CHANNEL_OPEN_GRACE_SECONDS := 15.0
+const WEB_DIRECT_CHANNEL_GRACE_SECONDS := 8.0
 const GAME_CHECKPOINT_INTERVAL_SECONDS := 5.0
 const CHECKPOINTS_PER_FULL_STATE := 12
 const RECONNECT_GRACE_SECONDS := 30.0
@@ -76,6 +77,11 @@ var _external_host_ip := ""
 var _directory_registration_attempts := 0
 var _web_transport := false
 var _web_ice_servers: Array = WEB_ICE_SERVERS
+var _web_direct_ice_servers: Array = WEB_ICE_SERVERS
+var _web_relay_peers: Dictionary = {}
+# Null until the host answers this guest offer. Keep that evidence if Godot
+# removes a failed peer before emitting its connection_failed signal.
+var _web_host_relay_available: Variant = null
 var _ice_url_pattern := RegEx.create_from_string(r"^(stun|stuns|turn|turns):([a-z0-9.-]+|\[[a-f0-9:.]+\])(?::([0-9]{1,5}))?(?:\?transport=(udp|tcp))?\z")
 var _web_multiplayer_peer: WebRTCMultiplayerPeer
 var _web_connections: Dictionary = {}
@@ -86,6 +92,7 @@ var _web_signal_poll_pending := false
 var _web_processed_signal_id := 0
 var _web_signaling_active := false
 var _web_connect_remaining := 0.0
+var _web_direct_check_remaining := 0.0
 var _full_game_snapshot_remaining := 0.0
 var _checkpoints_until_full := 0
 var _reliable_game_state: Dictionary = {}
@@ -150,6 +157,10 @@ func _process(delta: float) -> void:
 		_web_connect_remaining -= delta
 		if _web_connect_remaining <= 0.0:
 			_fail_browser_guest_connection()
+	if _web_direct_check_remaining > 0.0:
+		_web_direct_check_remaining -= delta
+		if _web_direct_check_remaining <= 0.0:
+			_try_browser_relay()
 	if _web_transport and _web_signaling_active:
 		_replay_pending_browser_signals(delta)
 		_web_signal_poll_remaining -= delta
@@ -319,6 +330,9 @@ func disconnect_network() -> void:
 	_host_directory_token = ""
 	_web_transport = false
 	_web_ice_servers = WEB_ICE_SERVERS
+	_web_direct_ice_servers = WEB_ICE_SERVERS
+	_web_relay_peers.clear()
+	_web_host_relay_available = null
 	_web_multiplayer_peer = null
 	_web_connections.clear()
 	_web_remote_description_set.clear()
@@ -328,6 +342,7 @@ func disconnect_network() -> void:
 	_web_processed_signal_id = 0
 	_web_signaling_active = false
 	_web_connect_remaining = 0.0
+	_web_direct_check_remaining = 0.0
 	_full_game_snapshot_remaining = 0.0
 	_reset_game_checkpoints()
 	_last_open_market_sync_signature = ""
@@ -649,10 +664,12 @@ func _on_browser_room_joined(result: int, response_code: int, _headers: PackedSt
 
 func _set_room_ice_servers(response: Dictionary) -> void:
 	_web_ice_servers = WEB_ICE_SERVERS
+	_web_direct_ice_servers = WEB_ICE_SERVERS
 	var supplied = response.get("ice_servers")
 	if not (supplied is Array):
 		return
 	var servers: Array[Dictionary] = []
+	var direct: Array[Dictionary] = []
 	for entry in supplied.slice(0, 8):
 		if not (entry is Dictionary):
 			continue
@@ -662,6 +679,7 @@ func _set_room_ice_servers(response: Dictionary) -> void:
 		if not (urls is Array):
 			continue
 		var accepted: Array[String] = []
+		var stun_urls: Array[String] = []
 		var uses_turn := false
 		for value in urls.slice(0, 8):
 			if not (value is String) or value.length() > 512:
@@ -679,6 +697,10 @@ func _set_room_ice_servers(response: Dictionary) -> void:
 			uses_turn = uses_turn or relay
 			if not accepted.has(url):
 				accepted.append(url)
+				if not relay:
+					stun_urls.append(url)
+		if not stun_urls.is_empty():
+			direct.append({"urls": stun_urls})
 		if accepted.is_empty():
 			continue
 		var server := {"urls": accepted}
@@ -694,6 +716,16 @@ func _set_room_ice_servers(response: Dictionary) -> void:
 		servers.append(server)
 	if not servers.is_empty():
 		_web_ice_servers = servers
+	if not direct.is_empty():
+		_web_direct_ice_servers = direct
+
+
+func _browser_ice_servers_for(peer_id: int) -> Array:
+	return _web_ice_servers if _web_relay_peers.has(peer_id) else _web_direct_ice_servers
+
+
+func _has_browser_turn() -> bool:
+	return _web_ice_servers.any(func(server: Dictionary): return server.has("credential"))
 
 
 func _ensure_browser_connection(remote_peer_id: int, create_offer: bool) -> Error:
@@ -702,8 +734,9 @@ func _ensure_browser_connection(remote_peer_id: int, create_offer: bool) -> Erro
 	if _web_connections.has(remote_peer_id):
 		return OK
 	var connection := WebRTCPeerConnection.new()
-	var initialize_error := connection.initialize({"iceServers": _web_ice_servers})
-	if initialize_error != OK and _web_ice_servers != WEB_ICE_SERVERS:
+	var ice_servers := _browser_ice_servers_for(remote_peer_id)
+	var initialize_error := connection.initialize({"iceServers": ice_servers})
+	if initialize_error != OK and ice_servers != WEB_ICE_SERVERS:
 		connection.close()
 		connection = WebRTCPeerConnection.new()
 		initialize_error = connection.initialize({"iceServers": WEB_ICE_SERVERS})
@@ -745,6 +778,10 @@ func _send_browser_signal(remote_peer_id: int, signal_type: String, data: Dictio
 	if not _web_transport or room_code.is_empty() or _host_directory_token.is_empty():
 		return
 	var signal_payload := data.duplicate(true)
+	if signal_type == "offer":
+		signal_payload["relay_fallback"] = _web_relay_peers.has(remote_peer_id)
+	elif signal_type == "answer":
+		signal_payload["relay_available"] = _has_browser_turn()
 	signal_payload["attempt"] = str(_web_connection_attempts.get(remote_peer_id, ""))
 	signal_payload["generation"] = int(_web_peer_generations.get(remote_peer_id, 0))
 	signal_payload["delivery_id"] = Crypto.new().generate_random_bytes(12).hex_encode()
@@ -904,6 +941,11 @@ func _apply_browser_signal(signal_data: Dictionary) -> void:
 				_drop_browser_connection(remote_peer_id)
 		_web_connection_attempts[remote_peer_id] = attempt
 		_web_peer_generations[remote_peer_id] = generation
+		# Older guests gather their candidates in one pass and cannot request a retry.
+		if data.get("relay_fallback", true) == true:
+			_web_relay_peers[remote_peer_id] = true
+		else:
+			_web_relay_peers.erase(remote_peer_id)
 		var candidate_key := "%d:%d:%s" % [remote_peer_id, generation, attempt]
 		_web_pending_candidates[remote_peer_id] = _web_early_candidates.get(candidate_key, [])
 		for early_key in _web_early_candidates.keys():
@@ -916,8 +958,14 @@ func _apply_browser_signal(signal_data: Dictionary) -> void:
 		if attempt != current_attempt or bool(_web_remote_description_set.get(remote_peer_id, false)):
 			return
 		_set_browser_remote_description(remote_peer_id, "answer", str(data.get("sdp", "")))
-		if _web_connect_remaining > 0.0 and bool(_web_remote_description_set.get(remote_peer_id, false)):
-			_web_connect_remaining = maxf(_web_connect_remaining, WEB_CHANNEL_OPEN_GRACE_SECONDS)
+		if bool(_web_remote_description_set.get(remote_peer_id, false)):
+			_web_host_relay_available = data.get("relay_available", false) == true
+			if _can_retry_browser_with_relay():
+				_web_direct_check_remaining = WEB_DIRECT_CHANNEL_GRACE_SECONDS
+			if _web_connect_remaining > 0.0:
+				_web_connect_remaining = maxf(_web_connect_remaining, WEB_CHANNEL_OPEN_GRACE_SECONDS)
+			elif _reconnecting and not _web_relay_peers.has(1):
+				_next_reconnect_attempt = mini(_reconnect_deadline, Time.get_ticks_msec() + int(WEB_CHANNEL_OPEN_GRACE_SECONDS * 1000))
 	elif signal_type == "candidate":
 		var candidate := {"media": str(data.get("media", "")), "index": int(data.get("index", 0)), "sdp": str(data.get("sdp", ""))}
 		if attempt != current_attempt:
@@ -942,6 +990,8 @@ func _drop_browser_connection(peer_id: int) -> void:
 	_web_connections.erase(peer_id)
 	_web_remote_description_set.erase(peer_id)
 	_web_pending_candidates.erase(peer_id)
+	if is_host:
+		_web_relay_peers.erase(peer_id)
 	if _web_connection_attempts.has(peer_id):
 		_web_retired_attempts["%d:%s" % [peer_id, _web_connection_attempts[peer_id]]] = true
 		if _web_retired_attempts.size() > 64:
@@ -1315,7 +1365,8 @@ func _update_connection_recovery() -> void:
 				_last_recovery_seconds = seconds
 				recovery_state_changed.emit({"mode": "reconnecting", "remaining": seconds})
 			if now >= _next_reconnect_attempt:
-				_attempt_reconnect()
+				if not _try_browser_relay():
+					_attempt_reconnect()
 		elif _connection_is_unresponsive(1, _last_host_contact, now):
 			_begin_reconnect()
 		elif _heartbeat_due(now) and 1 in multiplayer.get_peers():
@@ -1391,6 +1442,8 @@ func _begin_reconnect() -> void:
 
 
 func _close_client_transport() -> void:
+	_web_direct_check_remaining = 0.0
+	_web_host_relay_available = null
 	var old_peer := multiplayer.multiplayer_peer
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	if old_peer and not (old_peer is OfflineMultiplayerPeer):
@@ -1406,19 +1459,46 @@ func _close_client_transport() -> void:
 
 
 func _attempt_reconnect() -> void:
-	_close_client_transport()
 	_next_reconnect_attempt = Time.get_ticks_msec() + int(RECONNECT_ATTEMPT_SECONDS * 1000)
 	if _web_transport:
-		_web_multiplayer_peer = WebRTCMultiplayerPeer.new()
-		if _web_multiplayer_peer.create_client(my_peer_id) != OK:
-			return
-		multiplayer.multiplayer_peer = _web_multiplayer_peer
-		_web_signaling_active = true
-		_ensure_browser_connection(1, true)
+		if _web_relay_peers.has(1):
+			_next_reconnect_attempt = _reconnect_deadline
+		_reopen_browser_guest()
 	else:
+		_close_client_transport()
 		var peer := ENetMultiplayerPeer.new()
 		if peer.create_client(_join_address, _join_port) == OK:
 			multiplayer.multiplayer_peer = peer
+
+
+func _reopen_browser_guest() -> Error:
+	_close_client_transport()
+	_web_multiplayer_peer = WebRTCMultiplayerPeer.new()
+	var error := _web_multiplayer_peer.create_client(my_peer_id)
+	if error != OK:
+		return error
+	multiplayer.multiplayer_peer = _web_multiplayer_peer
+	_web_signaling_active = true
+	return _ensure_browser_connection(1, true)
+
+
+func _can_retry_browser_with_relay() -> bool:
+	if not _web_transport or is_host or _web_relay_peers.has(1) or _web_host_relay_available == null:
+		return false
+	return _has_browser_turn() or _web_host_relay_available == true
+
+
+func _try_browser_relay() -> bool:
+	if not _can_retry_browser_with_relay() or _browser_peer_is_connected(1):
+		return false
+	_web_relay_peers[1] = true
+	# Keep the authenticated room seat, the signaling cursor and the reconnect deadline.
+	# Only the failed direct connection and its old SDP/ICE generation are replaced.
+	if _reconnecting:
+		_next_reconnect_attempt = _reconnect_deadline
+	else:
+		_web_connect_remaining = WEB_CHANNEL_OPEN_GRACE_SECONDS
+	return _reopen_browser_guest() == OK
 
 
 func _fail_recovery(message: String) -> void:
@@ -1632,6 +1712,9 @@ func _on_peer_disconnected(id: int) -> void:
 func _on_connected_to_server() -> void:
 	_web_signal_replays.erase(1)
 	_web_connect_remaining = 0.0
+	_web_direct_check_remaining = 0.0
+	if _reconnecting:
+		_next_reconnect_attempt = _reconnect_deadline
 	my_peer_id = multiplayer.get_unique_id()
 	_last_host_contact = Time.get_ticks_msec()
 	print("[Network] 플레이어 호스트 접속 성공: %d" % my_peer_id)
@@ -1649,7 +1732,10 @@ func _send_pending_registration() -> void:
 
 func _on_connection_failed() -> void:
 	print("[Network] 플레이어 호스트 접속 실패")
-	if _reconnecting or _recovery_failed:
+	if _reconnecting:
+		_try_browser_relay()
+		return
+	if _recovery_failed:
 		return
 	if _web_connect_remaining > 0.0:
 		_fail_browser_guest_connection()
@@ -1659,8 +1745,12 @@ func _on_connection_failed() -> void:
 
 
 func _fail_browser_guest_connection() -> void:
+	if _try_browser_relay():
+		return
 	var detail := "방은 찾았지만 방장의 응답을 받지 못했습니다. 방장이 게임 탭을 열어 둔 상태에서 다시 참가해 주세요."
-	if bool(_web_remote_description_set.get(1, false)):
+	if _web_relay_peers.has(1):
+		detail = "방장을 찾았지만 직접 연결과 중계 연결을 모두 완료하지 못했습니다. 잠시 뒤 다시 참가해 주세요."
+	elif _web_host_relay_available != null:
 		detail = "방장이 응답했지만 두 기기를 직접 연결하지 못했습니다. 두 기기를 같은 Wi-Fi에 연결하거나 다른 네트워크에서 다시 참가해 주세요."
 	disconnect_network()
 	room_code_lookup_failed.emit(detail)
@@ -1668,6 +1758,9 @@ func _fail_browser_guest_connection() -> void:
 
 func _on_server_disconnected() -> void:
 	print("[Network] 방장과의 연결이 끊어졌습니다.")
+	if _reconnecting:
+		_try_browser_relay()
+		return
 	if _web_connect_remaining > 0.0:
 		_fail_browser_guest_connection()
 		return
