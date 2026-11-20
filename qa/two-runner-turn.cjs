@@ -17,17 +17,21 @@ module.exports = async ({ github, context }) => {
   const repo = context.repo;
 
   async function publish(name, data) {
+    name = String(process.env.GITHUB_RUN_ATTEMPT) + "-" + name;
     const file = path.join(folder, name + ".bin");
     await fs.writeFile(file, data);
     await artifacts.uploadArtifact(name, [file], folder, { retentionDays: 1 });
   }
   async function receive(name) {
+    name = String(process.env.GITHUB_RUN_ATTEMPT) + "-" + name;
     const deadline = Date.now() + 90000;
     while (Date.now() < deadline) {
       const result = await github.rest.actions.listWorkflowRunArtifacts({ ...repo, run_id: context.runId, per_page: 50 });
       const artifact = result.data.artifacts.find(item => item.name === name && !item.expired);
       if (artifact) {
-        const archive = await github.rest.actions.downloadArtifact({ ...repo, artifact_id: artifact.id, archive_format: "zip" });
+        let archive;
+        try { archive = await github.rest.actions.downloadArtifact({ ...repo, artifact_id: artifact.id, archive_format: "zip" }); }
+        catch (err) { if (![404, 502, 503, 504].includes(err.status)) throw err; await sleep(1000); continue; }
         const zip = path.join(folder, name + ".zip");
         await fs.writeFile(zip, Buffer.from(archive.data));
         return execFileSync("unzip", ["-p", zip, name + ".bin"]);
