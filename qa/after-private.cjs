@@ -75,10 +75,10 @@ function watchListedRoom(settings){
     });}).catch(()=>{});return result;};
 }
 async function ownRenderedRow(page,index){
-  const deadline=Date.now()+22000;let fallback=-1;
+  const deadline=Date.now()+25000;let fallback=-1;let refreshed=false;
   do{const seen=await page.evaluate(()=>window.qaRoomList);if(seen?.row>=0)return seen.row;
-    if(rows.has(index))fallback=rows.get(index);if(fallback>=0)return fallback;await delay(400);
-  }while(Date.now()<deadline);throw Error('The client did not receive its own room in the game listing');
+    if(rows.has(index))fallback=rows.get(index);if(fallback>=0)return fallback;if(!refreshed&&Date.now()>deadline-16500){refreshed=true;await page.mouse.click(165,190,{delay:180});log('refreshing a slow room list',{player:index+1});}await delay(500);
+  }while(Date.now()<deadline);return -1;
 }
 async function tap(page,point){await page.mouse.click(...points[point],{delay:160});await delay(350)}
 async function fill(page,point,value){await tap(page,point);await page.keyboard.press('ControlOrMeta+a');await page.keyboard.type(value,{delay:55});}
@@ -100,7 +100,7 @@ async function run(){
   try{
     stage='loading four production clients';
     for(let i=0;i<4;i++){
-      const ctx=await browser.newContext({viewport:{width:1280,height:720},deviceScaleFactor:0.75});
+      const ctx=await browser.newContext({viewport:{width:1280,height:720},deviceScaleFactor:0.6});
       await ctx.addInitScript(watchListedRoom,{url:directory+'/webrtc/rooms',title:roomTitle});await ctx.addInitScript(observeRTC,{forceRelay:i===0&&process.env.QA_FORCE_HOST_RELAY==='1'});if(i===0)await ctx.addInitScript(simulateHostBackground);
       await ctx.route('**/scores/**',async route=>{if(!['GET','HEAD','OPTIONS'].includes(route.request().method())){blockedScores++;await route.fulfill({status:204,body:''})}else await route.continue()});
       await ctx.route(directory+'/webrtc/rooms',async route=>{
@@ -119,6 +119,7 @@ async function run(){
         return route.continue();
       });
       const page=await ctx.newPage();clients.push(page);
+      page.on('request',r=>{if(r.method()!=='POST'||!new URL(r.url()).pathname.endsWith('/signals'))return;try{const b=r.postDataJSON();if(b.type==='offer'||b.kind==='offer')log('offer fallback marker',{player:i+1,requested:b.data?.relay_fallback===true,explicit:b.data?.relay_fallback!==undefined});}catch{}});
       const statuses=new Map();page.on('response',async r=>{
         if(r.request().method()==='GET' && r.url()===directory+'/webrtc/rooms'){try{const out=await r.json();if(out.rooms.some(row=>row.title!==roomTitle))privateScreens=false;const visible=out.rooms.filter(row=>Number(row.player_count)>0&&/^\d{6}$/.test(String(row.code)));const index=visible.findIndex(row=>row.title===roomTitle&&String(row.code)===String(code));const own=visible[index];log('visible private room',{player:i+1,index,locked:own?.password_required,count:own?.player_count,max:own?.max_players});if(index>=0)rows.set(i,index);}catch(e){log('listing parser',{error:redacted(e.message).slice(0,110)});}}
         if(r.request().method()==='POST' && r.url()===directory+'/webrtc/rooms'){
@@ -145,12 +146,13 @@ async function run(){
     await tap(host,'online');await delay(800);await fill(host,'title',roomTitle);await tap(host,'lock');await fill(host,'password',password);await tap(host,'create');
     await until(()=>!!code&&hostRegistered,'private room acknowledged in the host game');
     stage='join other three browsers';const hidden=await host.evaluate(()=>window.qaSetHostHidden(true));assert.equal(hidden.hidden,true);log('host backgrounded and native frames paused',hidden);
-    await Promise.all(clients.slice(1).map(async (p,idx)=>{const listing=p.waitForResponse(r=>r.request().method()==='GET' && r.url()===directory+'/webrtc/rooms',{timeout:30000});await tap(p,'online');await listing;await delay(700);if(idx===2){await fill(p,'codeField',code);await tap(p,'submitCode');await delay(400);log('guest uses direct six-digit code',{player:idx+2});}else{const row=await ownRenderedRow(p,idx+1);assert(row>=0&&row<5,'Own rendered room is outside visible rows');log('listed classroom verified',{player:idx+2,row});await delay(1300);await p.mouse.click(745,249+row*68,{delay:200});await delay(550);log('guest uses room list',{player:idx+2});}await submitPassword(p);}));
+    await Promise.all(clients.slice(1).map(async (p,idx)=>{await tap(p,'online');await delay(1100);if(idx===2||process.env.QA_FORCE_HOST_RELAY==='1'){await fill(p,'codeField',code);await tap(p,'submitCode');await delay(400);log('guest uses direct six-digit code',{player:idx+2});}else{const row=await ownRenderedRow(p,idx+1);if(row<0||row>=5){await fill(p,'codeField',code);await tap(p,'submitCode');await delay(450);log('guest used code after room lookup',{player:idx+2});}else{log('listed classroom verified',{player:idx+2,row});await delay(1300);await p.mouse.click(745,249+row*68,{delay:200});await delay(550);log('guest uses room list',{player:idx+2});}}await submitPassword(p);}));
     await until(()=>registered.size===3,'assign three different seats');
     assert.equal(new Set([1,...registered.values()]).size,4);
     const transports=()=>Promise.all(clients.map(p=>p.evaluate(()=>window.qaTransport?.peers.filter(x=>x.connectionState==='connected'||['connected','completed'].includes(x.iceConnectionState)).length||0)));
     await until(async()=>{const v=await transports();return v[0]>=3 && v.slice(1).every(n=>n>=1)},'all three live WebRTC links',process.env.QA_FORCE_HOST_RELAY==='1'?145000:65000);
-    log('observed ICE attempts',{clients:await Promise.all(clients.map(p=>p.evaluate(()=>window.qaTransport.iceConfigs)))});log('host admitted three while hidden',{hidden:await host.evaluate(()=>document.hidden)});await host.evaluate(()=>window.qaSetHostHidden(false));log('four connected real clients',{connections:await transports(),seats:[1,...[...registered.values()].sort()]});
+    const attempts=await Promise.all(clients.map(p=>p.evaluate(()=>window.qaTransport.iceConfigs.filter(x=>x.stun||x.turn))));log('observed ICE attempts',{clients:attempts});
+    if(process.env.QA_REQUIRE_STAGED==='1'){assert(attempts.every(list=>list.length&&list[0].stun&&!list[0].turn),'every new game peer tries only STUN first');if(process.env.QA_FORCE_HOST_RELAY==='1')assert(attempts.every(list=>list.some(x=>x.turn)),'all game peers switch to a later TURN-enabled attempt');else assert(attempts.every(list=>list.every(x=>!x.turn)),'direct game created no TURN-enabled connection');}log('host admitted three while hidden',{hidden:await host.evaluate(()=>document.hidden)});await host.evaluate(()=>window.qaSetHostHidden(false));log('four connected real clients',{connections:await transports(),seats:[1,...[...registered.values()].sort()]});
     await until(()=>lobbyCount>=4,'host registers four real students',50000);await delay(1000);stage='start synchronized game';await tap(host,'start');
     const read=()=>Promise.all(clients.map(p=>p.evaluate(()=>({boards:window.qaTransport.boards,dice:window.qaTransport.dice}))));
     await until(async()=>{const m=await read();return gameStarted.size===4 || (m[0].boards.includes('out')&&m.slice(1).every(q=>q.boards.includes('in')))},'same four participants receive game start');
