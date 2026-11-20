@@ -72,9 +72,7 @@ jobs:
       - name: Install Chromium
         run: |
           npm install --prefix "$RUNNER_TEMP/qa" playwright@1.55.0
-          "$RUNNER_TEMP/qa/node_modules/.bin/playwright" install --with-deps chromium
-      - name: Install text recognition for rendered game controls
-        run: sudo apt-get install -y tesseract-ocr tesseract-ocr-kor >/dev/null
+          google-chrome --version
       - name: Exercise deployed client with a private room and four browsers
         run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node qa/production.cjs
       - name: Read the private test screens
