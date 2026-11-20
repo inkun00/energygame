@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   isolated:
-    if: "!contains(github.event.head_commit.message, 'Live smoke') && !contains(github.event.head_commit.message, '[open room]')"
+    if: "!contains(github.event.head_commit.message, 'Live smoke') && !contains(github.event.head_commit.message, '[open room]') && !contains(github.event.head_commit.message, '[worker probe]')"
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -113,6 +113,8 @@ jobs:
         run: |
           curl --silent --fail 'https://api.github.com/repos/inkun00/energygame/commits/7b4beb257af6f2ebf75dd07fd80cad2485d76688/check-runs' | jq -r '.check_runs[] | [.app.slug, .name, .conclusion] | @tsv'
       - name: Verify live signaling delivery with a private four-player room
+        env:
+          REQUIRE_WORKER_ACK: '1'
         run: node qa/worker-production-probe.cjs
 
   open-room:
