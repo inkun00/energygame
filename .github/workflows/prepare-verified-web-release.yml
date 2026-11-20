@@ -5,7 +5,7 @@ on:
 permissions:
   contents: read
 env:
-  GAME_SHA: 36c59562b6d79bf8304736a9e0d18fb76c8cd76f
+  GAME_SHA: 406894adbc2484cce6cb516295f644df65a88453
 jobs:
   worker-connection:
     runs-on: ubuntu-24.04
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 36c59562b6d79bf8304736a9e0d18fb76c8cd76f
+          ref: 406894adbc2484cce6cb516295f644df65a88453
           lfs: true
           persist-credentials: false
       - uses: chickensoft-games/setup-godot@v1
@@ -111,10 +111,10 @@ jobs:
           set -euo pipefail
           tag="web-$GAME_SHA"
           gh api --header 'Accept: application/vnd.github.raw+json' "repos/$GH_REPO/contents/release-prep/worker.mjs?ref=$GITHUB_SHA" > worker.mjs
-          echo "09d3e1ca08fe98c6bc3d1c85bf3a79e191e80b9ffedea298ee1c05b8a8aa1aee  worker.mjs" | sha256sum -c -
+          echo "0c53584436bd782672d5c3dd4ab34649e886248da6d9bf812ae31eec9087bf38  worker.mjs" | sha256sum -c -
           node --check worker.mjs
           if ! gh release view "$tag" --repo "$GH_REPO" > /dev/null 2>&1; then
-            gh release create "$tag" energygame-web.zip worker.mjs --repo "$GH_REPO" --target "$GAME_SHA" --title "온라인 모험 직접 연결 우선 적용" --notes "참가자마다 직접 연결을 먼저 시도하고, 직접 연결이 막힌 경우에 같은 자리에서 중계 연결을 다시 시도합니다."
+            gh release create "$tag" energygame-web.zip worker.mjs --repo "$GH_REPO" --target "$GAME_SHA" --title "온라인 모험 중계 자격 증명 발급 수정" --notes "브라우저가 직접 연결할 수 없을 때 사용할 단기 중계 자격 증명 발급을 수정하고 TLS 443 연결을 지원합니다."
           fi
           test "$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq .object.sha)" = "$GAME_SHA"
           mkdir -p "$RUNNER_TEMP/release-download"
