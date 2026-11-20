@@ -1,11 +1,21 @@
 {
   "framework": null,
   "outputDirectory": "public",
-  "regions": ["icn1"],
+  "regions": [
+    "icn1"
+  ],
   "functions": {
-    "api/records.mjs": {"maxDuration": 30}
+    "api/records.mjs": {
+      "maxDuration": 30
+    }
   },
   "rewrites": [
-    {"source": "/api/scores/:route*", "destination": "/api/records?gamePath=:route*"}
-  ]
+    {
+      "source": "/api/scores/:route*",
+      "destination": "/api/records?gamePath=:route*"
+    }
+  ],
+  "git": {
+    "deploymentEnabled": false
+  }
 }
