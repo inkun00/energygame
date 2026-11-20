@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   isolated:
-    if: "!contains(github.event.head_commit.message, 'Live smoke')"
+    if: "!contains(github.event.head_commit.message, 'Live smoke') && !contains(github.event.head_commit.message, '[open room]')"
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -129,6 +129,14 @@ jobs:
       - name: Start two independent Chromium clients
         run: |
           npm install --prefix "$RUNNER_TEMP/qa" playwright@1.55.0
-          "$RUNNER_TEMP/qa/node_modules/.bin/playwright" install --with-deps chromium
+          google-chrome --version
       - name: Join own open room and verify a shared die
         run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node qa/open.cjs
+      - name: Save own-room screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: own-open-room
+          path: qa-pictures/*.png
+          if-no-files-found: ignore
+          retention-days: 1

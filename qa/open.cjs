@@ -9,7 +9,7 @@ const password = '';let pendingOwnJoin=false;let roomMonitor;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const points = {name:[997,232],online:[1105,518],title:[1004,267],lock:[1004,393],password:[1004,437],create:[1004,525],join:[745,249],codeField:[470,190],submitCode:[748,190],joinPassword:[618,317],confirm:[685,365],start:[743,617],ready:[640,406],dismissGuide:[188,240],dice:[1108,285]};
 let secret, code, pendingCode, stage='baseline', blockedScores=0;
-let privateScreens=true;const rows=new Map();const registered = new Map(), gameStarted = new Set(), clients = [], problems = new Set();
+let privateScreens=true;const rows=new Map();const joinsSent=new Set();let lobbyCount=0;const registered = new Map(), gameStarted = new Set(), clients = [], problems = new Set();
 const redacted = s => String(s).replaceAll(secret||'__impossible__','[redacted]').replace(/\b\d{6}\b/g,'[room]');
 const log = (label, obj={}) => console.log('[QA]',label,JSON.stringify(obj));
 const until=async(check,label,timeout=50000)=>{const deadline=Date.now()+timeout;do{if(problems.size)throw new Error([...problems].join('; '));if(await check())return;await delay(350)}while(Date.now()<deadline);throw new Error('Timed out: '+label)};
@@ -77,7 +77,7 @@ async function submitPassword(page){
 }
 async function run(){
   const baselineOK=await baseline();
-  const browser=await chromium.launch({headless:true,args:['--enable-unsafe-swiftshader','--disable-background-timer-throttling','--disable-renderer-backgrounding']});
+  const browser=await chromium.launch({headless:true,channel:'chrome',args:['--enable-unsafe-swiftshader','--disable-background-timer-throttling','--disable-renderer-backgrounding']});
   try{
     stage='loading four production clients';
     for(let i=0;i<2;i++){
@@ -97,7 +97,7 @@ async function run(){
       await ctx.route(directory+'/webrtc/rooms/*/join',async route=>{
         const req=route.request();if(req.method()!=='POST')return route.continue();
         if(!code||!req.url().endsWith('/'+code+'/join')||String(req.postDataJSON().password||'')!==password){problems.add('Unexpected join target or password');return route.abort();}
-        pendingOwnJoin=true; return route.continue();
+        pendingOwnJoin=true;joinsSent.add(i);log('guest submitted normal open-room join',{player:i+1}); return route.continue();
       });
       const page=await ctx.newPage();clients.push(page);
       const statuses=new Map();page.on('response',async r=>{
@@ -113,7 +113,7 @@ async function run(){
         const route=new URL(r.url()).pathname.replace(/\/\d{6}\b/,'/ROOM');const key=r.request().method()+' '+route+' '+r.status();
         if(!statuses.has(key)){statuses.set(key,1);log('signaling response',{player:i+1,method:r.request().method(),path:route,status:r.status()});}});
       page.on('requestfailed',r=>{if(r.url().startsWith(directory+'/webrtc/'))log('signaling transport error',{player:i+1,path:new URL(r.url()).pathname.replace(/\/\d{6}\b/,'/ROOM'),error:r.failure()?.errorText});});
-      page.on('console',m=>{const text=m.text();if(text.includes('공통 게임 시작 수신'))gameStarted.add(i);if(text.includes('SCRIPT ERROR')||text.includes('Parse Error'))problems.add('Godot runtime error on player '+(i+1));});
+      page.on('console',m=>{const text=m.text();if(text.includes('[Network]')){log('engine',{player:i+1,message:redacted(text).slice(0,135)});const a=text.match(/참가자 배정.*peer=(\d+)/);if(a)registered.set(i,Number(a[1]));const p=text.match(/로비 인원[^0-9]*(\d+)\//);if(i===0&&p)lobbyCount=Number(p[1]);}if(text.includes('공통 게임 시작 수신'))gameStarted.add(i);if(text.includes('SCRIPT ERROR')||text.includes('Parse Error'))problems.add('Godot runtime error on player '+(i+1));});
       page.on('pageerror',()=>problems.add('Browser runtime exception on player '+(i+1)));
       await page.goto(site+'/',{waitUntil:'domcontentloaded',timeout:65000});
       await page.waitForFunction(()=>document.querySelector('#canvas')&&!document.querySelector('#loading'),null,{timeout:105000});
@@ -126,13 +126,14 @@ async function run(){
     await until(()=>!!code,'test room registration');
     let checking=false;roomMonitor=setInterval(async()=>{if(checking)return;checking=true;try{const r=await fetch(directory+'/webrtc/rooms',{signal:AbortSignal.timeout(7000)});const own=(await r.json()).rooms?.find(x=>String(x.code)===String(code)&&x.title===roomTitle);if(own&&Number(own.player_count)>(pendingOwnJoin?2:1))problems.add('Unexpected classroom participant: closing QA room');}catch{}finally{checking=false;}},1300);
     stage='direct join to open room';
-    await Promise.all(clients.slice(1).map(async (p,idx)=>{const listing=p.waitForResponse(r=>r.request().method()==='GET' && r.url()===directory+'/webrtc/rooms',{timeout:30000});await tap(p,'online');await listing;await delay(700);if(idx===2){await fill(p,'codeField',code);await tap(p,'submitCode');await delay(400);log('guest uses direct six-digit code',{player:idx+2});}else{await until(()=>rows.has(idx+1),'own room in guest listing',16000);assert(rows.get(idx+1)<5,'Private room beyond visible rows');await p.mouse.click(745,249+rows.get(idx+1)*68,{delay:180});await delay(550);log('guest uses room list',{player:idx+2});}await delay(900);}));
+    await Promise.all(clients.slice(1).map(async (p,idx)=>{const listing=p.waitForResponse(r=>r.request().method()==='GET' && r.url()===directory+'/webrtc/rooms',{timeout:30000});await tap(p,'online');await listing;await delay(700);if(idx===2){await fill(p,'codeField',code);await tap(p,'submitCode');await delay(400);log('guest uses direct six-digit code',{player:idx+2});}else{const separate=await fetch(directory+'/webrtc/rooms',{signal:AbortSignal.timeout(14000)});const list=(await separate.json()).rooms;const row=list.findIndex(x=>x.title===roomTitle&&String(x.code)===String(code));assert(row>=0&&row<5,'Test room unavailable in live listing');log('own room location confirmed',{row,count:list[row].player_count});await delay(1500);
+        for(let n=0;n<4&&!joinsSent.has(idx+1);n++){if(n){await p.mouse.click(165,190,{delay:170});await delay(2200);}await p.mouse.click(745,249+row*68,{delay:230});await delay(1700);}log('guest uses room list',{player:idx+2,submitted:joinsSent.has(idx+1)});}await delay(900);}));
     await until(()=>registered.size===1,'assign own guest seat');
     assert.equal(new Set([1,...registered.values()]).size,2);
     const transports=()=>Promise.all(clients.map(p=>p.evaluate(()=>window.qaTransport?.peers.filter(x=>x.connectionState==='connected'||['connected','completed'].includes(x.iceConnectionState)).length||0)));
     await until(async()=>{const v=await transports();return v[0]>=1 && v.slice(1).every(n=>n>=1)},'both real browsers connected over WebRTC',65000);
     log('two connected real clients',{connections:await transports(),seats:[1,...[...registered.values()].sort()]});
-    await delay(1200);stage='start synchronized game';await tap(host,'start');
+    await until(()=>lobbyCount>=2,'host engine registers both students',45000);await delay(900);stage='start synchronized game';await tap(host,'start');
     const read=()=>Promise.all(clients.map(p=>p.evaluate(()=>({boards:window.qaTransport.boards,dice:window.qaTransport.dice}))));
     await until(async()=>{const m=await read();return gameStarted.size===2 || (m[0].boards.includes('out')&&m.slice(1).every(q=>q.boards.includes('in')))},'both participants receive board start');
     log('both clients receive board start',{engineAcknowledgements:gameStarted.size});await delay(2300);
