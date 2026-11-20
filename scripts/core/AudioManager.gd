@@ -29,6 +29,7 @@ const CLIPS := {
 }
 
 var voices: Array[AudioStreamPlayer] = []
+var playback_enabled := DisplayServer.get_name() != "headless"
 
 func _ready() -> void:
 	for index in range(MAX_VOICES):
@@ -40,6 +41,8 @@ func _ready() -> void:
 		voices.append(player)
 
 func _play_clip(effect_id: String) -> void:
+	if not playback_enabled:
+		return
 	var clip: AudioStream = CLIPS.get(effect_id)
 	if clip == null:
 		return
@@ -61,8 +64,7 @@ func play_move_sfx() -> void:
 	_play_clip("move")
 
 func play_arcade_cue(effect_id: String) -> void:
-	if DisplayServer.get_name() != "headless":
-		_play_clip(effect_id)
+	_play_clip(effect_id)
 
 func play_correct_sfx() -> void:
 	_play_clip("correct")

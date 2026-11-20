@@ -23,6 +23,8 @@ func check(value: bool, message: String) -> void:
 
 func _run() -> void:
 	var manager = root.get_node("AudioManager")
+	# This test explicitly exercises the mixer even when launched without a window.
+	manager.playback_enabled = true
 	check(manager.CLIPS.size() == 19 and manager.CLIPS.has("arcade_tick") and manager.CLIPS.has("arcade_start"), "All game and countdown effects must be bundled")
 	var data_bytes := 0
 	for id in manager.CLIPS:
